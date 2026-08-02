@@ -1,0 +1,44 @@
+## Netlify configuration for Shule.
+## This is a static, no-build-step SPA (plain HTML/CSS/JS ES modules) plus one
+## serverless function (netlify/functions/admin-provision.js). There is
+## nothing to compile, so "command" is intentionally empty — Netlify just
+## picks up the files as they are.
+
+[build]
+  publish = "."
+  functions = "netlify/functions"
+  command = ""
+
+[functions]
+  # Ships each function with its dependencies bundled — no separate
+  # node_modules upload step needed for the function itself.
+  node_bundler = "esbuild"
+
+## --- Client-side routing -----------------------------------------------
+## The app uses hash-based routing (index.html#/students, #/exams, ...), so
+## every real "page" is still just index.html — the browser never asks the
+## server for /students. This redirect exists only as a safety net for the
+## rare case of someone hitting a stray non-hash path directly (an old
+## bookmark, a typo, etc.) so they land on the app instead of a Netlify 404.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+## --- Headers -------------------------------------------------------------
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+[[headers]]
+  # The vendored supabase-js bundle is content-addressed only by this fixed
+  # path, not by a hashed filename, so don't cache it forever — but it also
+  # never changes on its own (only via a deliberate `npm run build:vendor`
+  # re-run), so a short revalidation window is enough to avoid stale bundles
+  # after an upgrade without re-fetching it on every visit.
+  for = "/src/vendor/*"
+  [headers.values]
+    Cache-Control = "public, max-age=3600, must-revalidate"

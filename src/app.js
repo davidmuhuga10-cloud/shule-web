@@ -1,0 +1,412 @@
+/**
+ * app.js — Shule SPA shell: auth screen, sidebar/topbar, hash router, modal
+ * and toast helpers. Direct port of the Apps Script version's JavaScript.html
+ * shell logic, with google.script.run/gcall/api() replaced by Supabase Auth
+ * (src/lib/auth.js) and the Db data-access layer (src/lib/api/index.mjs).
+ *
+ * One structural improvement over the original: because this is loaded as a
+ * real ES module graph (not concatenated <script> blocks), every view
+ * function is imported directly — no more string-name ROUTES table working
+ * around load order.
+ */
+import { loginStaff, loginStudent, logout as authLogout, getCurrentProfile, changePassword } from './lib/auth.js';
+import { supabase } from './lib/supabaseClient.js';
+import { Db } from './lib/api/index.mjs';
+
+import { viewDashboard } from './views/dashboard.mjs';
+import { viewAcademicCalendar } from './views/academicCalendar.mjs';
+import { viewClasses } from './views/classes.mjs';
+import { viewSubjects } from './views/subjects.mjs';
+import { viewStudents } from './views/students.mjs';
+import { viewBulkUpload } from './views/bulkUpload.mjs';
+import { viewStaff } from './views/staff.mjs';
+import { viewClassSubjects } from './views/classSubjects.mjs';
+import { viewTeacherAssignments } from './views/teacherAssignments.mjs';
+import { viewGrading } from './views/gradingScales.mjs';
+import { viewExams } from './views/exams.mjs';
+import { viewMarks } from './views/marksEntry.mjs';
+import { viewBroadsheet } from './views/broadsheet.mjs';
+import { viewReports } from './views/reportForms.mjs';
+import { viewClassList } from './views/classList.mjs';
+import { viewMyResults } from './views/myResults.mjs';
+import { viewSettings } from './views/schoolSettings.mjs';
+import { viewUsers } from './views/userAccounts.mjs';
+import { renderComingSoon } from './views/_comingSoon.mjs';
+
+/* ------------------------------ Shared state ----------------------------- */
+export const state = { profile: null, settings: null };
+
+/* ------------------------------ DOM helpers ------------------------------ */
+export function $(sel, root) { return (root || document).querySelector(sel); }
+export function esc(s) {
+  return String(s === undefined || s === null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+export function toast(msg, type) {
+  const t = document.createElement('div');
+  t.className = 'toast ' + (type || '');
+  t.textContent = msg;
+  $('#toasts').appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; t.style.transition = '.3s'; setTimeout(() => t.remove(), 300); }, 3200);
+}
+export function loader() { return '<div class="loader"><div class="spin"></div></div>'; }
+export function initials(name) {
+  return String(name || '?').trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+}
+export function fmtDate(d) {
+  if (!d) return '—';
+  try { const dt = new Date(d); if (isNaN(dt)) return d; return dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
+  catch (e) { return d; }
+}
+export function emptyState(opts) {
+  const cta = opts.cta ? `<button class="btn" id="empty-cta">${esc(opts.cta.label)}</button>` : '';
+  const html = `<div class="empty ${opts.warn ? 'warn' : ''}">
+    <div class="e-ico">${opts.icon || '📭'}</div>
+    <h3>${esc(opts.title)}</h3>
+    <p>${esc(opts.text)}</p>${cta}</div>`;
+  return { html, wire: (root) => { if (opts.cta) { const b = $('#empty-cta', root); if (b) b.onclick = opts.cta.onclick; } } };
+}
+/** A guard block shown when a prerequisite is missing (e.g. "add classes first"). */
+export function prereqHtml(title, text, route, label) {
+  return { title, text, route, label };
+}
+export function renderPrereq(root, title, text, route, label) {
+  root.innerHTML = `<div class="card"><div class="card-b"><div class="empty warn">
+    <div class="e-ico">⚠️</div><h3>${esc(title)}</h3><p>${esc(text)}</p>
+    ${route ? `<button class="btn" id="prereq-cta">${esc(label || 'Go there now')}</button>` : ''}
+  </div></div></div>`;
+  if (route) { const b = $('#prereq-cta', root); if (b) b.onclick = () => go(route); }
+}
+export function options(list, valKey, labKey, selected, placeholder) {
+  let html = placeholder ? `<option value="">${esc(placeholder)}</option>` : '';
+  (list || []).forEach((it) => {
+    const v = it[valKey], l = it[labKey];
+    html += `<option value="${esc(v)}"${String(v) === String(selected) ? ' selected' : ''}>${esc(l)}</option>`;
+  });
+  return html;
+}
+
+/* ------------------------------ Modal ------------------------------------ */
+export function modal(opts) {
+  const wide = opts.wide ? ' wide' : '';
+  const foot = opts.footer === false ? '' :
+    `<div class="modal-f">
+      <button class="btn secondary" id="modal-cancel">${esc(opts.cancelLabel || 'Cancel')}</button>
+      ${opts.okLabel ? `<button class="btn" id="modal-ok">${esc(opts.okLabel)}</button>` : ''}
+    </div>`;
+  $('#modal-root').innerHTML = `<div class="modal-back" id="modal-back">
+    <div class="modal${wide}">
+      <div class="modal-h"><h3>${esc(opts.title)}</h3></div>
+      <div class="modal-b">${opts.body}</div>${foot}
+    </div></div>`;
+  $('#modal-back').onclick = (e) => { if (e.target.id === 'modal-back') closeModal(); };
+  const cancelBtn = $('#modal-cancel'); if (cancelBtn) cancelBtn.onclick = closeModal;
+  if (opts.okLabel && opts.onOk) $('#modal-ok').onclick = opts.onOk;
+  if (opts.onOpen) opts.onOpen();
+}
+export function closeModal() { $('#modal-root').innerHTML = ''; }
+export function confirmAction(msg, onYes, danger) {
+  modal({
+    title: 'Please confirm', body: `<p style="margin:0">${esc(msg)}</p>`,
+    okLabel: 'Yes, continue', onOk: () => { closeModal(); onYes(); }
+  });
+  if (danger) { const b = $('#modal-ok'); if (b) b.className = 'btn danger'; }
+}
+
+/* ============================================================================
+ * AUTH
+ * ==========================================================================*/
+let loginTab = 'staff';
+
+export function renderAuth(errorMsg) {
+  const name = (state.settings && state.settings.school_name) || (window.SHULE_CONFIG && window.SHULE_CONFIG.SCHOOL_BRAND_NAME) || 'Shule';
+  const features = [
+    ['🎒', 'Students', 'Classes, streams & enrollment'],
+    ['📚', 'Subjects', 'Assign subjects & teachers'],
+    ['📝', 'Exams', 'Marks with automatic grading'],
+    ['🧾', 'Reports', 'Mark lists & report forms']
+  ].map(([ico, title, sub]) => `<div class="feat-tile"><div class="ft-ico">${ico}</div>
+    <div><div class="ft-title">${title}</div><div class="ft-sub">${sub}</div></div></div>`).join('');
+
+  $('#auth-screen').innerHTML = `<div class="auth">
+    <div class="promo"><div class="promo-inner">
+      <div class="logo">🎓</div>
+      <h1>${esc(name)}</h1>
+      <p>A clean, modern way to run your school — from enrollment to report forms.</p>
+      <div class="feat-grid">${features}</div>
+    </div></div>
+    <div class="formside"><div class="formcard">
+      <h2>Welcome back 👋</h2>
+      <div class="sub">Sign in to continue to ${esc(name)}</div>
+      <div class="tabs">
+        <button id="tab-staff" class="${loginTab === 'staff' ? 'active' : ''}">Staff / Admin</button>
+        <button id="tab-student" class="${loginTab === 'student' ? 'active' : ''}">Student</button>
+      </div>
+      ${errorMsg ? `<div class="auth-err">${esc(errorMsg)}</div>` : ''}
+      <form id="login-form">
+        <div class="field">
+          <label id="id-label">${loginTab === 'student' ? 'Admission Number' : 'Email address'}</label>
+          <input id="login-id" autocomplete="${loginTab === 'student' ? 'off' : 'username'}"
+            placeholder="${loginTab === 'student' ? 'e.g. 23' : 'you@school.com'}" required>
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input id="login-pw" type="password" autocomplete="current-password" required>
+        </div>
+        <button class="btn block" type="submit" id="login-btn">Sign in</button>
+      </form>
+      <p class="hint" id="login-hint">${loginTab === 'student'
+        ? 'Ask your school admin for your password if you don\'t have one yet.'
+        : 'First time here? Ask your admin to set up your account.'}</p>
+    </div></div>
+  </div>`;
+  $('#auth-screen').classList.remove('hidden');
+  $('#app').classList.add('hidden');
+
+  $('#tab-staff').onclick = () => { loginTab = 'staff'; renderAuth(); };
+  $('#tab-student').onclick = () => { loginTab = 'student'; renderAuth(); };
+  $('#login-form').onsubmit = doLogin;
+}
+
+async function doLogin(e) {
+  e.preventDefault();
+  const btn = $('#login-btn'); btn.disabled = true; btn.textContent = 'Signing in…';
+  const id = $('#login-id').value, pw = $('#login-pw').value;
+  const res = loginTab === 'student' ? await loginStudent(id, pw) : await loginStaff(id, pw);
+  if (!res.ok) { renderAuth(res.message || 'Sign in failed.'); return; }
+  await bootApp();
+  return false;
+}
+
+async function forceLogout(msg) {
+  await authLogout();
+  state.profile = null;
+  renderAuth(msg || 'Your session expired. Please sign in again.');
+}
+
+/* ============================================================================
+ * NAV + ROUTER
+ * ==========================================================================*/
+const NAV = {
+  admin: [
+    { route: 'dashboard', label: 'Dashboard', ico: '🏠' },
+    { section: 'Academics' },
+    { route: 'classes', label: 'Classes & Streams', ico: '🏫' },
+    { route: 'subjects', label: 'Subjects', ico: '📚' },
+    { section: 'People' },
+    { parent: 'Students', ico: '🎒', children: [
+      { route: 'students', label: 'All Students' },
+      { route: 'bulk-upload', label: 'Bulk Upload' }
+    ] },
+    { route: 'staff', label: 'Staff', ico: '👨‍🏫' },
+    { section: 'Teaching' },
+    { route: 'class-subjects', label: 'Class Subjects', ico: '🧩' },
+    { route: 'teacher-assignments', label: 'Teacher Assignments', ico: '🔗' },
+    { section: 'Assessment' },
+    { parent: 'Exams', ico: '📝', children: [
+      { route: 'exams', label: 'Exams' },
+      { route: 'marks', label: 'Enter Marks' },
+      { route: 'grading', label: 'Grading Scales' }
+    ] },
+    { parent: 'Reports', ico: '🧾', children: [
+      { route: 'class-list', label: 'Class List' },
+      { route: 'broadsheet', label: 'Mark List' },
+      { route: 'reports', label: 'Report Forms' }
+    ] },
+    { section: 'Configuration' },
+    { route: 'academic-calendar', label: 'Academic Calendar', ico: '📅' },
+    { route: 'settings', label: 'School Settings', ico: '⚙️' },
+    { route: 'users', label: 'User Accounts', ico: '🔐' }
+  ],
+  teacher: [
+    { route: 'dashboard', label: 'Dashboard', ico: '🏠' },
+    { section: 'People' },
+    { parent: 'Students', ico: '🎒', children: [
+      { route: 'students', label: 'All Students' },
+      { route: 'bulk-upload', label: 'Bulk Upload' }
+    ] },
+    { section: 'Assessment' },
+    { parent: 'Exams', ico: '📝', children: [
+      { route: 'exams', label: 'Exams' },
+      { route: 'marks', label: 'Enter Marks' }
+    ] },
+    { parent: 'Reports', ico: '🧾', children: [
+      { route: 'class-list', label: 'Class List' },
+      { route: 'broadsheet', label: 'Mark List' },
+      { route: 'reports', label: 'Report Forms' }
+    ] }
+  ],
+  student: [
+    { route: 'my-results', label: 'My Results', ico: '🧾' }
+  ]
+};
+
+function allowedRoutes(role) {
+  const set = {};
+  (NAV[role] || []).forEach((it) => {
+    if (it.route) set[it.route] = true;
+    if (it.children) it.children.forEach((c) => { set[c.route] = true; });
+  });
+  return set;
+}
+
+function buildNav() {
+  const items = NAV[state.profile.role] || NAV.student;
+  let html = '';
+  items.forEach((it) => {
+    if (it.section) {
+      html += `<div class="group">${esc(it.section)}</div>`;
+    } else if (it.parent) {
+      const kids = it.children.map((c) => `<a class="subitem" data-route="${c.route}">${esc(c.label)}</a>`).join('');
+      html += `<div class="navparent" data-parent="${esc(it.parent)}">
+        <a class="parent-toggle"><span class="ico">${it.ico}</span>${esc(it.parent)}<span class="caret">▸</span></a>
+        <div class="subnav">${kids}</div></div>`;
+    } else {
+      html += `<a data-route="${it.route}"><span class="ico">${it.ico}</span>${esc(it.label)}</a>`;
+    }
+  });
+  $('#nav').innerHTML = html;
+  $('#nav').querySelectorAll('a[data-route]').forEach((a) => {
+    a.onclick = () => go(a.getAttribute('data-route'));
+  });
+  $('#nav').querySelectorAll('.parent-toggle').forEach((a) => {
+    a.onclick = () => a.parentElement.classList.toggle('open');
+  });
+}
+function setActiveNav(route) {
+  document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.getAttribute('data-route') === route));
+  document.querySelectorAll('#nav .navparent').forEach((p) => { if (p.querySelector('a.active')) p.classList.add('open'); });
+}
+export function go(route) {
+  location.hash = '#/' + route;
+  App.toggleSidebar(false);
+}
+
+// Routes implemented so far. Anything in NAV but not listed here renders a
+// friendly "coming soon" placeholder instead of crashing — the next phase of
+// the migration fills these in one by one.
+const ROUTES = {
+  'dashboard': viewDashboard,
+  'academic-calendar': viewAcademicCalendar,
+  'classes': viewClasses,
+  'subjects': viewSubjects,
+  'students': viewStudents,
+  'bulk-upload': viewBulkUpload,
+  'staff': viewStaff,
+  'class-subjects': viewClassSubjects,
+  'teacher-assignments': viewTeacherAssignments,
+  'grading': viewGrading,
+  'exams': viewExams,
+  'marks': viewMarks,
+  'broadsheet': viewBroadsheet,
+  'reports': viewReports,
+  'class-list': viewClassList,
+  'my-results': viewMyResults,
+  'settings': viewSettings,
+  'users': viewUsers
+};
+
+async function router() {
+  let route = (location.hash || '').replace(/^#\/?/, '') || defaultRoute();
+  route = route.split('/')[0];
+  const allowed = allowedRoutes(state.profile.role)[route] === true;
+  const fn = ROUTES[route];
+  if (!allowed) route = defaultRoute();
+  setActiveNav(route);
+  const view = $('#view');
+  view.innerHTML = loader();
+  try {
+    if (typeof (ROUTES[route]) === 'function') {
+      await ROUTES[route](view);
+    } else {
+      renderComingSoon(view, (NAV[state.profile.role] || []).flatMap((it) => it.children ? it.children : [it]).find((r) => r.route === route)?.label || route);
+    }
+  } catch (e) {
+    console.error(e);
+    view.innerHTML = `<div class="card pad">⚠️ Something went wrong loading this page: ${esc(e.message || e)}</div>`;
+  }
+}
+function defaultRoute() { return state.profile.role === 'student' ? 'my-results' : 'dashboard'; }
+
+/* ============================================================================
+ * APP object (topbar / sidebar / boot)
+ * ==========================================================================*/
+window.App = {
+  toggleSidebar(force) {
+    const sb = $('#sidebar'), sc = $('#scrim');
+    const open = typeof force === 'boolean' ? force : !sb.classList.contains('open');
+    sb.classList.toggle('open', open); sc.classList.toggle('show', open);
+  },
+  toggleUserMenu() { $('#usermenu').classList.toggle('hidden'); },
+  openChangePassword() {
+    $('#usermenu').classList.add('hidden');
+    modal({
+      title: 'Change password',
+      body: `<div class="field"><label>Current password</label><input id="cp-cur" type="password"></div>
+        <div class="field"><label>New password</label><input id="cp-new" type="password"></div>
+        <div class="field"><label>Confirm new password</label><input id="cp-conf" type="password"></div>`,
+      okLabel: 'Update password',
+      onOk: async () => {
+        const cur = $('#cp-cur').value, nw = $('#cp-new').value, cf = $('#cp-conf').value;
+        if (nw !== cf) { toast('New passwords do not match.', 'err'); return; }
+        const r = await changePassword(cur, nw);
+        if (r.ok) { toast('Password updated.', 'ok'); closeModal(); }
+        else toast(r.message, 'err');
+      }
+    });
+  },
+  async logout() {
+    await authLogout();
+    state.profile = null;
+    renderAuth();
+  }
+};
+
+async function bootApp() {
+  state.profile = await getCurrentProfile();
+  if (!state.profile) { renderAuth('Could not load your account. Please sign in again.'); return; }
+
+  $('#auth-screen').classList.add('hidden');
+  $('#app').classList.remove('hidden');
+  buildNav();
+  $('#avatar').textContent = initials(state.profile.name);
+  $('#um-name').textContent = state.profile.name;
+  $('#um-role').textContent = ({ admin: 'Administrator', teacher: 'Teacher / Staff', student: 'Student' })[state.profile.role] || state.profile.role;
+  if (state.settings && state.settings.school_name) $('#brand-school').textContent = state.settings.school_name;
+
+  Db.dashboard.getActiveContext().then((active) => {
+    $('#topctx').innerHTML = active.academic_year_name
+      ? `Active: <b>${esc(active.academic_year_name)}</b> · <b>${esc(active.term_name || 'No term set')}</b>`
+      : '<span class="muted">No active academic year set</span>';
+  }).catch(() => {});
+
+  if (!location.hash) location.hash = '#/' + defaultRoute();
+  router();
+}
+
+window.addEventListener('hashchange', () => { if (state.profile) router(); });
+document.addEventListener('click', (e) => {
+  const um = $('#usermenu');
+  if (um && !um.classList.contains('hidden') && !e.target.closest('.usermenu')) um.classList.add('hidden');
+});
+
+/* ------------------------------- INIT ----------------------------------- */
+(async function init() {
+  try {
+    const settingsRes = await Db.settings.get();
+    state.settings = settingsRes.ok ? settingsRes.data : {};
+  } catch (e) {
+    state.settings = {};
+  }
+
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session) {
+    const profile = await getCurrentProfile();
+    if (profile) { state.profile = profile; await bootApp(); return; }
+  }
+  renderAuth();
+
+  supabase.auth.onAuthStateChange((event) => {
+    if (event === 'SIGNED_OUT' && state.profile) { state.profile = null; renderAuth(); }
+  });
+})();
