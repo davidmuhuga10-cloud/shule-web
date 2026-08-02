@@ -1,3 +1,9 @@
+> **You already have a live Shule deployment?** This guide is for setting up
+> a brand-new project from zero. To upgrade your existing live project to
+> the current multi-tenant schema, use `../MULTI_TENANT_MIGRATION_GUIDE.md`
+> at the project root instead — do not re-run `schema.sql` against a project
+> that already has data in it.
+
 # Shule — Supabase backbone (Phase 1)
 
 This is the first phase of moving Shule off Google Apps Script/Sheets onto

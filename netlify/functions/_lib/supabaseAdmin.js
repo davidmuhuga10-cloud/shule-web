@@ -46,7 +46,7 @@ async function requireAdmin(event, admin) {
 
   const { data: profile, error: profileErr } = await admin
     .from('profiles')
-    .select('id, role, status')
+    .select('id, role, status, school_id')
     .eq('id', userData.user.id)
     .maybeSingle();
 

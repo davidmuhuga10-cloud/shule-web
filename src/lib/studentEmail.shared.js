@@ -10,6 +10,14 @@
  * Supabase Auth is email/password only; students only ever type their
  * admission number, so both sides translate it the same way before calling
  * supabase.auth.signInWithPassword() / auth.admin.createUser().
+ *
+ * MULTI-TENANCY NOTE: Supabase Auth enforces ONE global email uniqueness
+ * constraint across the whole project, but admission numbers are only
+ * unique WITHIN a school (two different schools both have a "23"). Since
+ * this same Supabase project now serves every school, the school's own
+ * code must be folded into the synthetic address, or two schools' student
+ * "23" would collide on the exact same login. That's why every call site
+ * now has to pass the school's code alongside the admission number.
  * ----------------------------------------------------------------------------
  */
 (function (root, factory) {
@@ -19,16 +27,25 @@
     root.ShuleStudentEmail = factory();
   }
 })(typeof self !== 'undefined' ? self : this, function () {
-  var STUDENT_EMAIL_DOMAIN = 'students.shule.internal';
+  var STUDENT_EMAIL_DOMAIN_SUFFIX = 'students.shule.internal';
   var DEFAULT_TEACHER_PASSWORD = 'teacher123';
 
-  function studentEmailFor(admissionNo) {
-    var slug = String(admissionNo || '')
+  function slugify(v, fallback) {
+    var slug = String(v || '')
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '');
-    return (slug || 'student') + '@' + STUDENT_EMAIL_DOMAIN;
+    return slug || fallback;
+  }
+
+  function studentEmailFor(admissionNo, schoolCode) {
+    var admSlug = slugify(admissionNo, 'student');
+    var codeSlug = slugify(schoolCode, '');
+    if (!codeSlug) {
+      throw new Error('studentEmailFor() requires a school code — every school shares this one Supabase project, so the code is what keeps admission numbers from colliding across schools.');
+    }
+    return admSlug + '@' + codeSlug + '.' + STUDENT_EMAIL_DOMAIN_SUFFIX;
   }
 
   /**
@@ -43,5 +60,10 @@
     return 'student-' + String(admissionNo || '').trim();
   }
 
-  return { studentEmailFor: studentEmailFor, studentPasswordFor: studentPasswordFor, DEFAULT_TEACHER_PASSWORD: DEFAULT_TEACHER_PASSWORD, STUDENT_EMAIL_DOMAIN: STUDENT_EMAIL_DOMAIN };
+  return {
+    studentEmailFor: studentEmailFor,
+    studentPasswordFor: studentPasswordFor,
+    DEFAULT_TEACHER_PASSWORD: DEFAULT_TEACHER_PASSWORD,
+    STUDENT_EMAIL_DOMAIN_SUFFIX: STUDENT_EMAIL_DOMAIN_SUFFIX
+  };
 });

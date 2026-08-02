@@ -6,6 +6,13 @@
  * synthetic internal address via window.ShuleStudentEmail (loaded separately,
  * see index.html) — the exact same rule the admin-provision Netlify function
  * uses to create the login in the first place.
+ *
+ * MULTI-TENANCY: one Supabase project now serves every school, so a School
+ * Code (see resolveSchoolByCode()) is required up front — both to translate
+ * a student's admission number into the right synthetic email (two schools
+ * can each have a student "23") and, after sign-in, to double-check the
+ * account that just logged in actually belongs to the school the person
+ * typed (a defence-in-depth guard on top of RLS, not a replacement for it).
  * ----------------------------------------------------------------------------
  */
 import { supabase } from './supabaseClient.js';
@@ -17,21 +24,57 @@ function studentEmailHelper() {
   return window.ShuleStudentEmail;
 }
 
-export function studentEmailFor(admissionNo) {
-  return studentEmailHelper().studentEmailFor(admissionNo);
+export function studentEmailFor(admissionNo, schoolCode) {
+  return studentEmailHelper().studentEmailFor(admissionNo, schoolCode);
 }
 
-export async function loginStaff(email, password) {
+/** Public, pre-auth lookup: does this School Code exist, and what's its name/logo/settings? */
+export async function resolveSchoolByCode(code) {
+  const trimmed = String(code || '').trim();
+  if (!trimmed) return { ok: false, message: 'Enter your School Code.' };
+  const { data, error } = await supabase.rpc('get_school_public_info', { p_code: trimmed });
+  if (error) return { ok: false, message: error.message };
+  if (!data || data.found !== true) return { ok: false, message: 'We could not find a school with that code.' };
+  return { ok: true, school: data };
+}
+
+export async function loginStaff(email, password, schoolCode) {
   const { data, error } = await supabase.auth.signInWithPassword({ email: String(email || '').trim(), password });
   if (error) return { ok: false, message: friendlyAuthError(error) };
+  const guard = await verifySchoolMatch(schoolCode);
+  if (!guard.ok) { await supabase.auth.signOut(); return guard; }
   return { ok: true, session: data.session };
 }
 
-export async function loginStudent(admissionNo, password) {
-  const email = studentEmailFor(admissionNo);
+export async function loginStudent(admissionNo, password, schoolCode) {
+  if (!String(schoolCode || '').trim()) return { ok: false, message: 'Enter your School Code.' };
+  const email = studentEmailFor(admissionNo, schoolCode);
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) return { ok: false, message: friendlyAuthError(error) };
+  const guard = await verifySchoolMatch(schoolCode);
+  if (!guard.ok) { await supabase.auth.signOut(); return guard; }
   return { ok: true, session: data.session };
+}
+
+/** Defence-in-depth: confirm the just-authenticated profile really belongs to
+ *  the School Code that was typed at the login screen. RLS already makes it
+ *  impossible to see another school's data regardless — this only prevents
+ *  the confusing UX of one person's account silently rendering under a
+ *  different school's branding if they mistype/reuse an old bookmark. */
+async function verifySchoolMatch(schoolCode) {
+  if (!String(schoolCode || '').trim()) return { ok: true }; // not asked to check (e.g. tests)
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return { ok: false, message: 'Sign-in did not complete. Please try again.' };
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('school_id, schools ( code )')
+    .eq('id', session.user.id)
+    .maybeSingle();
+  const actualCode = profile && profile.schools ? profile.schools.code : null;
+  if (actualCode && actualCode !== String(schoolCode).trim().toLowerCase()) {
+    return { ok: false, message: 'That School Code does not match this account. Double-check it with your school admin.' };
+  }
+  return { ok: true };
 }
 
 export async function logout() {
@@ -44,7 +87,7 @@ export async function getCurrentProfile() {
   if (!session) return null;
   const { data: profile, error } = await supabase
     .from('profiles')
-    .select('id, name, email, role, staff_id, student_id, status')
+    .select('id, name, email, role, staff_id, student_id, status, school_id, schools ( code, name )')
     .eq('id', session.user.id)
     .maybeSingle();
   if (error || !profile) return null;

@@ -9,7 +9,7 @@
  * function is imported directly — no more string-name ROUTES table working
  * around load order.
  */
-import { loginStaff, loginStudent, logout as authLogout, getCurrentProfile, changePassword } from './lib/auth.js';
+import { loginStaff, loginStudent, logout as authLogout, getCurrentProfile, changePassword, resolveSchoolByCode } from './lib/auth.js';
 import { supabase } from './lib/supabaseClient.js';
 import { Db } from './lib/api/index.mjs';
 
@@ -117,6 +117,7 @@ export function confirmAction(msg, onYes, danger) {
  * AUTH
  * ==========================================================================*/
 let loginTab = 'staff';
+let lastSchoolCode = ''; // persisted across tab switches / re-renders, same session only
 
 export function renderAuth(errorMsg) {
   const name = (state.settings && state.settings.school_name) || (window.SHULE_CONFIG && window.SHULE_CONFIG.SCHOOL_BRAND_NAME) || 'Shule';
@@ -145,6 +146,11 @@ export function renderAuth(errorMsg) {
       ${errorMsg ? `<div class="auth-err">${esc(errorMsg)}</div>` : ''}
       <form id="login-form">
         <div class="field">
+          <label>School Code</label>
+          <input id="login-code" autocomplete="off" placeholder="e.g. greenhill" value="${esc(lastSchoolCode)}" required>
+          <div class="hint" id="school-preview" style="min-height:1.2em"></div>
+        </div>
+        <div class="field">
           <label id="id-label">${loginTab === 'student' ? 'Admission Number' : 'Email address'}</label>
           <input id="login-id" autocomplete="${loginTab === 'student' ? 'off' : 'username'}"
             placeholder="${loginTab === 'student' ? 'e.g. 23' : 'you@school.com'}" required>
@@ -158,6 +164,7 @@ export function renderAuth(errorMsg) {
       <p class="hint" id="login-hint">${loginTab === 'student'
         ? 'Ask your school admin for your password if you don\'t have one yet.'
         : 'First time here? Ask your admin to set up your account.'}</p>
+      <p class="hint">New school? <a href="#" id="go-signup">Create your school's account</a></p>
     </div></div>
   </div>`;
   $('#auth-screen').classList.remove('hidden');
@@ -166,15 +173,103 @@ export function renderAuth(errorMsg) {
   $('#tab-staff').onclick = () => { loginTab = 'staff'; renderAuth(); };
   $('#tab-student').onclick = () => { loginTab = 'student'; renderAuth(); };
   $('#login-form').onsubmit = doLogin;
+  $('#go-signup').onclick = (e) => { e.preventDefault(); renderSignup(); };
+
+  const codeInput = $('#login-code');
+  codeInput.oninput = () => { lastSchoolCode = codeInput.value; };
+  codeInput.onblur = async () => {
+    const preview = $('#school-preview');
+    if (!preview || !codeInput.value.trim()) { if (preview) preview.textContent = ''; return; }
+    const res = await resolveSchoolByCode(codeInput.value);
+    if (preview) preview.textContent = res.ok ? `✓ ${res.school.school_name}` : '';
+  };
 }
 
 async function doLogin(e) {
   e.preventDefault();
   const btn = $('#login-btn'); btn.disabled = true; btn.textContent = 'Signing in…';
+  const code = $('#login-code').value;
   const id = $('#login-id').value, pw = $('#login-pw').value;
-  const res = loginTab === 'student' ? await loginStudent(id, pw) : await loginStaff(id, pw);
-  if (!res.ok) { renderAuth(res.message || 'Sign in failed.'); return; }
+  const res = loginTab === 'student' ? await loginStudent(id, pw, code) : await loginStaff(id, pw, code);
+  if (!res.ok) { lastSchoolCode = code; renderAuth(res.message || 'Sign in failed.'); return; }
   await bootApp();
+  return false;
+}
+
+/* ----------------------------------------------------------------------
+ * SCHOOL SIGNUP (self-serve) — a new school creates its tenant + first
+ * admin login here, then is signed straight in. Same visual language as
+ * renderAuth (identical CSS classes) so the look/theme stays consistent.
+ * -------------------------------------------------------------------- */
+function renderSignup() {
+  $('#auth-screen').innerHTML = `<div class="auth">
+    <div class="promo"><div class="promo-inner">
+      <div class="logo">🎓</div>
+      <h1>Bring your school onto Shule</h1>
+      <p>Set up your school's own space in a minute — classes, subjects, exams and report forms, ready to go.</p>
+    </div></div>
+    <div class="formside"><div class="formcard">
+      <h2>Create your school's account</h2>
+      <div class="sub">You'll be the first administrator.</div>
+      <div id="signup-err"></div>
+      <form id="signup-form">
+        <div class="field"><label>School name</label><input id="su-name" placeholder="e.g. Greenhill Academy" required></div>
+        <div class="field">
+          <label>School Code <span class="muted">(used to sign in — letters, numbers, hyphens)</span></label>
+          <input id="su-code" placeholder="e.g. greenhill" required>
+        </div>
+        <div class="field"><label>Your full name</label><input id="su-admin-name" placeholder="e.g. Jane Wanjiru" required></div>
+        <div class="field"><label>Your email</label><input id="su-email" type="email" placeholder="you@school.com" required></div>
+        <div class="field"><label>Password</label><input id="su-pw" type="password" autocomplete="new-password" required></div>
+        <button class="btn block" type="submit" id="signup-btn">Create school account</button>
+      </form>
+      <p class="hint">Already have an account? <a href="#" id="go-login">Sign in instead</a></p>
+    </div></div>
+  </div>`;
+
+  const nameInput = $('#su-name'), codeInput = $('#su-code');
+  let codeTouched = false;
+  codeInput.oninput = () => { codeTouched = true; };
+  nameInput.oninput = () => {
+    if (codeTouched) return;
+    codeInput.value = nameInput.value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
+  };
+
+  $('#go-login').onclick = (e) => { e.preventDefault(); renderAuth(); };
+  $('#signup-form').onsubmit = doSignup;
+}
+
+async function doSignup(e) {
+  e.preventDefault();
+  const btn = $('#signup-btn'); btn.disabled = true; btn.textContent = 'Creating…';
+  const body = {
+    school_name: $('#su-name').value,
+    school_code: $('#su-code').value,
+    admin_name: $('#su-admin-name').value,
+    admin_email: $('#su-email').value,
+    password: $('#su-pw').value
+  };
+  try {
+    const res = await fetch('/.netlify/functions/school-signup', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
+    });
+    const result = await res.json();
+    if (!result.ok) {
+      $('#signup-err').innerHTML = `<div class="auth-err">${esc(result.message || 'Could not create your school.')}</div>`;
+      btn.disabled = false; btn.textContent = 'Create school account';
+      return false;
+    }
+    // Straight in — no need to make a brand-new admin re-type their own
+    // credentials a second time.
+    lastSchoolCode = result.school_code;
+    loginTab = 'staff';
+    const loginRes = await loginStaff(body.admin_email, body.password, result.school_code);
+    if (loginRes.ok) { await bootApp(); return false; }
+    renderAuth(`School created! Sign in with School Code "${result.school_code}" to continue.`);
+  } catch (err) {
+    $('#signup-err').innerHTML = `<div class="auth-err">Something went wrong: ${esc(err.message || err)}</div>`;
+    btn.disabled = false; btn.textContent = 'Create school account';
+  }
   return false;
 }
 
@@ -366,6 +461,18 @@ async function bootApp() {
   state.profile = await getCurrentProfile();
   if (!state.profile) { renderAuth('Could not load your account. Please sign in again.'); return; }
 
+  // Settings are per-school and RLS-gated on being signed in, so they can
+  // only be fetched now — not before login, the way the single-tenant
+  // version did (there was only ever one school's settings to show, and
+  // they were deliberately world-readable; now every school's are private
+  // to its own members).
+  try {
+    const settingsRes = await Db.settings.get();
+    state.settings = settingsRes.ok ? settingsRes.data : {};
+  } catch (e) {
+    state.settings = {};
+  }
+
   $('#auth-screen').classList.add('hidden');
   $('#app').classList.remove('hidden');
   buildNav();
@@ -392,12 +499,7 @@ document.addEventListener('click', (e) => {
 
 /* ------------------------------- INIT ----------------------------------- */
 (async function init() {
-  try {
-    const settingsRes = await Db.settings.get();
-    state.settings = settingsRes.ok ? settingsRes.data : {};
-  } catch (e) {
-    state.settings = {};
-  }
+  state.settings = {}; // no school context yet — the auth screen shows generic platform branding until sign-in
 
   const { data: { session } } = await supabase.auth.getSession();
   if (session) {

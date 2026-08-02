@@ -1,4 +1,12 @@
 -- ============================================================================
+-- HISTORICAL — this migration predates multi-tenancy and has already been
+-- applied to the one live Shule project. If you're upgrading that project
+-- to the current multi-tenant schema, use migrations/0002_multi_tenant.sql
+-- instead (it assumes everything below is already in place). Kept here only
+-- as a record of what changed between the very first schema.sql and the
+-- single-tenant version that was live just before the multi-tenant move.
+-- ============================================================================
+--
 -- ONLY run this if you already executed the Phase 1 schema.sql on a live
 -- Supabase project before this update. If you haven't run schema.sql yet (or
 -- are starting on a fresh project), ignore this file — just run the current

@@ -1,12 +1,18 @@
 -- ============================================================================
--- Shule — Postgres schema for Supabase
+-- Shule — Postgres schema for Supabase (multi-tenant)
 -- ============================================================================
--- Mirrors the proven data model from the Apps Script version (Schema.gs),
--- adapted to Postgres with real foreign keys and Row-Level Security instead
--- of app-level role checks.
+-- One Supabase project now serves EVERY school on the platform. Every table
+-- that holds a school's own data carries a `school_id`, every Row-Level
+-- Security policy is scoped by it, and a BEFORE INSERT trigger stamps it on
+-- automatically from the signed-in user's own profile — so the application
+-- code that reads/writes students, exams, results etc. did not have to
+-- change at all; Postgres does the tenant isolation.
 --
 -- Run this once in the Supabase SQL editor (or via `supabase db push`) on a
--- brand-new project, BEFORE seed.sql.
+-- brand-new project, BEFORE seed.sql. If you already ran an earlier
+-- single-tenant version of this file against a live project, do NOT re-run
+-- this file — use supabase/migrations/0002_multi_tenant.sql instead, which
+-- upgrades an existing installation in place without losing data.
 -- ============================================================================
 
 create extension if not exists pgcrypto;
@@ -37,12 +43,45 @@ end;
 $$;
 
 -- ----------------------------------------------------------------------------
+-- schools — the tenant table. Every other table below belongs to exactly one
+-- row here. `code` is the short, url/email-safe slug a user types on the
+-- login screen ("School Code") and that student synthetic logins are scoped
+-- by (see get_school_public_info() and studentEmail.shared.js) — it is
+-- always stored lowercase so lookups are case-insensitive without needing
+-- the citext extension.
+-- ----------------------------------------------------------------------------
+create table public.schools (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  code text not null unique,
+  status text not null default 'active',       -- active | suspended | trial — informational, no fixed enum
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint schools_code_format check (code ~ '^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$')
+);
+create trigger trg_schools_updated_at before update on public.schools
+  for each row execute function public.set_updated_at();
+
+create or replace function public.normalize_school_code()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.code := lower(trim(new.code));
+  return new;
+end;
+$$;
+create trigger trg_schools_normalize_code before insert or update on public.schools
+  for each row execute function public.normalize_school_code();
+
+-- ----------------------------------------------------------------------------
 -- staff
 -- ----------------------------------------------------------------------------
 create table public.staff (
   id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
   full_name text not null,
-  email text unique,
+  email text,
   phone text,
   role text not null default 'teacher',        -- e.g. teacher, admin-staff
   gender gender_t,
@@ -50,28 +89,34 @@ create table public.staff (
   employment_start_date date,
   status row_status not null default 'active',
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  unique (school_id, email)
 );
 create trigger trg_staff_updated_at before update on public.staff
   for each row execute function public.set_updated_at();
+create index idx_staff_school on public.staff(school_id);
 
 -- ----------------------------------------------------------------------------
 -- academic_years (was "sessions")  +  terms
 -- ----------------------------------------------------------------------------
 create table public.academic_years (
   id uuid primary key default gen_random_uuid(),
-  name text not null unique,                   -- e.g. '2026'
+  school_id uuid not null references public.schools(id) on delete cascade,
+  name text not null,                          -- e.g. '2026'
   start_date date,
   end_date date,
   status lifecycle_status not null default 'upcoming',
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  unique (school_id, name)
 );
 create trigger trg_academic_years_updated_at before update on public.academic_years
   for each row execute function public.set_updated_at();
+create index idx_academic_years_school on public.academic_years(school_id);
 
 create table public.terms (
   id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
   academic_year_id uuid not null references public.academic_years(id) on delete cascade,
   name text not null,                          -- 'Term 1' / 'Term 2' / 'Term 3'
   start_date date,
@@ -83,23 +128,28 @@ create table public.terms (
 );
 create trigger trg_terms_updated_at before update on public.terms
   for each row execute function public.set_updated_at();
+create index idx_terms_school on public.terms(school_id);
 
 -- ----------------------------------------------------------------------------
 -- classes + streams
 -- ----------------------------------------------------------------------------
 create table public.classes (
   id uuid primary key default gen_random_uuid(),
-  name text not null unique,                   -- e.g. 'Grade 7'
+  school_id uuid not null references public.schools(id) on delete cascade,
+  name text not null,                          -- e.g. 'Grade 7'
   level_order int not null default 0,          -- controls display/sort order
   description text,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  unique (school_id, name)
 );
 create trigger trg_classes_updated_at before update on public.classes
   for each row execute function public.set_updated_at();
+create index idx_classes_school on public.classes(school_id);
 
 create table public.streams (
   id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
   class_id uuid not null references public.classes(id) on delete cascade,
   name text not null,                          -- e.g. 'North'
   description text,
@@ -109,29 +159,33 @@ create table public.streams (
 );
 create trigger trg_streams_updated_at before update on public.streams
   for each row execute function public.set_updated_at();
+create index idx_streams_school on public.streams(school_id);
 
 -- ----------------------------------------------------------------------------
 -- subjects (CBC-aware)
 -- ----------------------------------------------------------------------------
 create table public.subjects (
   id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
   name text not null,
   code text,
   level text,                                  -- 'Pre-Primary' | 'Lower Primary' | 'Upper Primary' | 'Junior Secondary' | null (custom)
   description text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  unique (name, level)
+  unique (school_id, name, level)
 );
 create trigger trg_subjects_updated_at before update on public.subjects
   for each row execute function public.set_updated_at();
+create index idx_subjects_school on public.subjects(school_id);
 
 -- ----------------------------------------------------------------------------
 -- students
 -- ----------------------------------------------------------------------------
 create table public.students (
   id uuid primary key default gen_random_uuid(),
-  admission_no text not null unique,
+  school_id uuid not null references public.schools(id) on delete cascade,
+  admission_no text not null,
   full_name text not null,
   gender gender_t not null,
   class_id uuid references public.classes(id) on delete set null,
@@ -140,10 +194,12 @@ create table public.students (
   guardian_contact text,
   status row_status not null default 'active',
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  unique (school_id, admission_no)
 );
 create trigger trg_students_updated_at before update on public.students
   for each row execute function public.set_updated_at();
+create index idx_students_school on public.students(school_id);
 
 -- numeric-aware admission-number sort helper (mirrors admissionNumber_() in Academics.gs)
 create or replace function public.admission_no_numeric(v text)
@@ -156,13 +212,15 @@ as $$
     else regexp_replace(coalesce(v, ''), '\D', '', 'g')::numeric
   end;
 $$;
-create index idx_students_admission_numeric on public.students (public.admission_no_numeric(admission_no));
+create index idx_students_admission_numeric on public.students (school_id, public.admission_no_numeric(admission_no));
 
 -- ----------------------------------------------------------------------------
--- profiles — 1:1 with auth.users, carries the app role
+-- profiles — 1:1 with auth.users, carries the app role + which school this
+-- login belongs to. One auth user belongs to exactly one school.
 -- ----------------------------------------------------------------------------
 create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
+  school_id uuid not null references public.schools(id) on delete cascade,
   name text not null,
   email text,
   role user_role not null default 'student',
@@ -174,9 +232,12 @@ create table public.profiles (
 );
 create trigger trg_profiles_updated_at before update on public.profiles
   for each row execute function public.set_updated_at();
+create index idx_profiles_school on public.profiles(school_id);
 
--- role/scope helpers — security definer so they can read profiles regardless
--- of the calling row's RLS (avoids recursive-policy problems on profiles itself)
+-- role/scope/tenant helpers — security definer so they can read profiles
+-- regardless of the calling row's RLS (avoids recursive-policy problems on
+-- profiles itself). These are the single source of truth every RLS policy
+-- and trigger below is built on.
 create or replace function public.current_role()
 returns user_role
 language sql stable security definer set search_path = public
@@ -198,17 +259,48 @@ as $$
   select student_id from public.profiles where id = auth.uid();
 $$;
 
+create or replace function public.current_school_id()
+returns uuid
+language sql stable security definer set search_path = public
+as $$
+  select school_id from public.profiles where id = auth.uid();
+$$;
+
 create or replace function public.is_admin()
 returns boolean language sql stable as $$ select public.current_role() = 'admin' $$;
 
 create or replace function public.is_staff()
 returns boolean language sql stable as $$ select public.current_role() in ('admin','teacher') $$;
 
+-- Auto-stamp: every tenant table's BEFORE INSERT trigger fills in school_id
+-- from the signed-in user's own profile whenever the caller didn't set it
+-- explicitly — which is every call site in the existing frontend, by design.
+-- This is what let the application code stay untouched by the multi-tenant
+-- migration: an `insert({...})` that never mentioned school_id still lands
+-- in the right tenant.
+create or replace function public.set_school_id()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.school_id is null then
+    new.school_id := public.current_school_id();
+  end if;
+  if new.school_id is null then
+    raise exception 'Could not determine which school this record belongs to (no school_id on your profile).' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
 -- ----------------------------------------------------------------------------
 -- subject <-> class assignment (subjects a class offers; streams inherit)
 -- ----------------------------------------------------------------------------
 create table public.subject_class_assignments (
   id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
   subject_id uuid not null references public.subjects(id) on delete cascade,
   class_id uuid not null references public.classes(id) on delete cascade,
   created_at timestamptz not null default now(),
@@ -217,12 +309,14 @@ create table public.subject_class_assignments (
 );
 create trigger trg_sca_updated_at before update on public.subject_class_assignments
   for each row execute function public.set_updated_at();
+create index idx_sca_school on public.subject_class_assignments(school_id);
 
 -- ----------------------------------------------------------------------------
 -- teacher <-> subject/class/stream assignment
 -- ----------------------------------------------------------------------------
 create table public.subject_teacher_assignments (
   id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
   subject_id uuid not null references public.subjects(id) on delete cascade,
   staff_id uuid not null references public.staff(id) on delete cascade,
   class_id uuid not null references public.classes(id) on delete cascade,
@@ -235,12 +329,14 @@ create table public.subject_teacher_assignments (
 create trigger trg_sta_updated_at before update on public.subject_teacher_assignments
   for each row execute function public.set_updated_at();
 create index idx_sta_staff on public.subject_teacher_assignments(staff_id);
+create index idx_sta_school on public.subject_teacher_assignments(school_id);
 
 -- ----------------------------------------------------------------------------
 -- grading
 -- ----------------------------------------------------------------------------
 create table public.grading_scales (
   id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
   name text not null,
   description text,
   is_default boolean not null default false,
@@ -249,9 +345,11 @@ create table public.grading_scales (
 );
 create trigger trg_grading_scales_updated_at before update on public.grading_scales
   for each row execute function public.set_updated_at();
+create index idx_grading_scales_school on public.grading_scales(school_id);
 
 create table public.grade_ranges (
   id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
   grading_scale_id uuid not null references public.grading_scales(id) on delete cascade,
   min_score numeric not null,
   max_score numeric not null,
@@ -263,12 +361,14 @@ create table public.grade_ranges (
 );
 create trigger trg_grade_ranges_updated_at before update on public.grade_ranges
   for each row execute function public.set_updated_at();
+create index idx_grade_ranges_school on public.grade_ranges(school_id);
 
 -- ----------------------------------------------------------------------------
 -- exams + results
 -- ----------------------------------------------------------------------------
 create table public.exams (
   id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
   name text not null,
   academic_year_id uuid not null references public.academic_years(id) on delete cascade,
   term_id uuid not null references public.terms(id) on delete cascade,
@@ -279,9 +379,11 @@ create table public.exams (
 );
 create trigger trg_exams_updated_at before update on public.exams
   for each row execute function public.set_updated_at();
+create index idx_exams_school on public.exams(school_id);
 
 create table public.results (
   id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
   exam_id uuid not null references public.exams(id) on delete cascade,
   student_id uuid not null references public.students(id) on delete cascade,
   subject_id uuid not null references public.subjects(id) on delete cascade,
@@ -299,28 +401,68 @@ create trigger trg_results_updated_at before update on public.results
   for each row execute function public.set_updated_at();
 create index idx_results_student on public.results(student_id);
 create index idx_results_exam on public.results(exam_id);
+create index idx_results_school on public.results(school_id);
 
 -- ----------------------------------------------------------------------------
--- settings (key/value, same shape as the Apps Script version)
+-- settings (key/value, same shape as the Apps Script version, now one row
+-- set per school — the primary key includes school_id so every school gets
+-- its own school_name/motto/logo/etc.)
 -- ----------------------------------------------------------------------------
 create table public.settings (
-  key text primary key,
+  school_id uuid not null references public.schools(id) on delete cascade,
+  key text not null,
   value text,
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  primary key (school_id, key)
 );
 create trigger trg_settings_updated_at before update on public.settings
   for each row execute function public.set_updated_at();
 
+-- Every tenant table above gets the same auto-stamp trigger.
+create trigger trg_staff_school_id before insert on public.staff
+  for each row execute function public.set_school_id();
+create trigger trg_academic_years_school_id before insert on public.academic_years
+  for each row execute function public.set_school_id();
+create trigger trg_terms_school_id before insert on public.terms
+  for each row execute function public.set_school_id();
+create trigger trg_classes_school_id before insert on public.classes
+  for each row execute function public.set_school_id();
+create trigger trg_streams_school_id before insert on public.streams
+  for each row execute function public.set_school_id();
+create trigger trg_subjects_school_id before insert on public.subjects
+  for each row execute function public.set_school_id();
+create trigger trg_students_school_id before insert on public.students
+  for each row execute function public.set_school_id();
+create trigger trg_profiles_school_id before insert on public.profiles
+  for each row execute function public.set_school_id();
+create trigger trg_sca_school_id before insert on public.subject_class_assignments
+  for each row execute function public.set_school_id();
+create trigger trg_sta_school_id before insert on public.subject_teacher_assignments
+  for each row execute function public.set_school_id();
+create trigger trg_grading_scales_school_id before insert on public.grading_scales
+  for each row execute function public.set_school_id();
+create trigger trg_grade_ranges_school_id before insert on public.grade_ranges
+  for each row execute function public.set_school_id();
+create trigger trg_exams_school_id before insert on public.exams
+  for each row execute function public.set_school_id();
+create trigger trg_results_school_id before insert on public.results
+  for each row execute function public.set_school_id();
+create trigger trg_settings_school_id before insert on public.settings
+  for each row execute function public.set_school_id();
+
 -- ============================================================================
 -- Row-Level Security
 -- ============================================================================
--- Model: admin = full read/write everywhere. teacher = read everything needed
--- to teach (classes/streams/subjects/students/exams), can enter & edit results
--- (no delete). student = read-only, and only their OWN student record + their
--- OWN results; can read classes/subjects/exams metadata needed to render a
--- report card. Nobody but admin touches staff, settings, or structural
--- (classes/subjects/assignments) tables.
+-- Model: admin = full read/write everywhere IN THEIR OWN SCHOOL. teacher =
+-- read everything needed to teach (classes/streams/subjects/students/exams)
+-- in their own school, can enter & edit results (no delete). student =
+-- read-only, and only their OWN student record + their OWN results, still
+-- scoped to their own school. Nobody but admin touches staff, settings, or
+-- structural (classes/subjects/assignments) tables. Every single policy
+-- below adds "school_id = public.current_school_id()" on top of the Phase 1
+-- role checks — that one clause is the entire tenant-isolation boundary.
 
+alter table public.schools enable row level security;
 alter table public.staff enable row level security;
 alter table public.academic_years enable row level security;
 alter table public.terms enable row level security;
@@ -337,102 +479,290 @@ alter table public.exams enable row level security;
 alter table public.results enable row level security;
 alter table public.settings enable row level security;
 
--- profiles: everyone can read their own; admin can read/manage all
+-- schools: a signed-in user may read their OWN school's row (for branding /
+-- account screens). Creating, renaming, suspending a school is a service-role
+-- (Netlify function) operation only in this phase — no client write policy.
+create policy schools_self_read on public.schools for select
+  using (id = public.current_school_id());
+
+-- profiles: everyone can read their own; admin can read/manage everyone
+-- WITHIN THEIR OWN SCHOOL only
 create policy profiles_self_read on public.profiles for select
-  using (id = auth.uid() or public.is_admin());
+  using (id = auth.uid() or (public.is_admin() and school_id = public.current_school_id()));
 create policy profiles_admin_write on public.profiles for insert
-  with check (public.is_admin());
+  with check (public.is_admin() and school_id = public.current_school_id());
 create policy profiles_admin_update on public.profiles for update
-  using (public.is_admin());
+  using (public.is_admin() and school_id = public.current_school_id());
 create policy profiles_admin_delete on public.profiles for delete
-  using (public.is_admin());
+  using (public.is_admin() and school_id = public.current_school_id());
 
 -- staff: admin full; teacher can read (for assignment pickers); student none
 create policy staff_read on public.staff for select
-  using (public.is_staff());
-create policy staff_admin_write on public.staff for insert with check (public.is_admin());
-create policy staff_admin_update on public.staff for update using (public.is_admin());
-create policy staff_admin_delete on public.staff for delete using (public.is_admin());
+  using (public.is_staff() and school_id = public.current_school_id());
+create policy staff_admin_write on public.staff for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy staff_admin_update on public.staff for update
+  using (public.is_admin() and school_id = public.current_school_id());
+create policy staff_admin_delete on public.staff for delete
+  using (public.is_admin() and school_id = public.current_school_id());
 
--- reference/structural data: readable by any authenticated user (students need
--- class/subject names for report cards), writable by admin only
-create policy academic_years_read on public.academic_years for select using (auth.uid() is not null);
-create policy academic_years_admin_write on public.academic_years for insert with check (public.is_admin());
-create policy academic_years_admin_update on public.academic_years for update using (public.is_admin());
-create policy academic_years_admin_delete on public.academic_years for delete using (public.is_admin());
+-- reference/structural data: readable by any authenticated user in the same
+-- school (students need class/subject names for report cards), writable by
+-- admin only
+create policy academic_years_read on public.academic_years for select
+  using (school_id = public.current_school_id());
+create policy academic_years_admin_write on public.academic_years for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy academic_years_admin_update on public.academic_years for update
+  using (public.is_admin() and school_id = public.current_school_id());
+create policy academic_years_admin_delete on public.academic_years for delete
+  using (public.is_admin() and school_id = public.current_school_id());
 
-create policy terms_read on public.terms for select using (auth.uid() is not null);
-create policy terms_admin_write on public.terms for insert with check (public.is_admin());
-create policy terms_admin_update on public.terms for update using (public.is_admin());
-create policy terms_admin_delete on public.terms for delete using (public.is_admin());
+create policy terms_read on public.terms for select
+  using (school_id = public.current_school_id());
+create policy terms_admin_write on public.terms for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy terms_admin_update on public.terms for update
+  using (public.is_admin() and school_id = public.current_school_id());
+create policy terms_admin_delete on public.terms for delete
+  using (public.is_admin() and school_id = public.current_school_id());
 
-create policy classes_read on public.classes for select using (auth.uid() is not null);
-create policy classes_admin_write on public.classes for insert with check (public.is_admin());
-create policy classes_admin_update on public.classes for update using (public.is_admin());
-create policy classes_admin_delete on public.classes for delete using (public.is_admin());
+create policy classes_read on public.classes for select
+  using (school_id = public.current_school_id());
+create policy classes_admin_write on public.classes for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy classes_admin_update on public.classes for update
+  using (public.is_admin() and school_id = public.current_school_id());
+create policy classes_admin_delete on public.classes for delete
+  using (public.is_admin() and school_id = public.current_school_id());
 
-create policy streams_read on public.streams for select using (auth.uid() is not null);
-create policy streams_admin_write on public.streams for insert with check (public.is_admin());
-create policy streams_admin_update on public.streams for update using (public.is_admin());
-create policy streams_admin_delete on public.streams for delete using (public.is_admin());
+create policy streams_read on public.streams for select
+  using (school_id = public.current_school_id());
+create policy streams_admin_write on public.streams for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy streams_admin_update on public.streams for update
+  using (public.is_admin() and school_id = public.current_school_id());
+create policy streams_admin_delete on public.streams for delete
+  using (public.is_admin() and school_id = public.current_school_id());
 
-create policy subjects_read on public.subjects for select using (auth.uid() is not null);
-create policy subjects_admin_write on public.subjects for insert with check (public.is_admin());
-create policy subjects_admin_update on public.subjects for update using (public.is_admin());
-create policy subjects_admin_delete on public.subjects for delete using (public.is_admin());
+create policy subjects_read on public.subjects for select
+  using (school_id = public.current_school_id());
+create policy subjects_admin_write on public.subjects for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy subjects_admin_update on public.subjects for update
+  using (public.is_admin() and school_id = public.current_school_id());
+create policy subjects_admin_delete on public.subjects for delete
+  using (public.is_admin() and school_id = public.current_school_id());
 
-create policy sca_read on public.subject_class_assignments for select using (auth.uid() is not null);
-create policy sca_admin_write on public.subject_class_assignments for insert with check (public.is_admin());
-create policy sca_admin_update on public.subject_class_assignments for update using (public.is_admin());
-create policy sca_admin_delete on public.subject_class_assignments for delete using (public.is_admin());
+create policy sca_read on public.subject_class_assignments for select
+  using (school_id = public.current_school_id());
+create policy sca_admin_write on public.subject_class_assignments for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy sca_admin_update on public.subject_class_assignments for update
+  using (public.is_admin() and school_id = public.current_school_id());
+create policy sca_admin_delete on public.subject_class_assignments for delete
+  using (public.is_admin() and school_id = public.current_school_id());
 
 create policy sta_read on public.subject_teacher_assignments for select
-  using (public.is_staff());
-create policy sta_admin_write on public.subject_teacher_assignments for insert with check (public.is_admin());
-create policy sta_admin_update on public.subject_teacher_assignments for update using (public.is_admin());
-create policy sta_admin_delete on public.subject_teacher_assignments for delete using (public.is_admin());
+  using (public.is_staff() and school_id = public.current_school_id());
+create policy sta_admin_write on public.subject_teacher_assignments for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy sta_admin_update on public.subject_teacher_assignments for update
+  using (public.is_admin() and school_id = public.current_school_id());
+create policy sta_admin_delete on public.subject_teacher_assignments for delete
+  using (public.is_admin() and school_id = public.current_school_id());
 
-create policy grading_scales_read on public.grading_scales for select using (auth.uid() is not null);
-create policy grading_scales_admin_write on public.grading_scales for insert with check (public.is_admin());
-create policy grading_scales_admin_update on public.grading_scales for update using (public.is_admin());
-create policy grading_scales_admin_delete on public.grading_scales for delete using (public.is_admin());
+create policy grading_scales_read on public.grading_scales for select
+  using (school_id = public.current_school_id());
+create policy grading_scales_admin_write on public.grading_scales for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy grading_scales_admin_update on public.grading_scales for update
+  using (public.is_admin() and school_id = public.current_school_id());
+create policy grading_scales_admin_delete on public.grading_scales for delete
+  using (public.is_admin() and school_id = public.current_school_id());
 
-create policy grade_ranges_read on public.grade_ranges for select using (auth.uid() is not null);
-create policy grade_ranges_admin_write on public.grade_ranges for insert with check (public.is_admin());
-create policy grade_ranges_admin_update on public.grade_ranges for update using (public.is_admin());
-create policy grade_ranges_admin_delete on public.grade_ranges for delete using (public.is_admin());
+create policy grade_ranges_read on public.grade_ranges for select
+  using (school_id = public.current_school_id());
+create policy grade_ranges_admin_write on public.grade_ranges for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy grade_ranges_admin_update on public.grade_ranges for update
+  using (public.is_admin() and school_id = public.current_school_id());
+create policy grade_ranges_admin_delete on public.grade_ranges for delete
+  using (public.is_admin() and school_id = public.current_school_id());
 
--- Public (even logged-out) read: the login screen shows the school name/logo
--- before anyone signs in. Nothing stored here is sensitive (name, motto,
--- P.O. Box, phone, email, logo) — the same information that would appear on
--- the school's own letterhead or public website.
-create policy settings_read on public.settings for select using (true);
-create policy settings_admin_write on public.settings for insert with check (public.is_admin());
-create policy settings_admin_update on public.settings for update using (public.is_admin());
-create policy settings_admin_delete on public.settings for delete using (public.is_admin());
+-- settings: readable by any authenticated member of the school; the
+-- pre-login screen no longer reads this table directly (it can't — there's
+-- no session yet) and instead calls get_school_public_info() below, which is
+-- the one deliberate, narrow, anonymous-safe exception.
+create policy settings_read on public.settings for select
+  using (school_id = public.current_school_id());
+create policy settings_admin_write on public.settings for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy settings_admin_update on public.settings for update
+  using (public.is_admin() and school_id = public.current_school_id());
+create policy settings_admin_delete on public.settings for delete
+  using (public.is_admin() and school_id = public.current_school_id());
 
 -- students: admin full; teacher read all (+ write, since teachers register
--- students in the original system); student may read only their own row
+-- students in the original system); student may read only their own row —
+-- all scoped to one school
 create policy students_staff_read on public.students for select
-  using (public.is_staff() or id = public.current_student_id());
-create policy students_staff_write on public.students for insert with check (public.is_staff());
-create policy students_staff_update on public.students for update using (public.is_staff());
-create policy students_admin_delete on public.students for delete using (public.is_admin());
+  using ((public.is_staff() or id = public.current_student_id()) and school_id = public.current_school_id());
+create policy students_staff_write on public.students for insert
+  with check (public.is_staff() and school_id = public.current_school_id());
+create policy students_staff_update on public.students for update
+  using (public.is_staff() and school_id = public.current_school_id());
+create policy students_admin_delete on public.students for delete
+  using (public.is_admin() and school_id = public.current_school_id());
 
 -- exams: staff read/write; students read (needed to know which exams exist
 -- for their report card / mark list views)
-create policy exams_read on public.exams for select using (auth.uid() is not null);
-create policy exams_staff_write on public.exams for insert with check (public.is_staff());
-create policy exams_staff_update on public.exams for update using (public.is_staff());
-create policy exams_admin_delete on public.exams for delete using (public.is_admin());
+create policy exams_read on public.exams for select
+  using (school_id = public.current_school_id());
+create policy exams_staff_write on public.exams for insert
+  with check (public.is_staff() and school_id = public.current_school_id());
+create policy exams_staff_update on public.exams for update
+  using (public.is_staff() and school_id = public.current_school_id());
+create policy exams_admin_delete on public.exams for delete
+  using (public.is_admin() and school_id = public.current_school_id());
 
 -- results: staff (admin+teacher) can enter/edit; nobody but admin deletes;
 -- a student can read only rows that are their own
 create policy results_read on public.results for select
-  using (public.is_staff() or student_id = public.current_student_id());
-create policy results_staff_write on public.results for insert with check (public.is_staff());
-create policy results_staff_update on public.results for update using (public.is_staff());
-create policy results_admin_delete on public.results for delete using (public.is_admin());
+  using ((public.is_staff() or student_id = public.current_student_id()) and school_id = public.current_school_id());
+create policy results_staff_write on public.results for insert
+  with check (public.is_staff() and school_id = public.current_school_id());
+create policy results_staff_update on public.results for update
+  using (public.is_staff() and school_id = public.current_school_id());
+create policy results_admin_delete on public.results for delete
+  using (public.is_admin() and school_id = public.current_school_id());
+
+-- ============================================================================
+-- get_school_public_info RPC — the ONE anonymous-safe read in the whole
+-- schema. The login screen needs to show a school's name/logo (and the
+-- student-login flow needs the school's code to build the right synthetic
+-- email) before anyone is signed in, so there is no auth.uid() / school_id
+-- to filter by yet. This function takes the place of the old, fully-public
+-- `settings_read using (true)` policy — it deliberately returns nothing but
+-- a name/logo/motto for an ACTIVE school looked up by its public code, never
+-- anything else.
+-- ============================================================================
+create or replace function public.get_school_public_info(p_code text)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_school public.schools%rowtype;
+  v_settings jsonb;
+begin
+  select * into v_school from public.schools
+    where code = lower(trim(coalesce(p_code, ''))) and status = 'active';
+  if not found then
+    return jsonb_build_object('found', false);
+  end if;
+
+  select coalesce(jsonb_object_agg(key, value), '{}'::jsonb) into v_settings
+    from public.settings where school_id = v_school.id;
+
+  return jsonb_build_object(
+    'found', true,
+    'school_id', v_school.id,
+    'school_code', v_school.code,
+    'school_name', v_school.name,
+    'settings', v_settings
+  );
+end;
+$$;
+grant execute on function public.get_school_public_info(text) to anon, authenticated;
+
+-- ============================================================================
+-- seed_school_defaults RPC — populates a brand-new school with the same CBC
+-- subject list, default grading scale/bands and default settings keys every
+-- school used to get from seed.sql when there was only ever one tenant.
+-- SECURITY DEFINER + a hard school_id parameter (not current_school_id())
+-- because this runs from the school-signup Netlify function via the
+-- service_role key, before the new admin's profile even exists yet.
+-- ============================================================================
+create or replace function public.seed_school_defaults(p_school_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_scale_id uuid;
+begin
+  insert into public.subjects (school_id, name, level, code, description) values
+    (p_school_id, 'Language Activities', 'Pre-Primary', '', ''),
+    (p_school_id, 'Mathematical Activities', 'Pre-Primary', '', ''),
+    (p_school_id, 'Environmental Activities', 'Pre-Primary', '', ''),
+    (p_school_id, 'Psychomotor and Creative Activities', 'Pre-Primary', '', ''),
+    (p_school_id, 'Religious Education Activities', 'Pre-Primary', '', ''),
+    (p_school_id, 'Literacy Activities', 'Lower Primary', '', ''),
+    (p_school_id, 'English Language Activities', 'Lower Primary', '', ''),
+    (p_school_id, 'Kiswahili Language Activities', 'Lower Primary', '', ''),
+    (p_school_id, 'Indigenous Language Activities', 'Lower Primary', '', ''),
+    (p_school_id, 'Mathematical Activities', 'Lower Primary', '', ''),
+    (p_school_id, 'Environmental Activities', 'Lower Primary', '', ''),
+    (p_school_id, 'Hygiene and Nutrition Activities', 'Lower Primary', '', ''),
+    (p_school_id, 'Religious Education', 'Lower Primary', '', ''),
+    (p_school_id, 'Movement and Creative Activities', 'Lower Primary', '', ''),
+    (p_school_id, 'English', 'Upper Primary', '', ''),
+    (p_school_id, 'Kiswahili', 'Upper Primary', '', ''),
+    (p_school_id, 'Mathematics', 'Upper Primary', '', ''),
+    (p_school_id, 'Science and Technology', 'Upper Primary', '', ''),
+    (p_school_id, 'Social Studies', 'Upper Primary', '', ''),
+    (p_school_id, 'Religious Education', 'Upper Primary', '', ''),
+    (p_school_id, 'Agriculture', 'Upper Primary', '', ''),
+    (p_school_id, 'Home Science', 'Upper Primary', '', ''),
+    (p_school_id, 'Creative Arts', 'Upper Primary', '', ''),
+    (p_school_id, 'Physical and Health Education', 'Upper Primary', '', ''),
+    (p_school_id, 'English', 'Junior Secondary', '', ''),
+    (p_school_id, 'Kiswahili', 'Junior Secondary', '', ''),
+    (p_school_id, 'Mathematics', 'Junior Secondary', '', ''),
+    (p_school_id, 'Integrated Science', 'Junior Secondary', '', ''),
+    (p_school_id, 'Pre-Technical Studies', 'Junior Secondary', '', ''),
+    (p_school_id, 'Social Studies', 'Junior Secondary', '', ''),
+    (p_school_id, 'Agriculture', 'Junior Secondary', '', ''),
+    (p_school_id, 'Religious Education', 'Junior Secondary', '', ''),
+    (p_school_id, 'Creative Arts and Sports', 'Junior Secondary', '', '')
+  on conflict (school_id, name, level) do nothing;
+
+  insert into public.grading_scales (id, school_id, name, description, is_default)
+  values (gen_random_uuid(), p_school_id, 'Default Grading Scale',
+          'Standard scale — edit the bands to match your school.', true)
+  returning id into v_scale_id;
+
+  insert into public.grade_ranges (school_id, grading_scale_id, min_score, max_score, grade_label, points, remark)
+  select p_school_id, v_scale_id, b.min_score, b.max_score, b.grade_label, b.points, b.remark
+  from (values
+    (80, 100, 'A',  12, 'Excellent'),
+    (75, 79,  'A-', 11, 'Excellent'),
+    (70, 74,  'B+', 10, 'Very Good'),
+    (65, 69,  'B',   9, 'Very Good'),
+    (60, 64,  'B-',  8, 'Good'),
+    (55, 59,  'C+',  7, 'Good'),
+    (50, 54,  'C',   6, 'Credit'),
+    (45, 49,  'C-',  5, 'Credit'),
+    (40, 44,  'D+',  4, 'Pass'),
+    (35, 39,  'D',   3, 'Pass'),
+    (30, 34,  'D-',  2, 'Weak'),
+    (0,  29,  'E',   1, 'Fail')
+  ) as b(min_score, max_score, grade_label, points, remark);
+
+  insert into public.settings (school_id, key, value) values
+    (p_school_id, 'school_name', (select name from public.schools where id = p_school_id)),
+    (p_school_id, 'school_motto', ''),
+    (p_school_id, 'po_box', ''),
+    (p_school_id, 'phone', ''),
+    (p_school_id, 'email', ''),
+    (p_school_id, 'logo', '')
+  on conflict (school_id, key) do nothing;
+end;
+$$;
 
 -- ============================================================================
 -- get_report_card RPC
@@ -446,9 +776,10 @@ create policy results_admin_delete on public.results for delete using (public.is
 -- This function is the one narrow exception: SECURITY DEFINER lets it read
 -- across all students' results internally, but it re-implements the exact
 -- same authorization rule RLS would apply (admin/teacher, or the student
--- viewing their own card, nobody else) before doing anything, and only ever
--- returns computed, single-student output — the caller never receives
--- another student's raw score.
+-- viewing their own card, nobody else, and always within one school) before
+-- doing anything, and only ever returns computed, single-student output —
+-- the caller never receives another student's raw score, and never anything
+-- from a different school even if a stale/foreign id were passed in.
 create or replace function public.get_report_card(p_exam_id uuid, p_student_id uuid)
 returns jsonb
 language plpgsql
@@ -458,6 +789,7 @@ as $$
 declare
   v_role user_role;
   v_own_student_id uuid;
+  v_caller_school uuid;
   v_student public.students%rowtype;
   v_exam public.exams%rowtype;
   v_class public.classes%rowtype;
@@ -474,18 +806,19 @@ declare
 begin
   v_role := public.current_role();
   v_own_student_id := public.current_student_id();
+  v_caller_school := public.current_school_id();
 
-  if v_role is null then
+  if v_role is null or v_caller_school is null then
     raise exception 'Not authorized to view this report card' using errcode = '42501';
   end if;
   if v_role not in ('admin', 'teacher') and (v_role <> 'student' or v_own_student_id is distinct from p_student_id) then
     raise exception 'Not authorized to view this report card' using errcode = '42501';
   end if;
 
-  select * into v_student from public.students where id = p_student_id;
+  select * into v_student from public.students where id = p_student_id and school_id = v_caller_school;
   if not found then raise exception 'Student not found'; end if;
 
-  select * into v_exam from public.exams where id = p_exam_id;
+  select * into v_exam from public.exams where id = p_exam_id and school_id = v_caller_school;
   if not found then raise exception 'Exam not found'; end if;
 
   select * into v_class from public.classes where id = v_student.class_id;
@@ -506,13 +839,13 @@ begin
     into v_subjects, v_total, v_count
     from public.results r
     left join public.subjects s on s.id = r.subject_id
-    where r.exam_id = p_exam_id and r.student_id = p_student_id;
+    where r.exam_id = p_exam_id and r.student_id = p_student_id and r.school_id = v_caller_school;
 
   v_average := case when v_count > 0 then round(v_total / v_count, 2) else 0 end;
 
   select grade_label into v_overall_grade
     from public.grade_ranges gr
-    join public.grading_scales gs on gs.id = gr.grading_scale_id and gs.is_default = true
+    join public.grading_scales gs on gs.id = gr.grading_scale_id and gs.is_default = true and gs.school_id = v_caller_school
     where v_average >= gr.min_score and v_average <= gr.max_score
     limit 1;
 
@@ -522,9 +855,9 @@ begin
   with cohort as (
     select st.id,
            coalesce((select sum(r2.score) from public.results r2
-                     where r2.exam_id = p_exam_id and r2.student_id = st.id), 0) as total
+                     where r2.exam_id = p_exam_id and r2.student_id = st.id and r2.school_id = v_caller_school), 0) as total
     from public.students st
-    where st.class_id = v_student.class_id and st.status = 'active'
+    where st.class_id = v_student.class_id and st.status = 'active' and st.school_id = v_caller_school
   ),
   ranked as (
     select id, total, rank() over (order by total desc) as pos

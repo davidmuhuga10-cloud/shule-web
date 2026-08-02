@@ -1,9 +1,20 @@
-# admin-provision — the one privileged endpoint
+# Netlify Functions — the two privileged endpoints
+
+Shule is multi-tenant: one Supabase project now serves every school, so every
+one of these functions is careful about which tenant (`school_id`) a given
+call is allowed to touch.
+
+## admin-provision — provisioning logins for an EXISTING school
 
 This function is where the Supabase **service_role** key lives (never in the
 browser). It requires the caller to already hold a valid Supabase session for
 an **active admin** — verified server-side against the `profiles` table on
-every call — before it will touch anything.
+every call — before it will touch anything. Every action is additionally
+scoped to that admin's own `school_id` (resolved server-side, never trusted
+from the request body) — this is what stops one school's admin from
+resetting a password or disabling a login that belongs to a different
+school, since the service_role key bypasses Row-Level Security entirely and
+this scoping is the only thing standing in for it here.
 
 Tested with 29 unit tests against a mocked Supabase client (auth checks,
 idempotency, rollback-on-failure, password-floor enforcement, ban/unban) —
@@ -67,20 +78,47 @@ const result = await res.json();
 
 ### The student login screen must apply the same email rule
 
-Students only ever type their admission number. Before calling
-`supabase.auth.signInWithPassword()`, the frontend must translate it using
-the exact same rule as `_lib/studentLogin.js`'s `studentEmailFor()`:
+Students only ever type their admission number (plus, now, their **School
+Code** — see below). Before calling `supabase.auth.signInWithPassword()`,
+the frontend must translate it using the exact same rule as
+`_lib/studentLogin.js`'s `studentEmailFor(admissionNo, schoolCode)`:
 
 ```js
-function studentEmailFor(admissionNo) {
-  const slug = String(admissionNo || '').trim().toLowerCase()
+function studentEmailFor(admissionNo, schoolCode) {
+  const slug = (v) => String(v || '').trim().toLowerCase()
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-  return (slug || 'student') + '@students.shule.internal';
+  return slug(admissionNo, 'student') + '@' + slug(schoolCode) + '.students.shule.internal';
 }
 ```
 
+The School Code has to be folded in because admission numbers are only
+unique **within** a school, but this one Supabase project now serves every
+school — two different schools can each have a student "23".
+
+## school-signup — the ONE public, unauthenticated endpoint
+
+This is where a brand-new school creates its own tenant: a `schools` row, a
+first admin login, and a set of sensible defaults (CBC subjects, default
+grading scale, default settings) via the `seed_school_defaults()` SQL
+function. It's public by necessity — there's no admin session to check yet
+for a school that doesn't exist yet — so it validates carefully (unique
+School Code, valid email, 6+ char password) and rolls back anything it
+already created if a later step fails, so a failed signup never leaves an
+orphaned half-created school behind.
+
+`POST /.netlify/functions/school-signup`
+Body: `{ school_name, school_code, admin_name, admin_email, password }`
+Response: `{ ok: true, school_code, school_name, admin_email, seeded }` or
+`{ ok: false, message }`.
+
+No CAPTCHA/rate-limiting yet — see `PRODUCT_ROADMAP.md`'s Phase 0 notes for
+why that's a deliberate, revisit-later call rather than an oversight.
+
 ## Re-running the tests
 
-`npm install && npm test` from the project root runs all 29 tests (in
-`tests/admin-provision.test.js`) against a mocked `admin.auth`/`admin.from()`
-client — no live Supabase project needed.
+`npm install && npm test` from the project root runs every test, including
+`tests/admin-provision.test.js` and `tests/school-signup.test.js`, against
+mocked `admin.auth`/`admin.from()` clients — no live Supabase project
+needed. There's also a real-browser smoke test for the login/signup screens
+at `tests/e2e/multitenant.e2e.mjs` (see the comment at the top of that file
+for how to run it).
