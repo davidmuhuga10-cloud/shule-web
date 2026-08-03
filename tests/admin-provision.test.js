@@ -8,11 +8,11 @@
  * happy path AND the cross-tenant rejection cases, since a bug there would
  * be a real privilege-escalation hole (service_role bypasses RLS entirely).
  */
-const { studentEmailFor, studentPasswordFor, DEFAULT_TEACHER_PASSWORD } =
+const { studentEmailFor, studentPasswordFor, parentEmailFor, DEFAULT_TEACHER_PASSWORD, DEFAULT_PARENT_PASSWORD } =
   require('../netlify/functions/_lib/studentLogin.js');
 const { requireAdmin } = require('../netlify/functions/_lib/supabaseAdmin.js');
 const {
-  createStudentLogin, createStaffLogin, resetPassword, setLoginStatus
+  createStudentLogin, createStaffLogin, createParentLogin, resetPassword, setLoginStatus
 } = require('../netlify/functions/admin-provision.js');
 
 let passed = 0, failed = 0;
@@ -224,6 +224,55 @@ function mockAdmin(opts) {
     const res = await createStaffLogin(admin, { staff_id: 'staff-2', email: 'head@test.school', full_name: 'Head Teacher', role: 'admin' }, SCHOOL_A);
     const profile = admin._tables.profiles.find(p => p.staff_id === 'staff-2');
     check('createStaffLogin can provision an admin-role staff account', profile && profile.role === 'admin');
+  }
+
+  // ---- parentEmailFor -------------------------------------------------------
+  check('parentEmailFor slugifies the phone + folds in school code', parentEmailFor('0712345678', 'alpha') === '0712345678@alpha.parents.shule.internal');
+  check('parentEmailFor keeps two schools\' identical phone numbers distinct', parentEmailFor('0700000000', 'alpha') !== parentEmailFor('0700000000', 'beta'));
+  check('parentEmailFor throws without a school code', (() => {
+    try { parentEmailFor('0712345678'); return false; } catch (e) { return true; }
+  })());
+  check('DEFAULT_PARENT_PASSWORD meets 6-char floor', DEFAULT_PARENT_PASSWORD.length >= 6);
+
+  // ---- createParentLogin -----------------------------------------------------
+  {
+    const admin = mockAdmin();
+    const res = await createParentLogin(admin, { full_name: 'Jane Parent', phone: '0712345678' }, SCHOOL_A);
+    check('createParentLogin succeeds', res.ok === true);
+    check('createParentLogin uses the school-scoped synthetic email', res.email === '0712345678@alpha.parents.shule.internal');
+    check('createParentLogin uses the fixed default password', res.defaultPassword === DEFAULT_PARENT_PASSWORD);
+    const profile = admin._tables.profiles.find(p => p.email === res.email);
+    check('createParentLogin inserts a linked profile row with role parent', profile && profile.role === 'parent');
+    check('createParentLogin stamps the profile with the caller\'s school_id', profile.school_id === SCHOOL_A);
+    check('createParentLogin does not set a staff_id or student_id (linking happens separately)', !profile.staff_id && !profile.student_id);
+  }
+  {
+    // Idempotency: calling twice for the same phone, in the SAME school, must not create a duplicate.
+    const admin = mockAdmin();
+    await createParentLogin(admin, { full_name: 'Jane Parent', phone: '0712345678' }, SCHOOL_A);
+    const res = await createParentLogin(admin, { full_name: 'Jane Parent', phone: '0712345678' }, SCHOOL_A);
+    check('createParentLogin is idempotent for an already-provisioned phone', res.ok === true && res.alreadyProvisioned === true);
+    check('createParentLogin did not insert a second profile', admin._tables.profiles.filter(p => p.role === 'parent').length === 1);
+  }
+  {
+    // Same phone number, but a DIFFERENT school — must not collide.
+    const admin = mockAdmin();
+    await createParentLogin(admin, { full_name: 'Jane Parent', phone: '0712345678' }, SCHOOL_A);
+    const res = await createParentLogin(admin, { full_name: 'Jane B Parent', phone: '0712345678' }, SCHOOL_B);
+    check('createParentLogin keeps the same phone number distinct across schools', res.ok === true && !res.alreadyProvisioned);
+  }
+  {
+    const admin = mockAdmin();
+    const res = await createParentLogin(admin, { full_name: 'Jane Parent' }, SCHOOL_A);
+    check('createParentLogin validates required fields', res.ok === false);
+  }
+  {
+    const admin = mockAdmin({ forceInsertError: true });
+    let deleteCalled = false;
+    const origDelete = admin.auth.admin.deleteUser;
+    admin.auth.admin.deleteUser = async (id) => { deleteCalled = true; return origDelete(id); };
+    const res = await createParentLogin(admin, { full_name: 'Rollback Parent', phone: '0799999999' }, SCHOOL_A);
+    check('createParentLogin rolls back the auth user when the profile insert fails', res.ok === false && deleteCalled === true);
   }
 
   // ---- resetPassword ----------------------------------------------------------

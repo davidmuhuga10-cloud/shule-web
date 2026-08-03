@@ -37,6 +37,8 @@ export function createMockSupabase(initialTables) {
       if (kind === 'ilike') return String(rv || '').toLowerCase() === String(val || '').toLowerCase().replace(/%/g, '');
       if (kind === 'in') return val.map(String).includes(String(rv));
       if (kind === 'gt') return Number(rv) > Number(val);
+      if (kind === 'gte') return rv >= val;
+      if (kind === 'lte') return rv <= val;
       return true;
     });
   }
@@ -76,6 +78,8 @@ export function createMockSupabase(initialTables) {
       ilike(col, val) { state.filters.push(['ilike', col, val]); return api; },
       in(col, val) { state.filters.push(['in', col, val]); return api; },
       gt(col, val) { state.filters.push(['gt', col, val]); return api; },
+      gte(col, val) { state.filters.push(['gte', col, val]); return api; },
+      lte(col, val) { state.filters.push(['lte', col, val]); return api; },
       order(col, opts) { state.order = { col, ascending: !opts || opts.ascending !== false }; return api; },
       limit() { return api; },
       async single() {

@@ -25,10 +25,12 @@ function getAdminClient() {
 
 /**
  * Verify the caller sent a valid Supabase session token ("Authorization:
- * Bearer <access_token>") AND that the token belongs to an active admin
- * profile. Throws an Error with a .statusCode on any failure.
+ * Bearer <access_token>") AND that the token belongs to an active profile
+ * whose role is one of `allowedRoles`. Throws an Error with a .statusCode
+ * on any failure. Shared by requireAdmin (admin-only actions) and
+ * requireStaff (admin+teacher actions, e.g. messaging/attendance).
  */
-async function requireAdmin(event, admin) {
+async function requireRole(event, admin, allowedRoles, roleLabel) {
   const authHeader = event.headers.authorization || event.headers.Authorization || '';
   const token = authHeader.replace(/^Bearer\s+/i, '').trim();
   if (!token) {
@@ -46,7 +48,7 @@ async function requireAdmin(event, admin) {
 
   const { data: profile, error: profileErr } = await admin
     .from('profiles')
-    .select('id, role, status, school_id')
+    .select('id, role, status, school_id, staff_id')
     .eq('id', userData.user.id)
     .maybeSingle();
 
@@ -55,8 +57,8 @@ async function requireAdmin(event, admin) {
     err.statusCode = 403;
     throw err;
   }
-  if (profile.role !== 'admin' || profile.status !== 'active') {
-    const err = new Error('Admin access is required for this action.');
+  if (allowedRoles.indexOf(profile.role) === -1 || profile.status !== 'active') {
+    const err = new Error((roleLabel || 'Admin') + ' access is required for this action.');
     err.statusCode = 403;
     throw err;
   }
@@ -64,4 +66,14 @@ async function requireAdmin(event, admin) {
   return { user: userData.user, profile };
 }
 
-module.exports = { getAdminClient, requireAdmin };
+async function requireAdmin(event, admin) {
+  return requireRole(event, admin, ['admin'], 'Admin');
+}
+
+/** Same as requireAdmin, but also allows teachers — used by endpoints like
+ *  messaging that Zeraki-parity intends for any staff member, not admin only. */
+async function requireStaff(event, admin) {
+  return requireRole(event, admin, ['admin', 'teacher'], 'Staff');
+}
+
+module.exports = { getAdminClient, requireAdmin, requireStaff };

@@ -13,12 +13,12 @@
  * saveStaff, per the notes in SETUP_GUIDE.md.
  *
  * POST body: { action, ...fields }, header: Authorization: Bearer <admin JWT>
- * Actions: create_student | create_staff | reset_password | set_login_status
+ * Actions: create_student | create_staff | create_parent | reset_password | set_login_status
  * ----------------------------------------------------------------------------
  */
 
 const { getAdminClient, requireAdmin } = require('./_lib/supabaseAdmin');
-const { studentEmailFor, studentPasswordFor, DEFAULT_TEACHER_PASSWORD } = require('./_lib/studentLogin');
+const { studentEmailFor, studentPasswordFor, parentEmailFor, DEFAULT_TEACHER_PASSWORD, DEFAULT_PARENT_PASSWORD } = require('./_lib/studentLogin');
 
 function json(statusCode, body) {
   return {
@@ -68,6 +68,8 @@ exports.handler = async (event) => {
         return json(200, await createStudentLogin(admin, payload, schoolId));
       case 'create_staff':
         return json(200, await createStaffLogin(admin, payload, schoolId));
+      case 'create_parent':
+        return json(200, await createParentLogin(admin, payload, schoolId));
       case 'reset_password':
         return json(200, await resetPassword(admin, payload, schoolId));
       case 'set_login_status':
@@ -150,6 +152,51 @@ async function createStaffLogin(admin, payload, schoolId) {
   return { ok: true, profile_id: created.user.id, email, defaultPassword: password };
 }
 
+/**
+ * Parent accounts have no dedicated FK column on `profiles` the way
+ * students/staff do (no `staff_id`/`student_id` to key off — a parent isn't
+ * "the same row as" any one student, since one parent can be linked to
+ * several children via parent_links, added separately by an admin after
+ * this call via a plain authenticated insert — see src/lib/api/parents.mjs).
+ * So idempotency here is keyed off the synthetic email instead, scoped to
+ * the calling admin's own school.
+ */
+async function createParentLogin(admin, payload, schoolId) {
+  const { full_name, phone } = payload;
+  if (!full_name || !phone) {
+    return { ok: false, message: 'Parent name and phone number are required.' };
+  }
+
+  const { data: school, error: schoolErr } = await admin
+    .from('schools').select('code').eq('id', schoolId).maybeSingle();
+  if (schoolErr || !school) return { ok: false, message: 'Could not resolve your school — please sign in again.' };
+
+  const email = parentEmailFor(phone, school.code);
+
+  const existing = await findProfileByEmail(admin, email, schoolId);
+  if (existing) {
+    return { ok: true, alreadyProvisioned: true, profile_id: existing.id, email };
+  }
+
+  const { data: created, error: createErr } = await admin.auth.admin.createUser({
+    email,
+    password: DEFAULT_PARENT_PASSWORD,
+    email_confirm: true,
+    user_metadata: { role: 'parent', full_name, school_id: schoolId }
+  });
+  if (createErr) return { ok: false, message: 'Could not create the login: ' + createErr.message };
+
+  const { error: profileErr } = await admin
+    .from('profiles')
+    .insert({ id: created.user.id, school_id: schoolId, name: full_name, email, role: 'parent', status: 'active' });
+  if (profileErr) {
+    await admin.auth.admin.deleteUser(created.user.id); // don't leave an orphaned auth account behind
+    return { ok: false, message: 'Could not link the profile: ' + profileErr.message };
+  }
+
+  return { ok: true, profile_id: created.user.id, email, defaultPassword: DEFAULT_PARENT_PASSWORD };
+}
+
 async function resetPassword(admin, payload, schoolId) {
   const { profile_id, new_password } = payload;
   if (!profile_id) return { ok: false, message: 'profile_id is required.' };
@@ -218,9 +265,15 @@ async function findProfileBy(admin, column, value, schoolId) {
   return data || null;
 }
 
+async function findProfileByEmail(admin, email, schoolId) {
+  const { data } = await admin.from('profiles').select('id').eq('email', email).eq('school_id', schoolId).maybeSingle();
+  return data || null;
+}
+
 // Exported (in addition to `handler`) so these pure actions can be unit-tested
 // against a mock Supabase client without needing a live project or env vars.
 module.exports.createStudentLogin = createStudentLogin;
 module.exports.createStaffLogin = createStaffLogin;
+module.exports.createParentLogin = createParentLogin;
 module.exports.resetPassword = resetPassword;
 module.exports.setLoginStatus = setLoginStatus;

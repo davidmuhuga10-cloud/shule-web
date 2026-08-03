@@ -28,6 +28,10 @@ export function studentEmailFor(admissionNo, schoolCode) {
   return studentEmailHelper().studentEmailFor(admissionNo, schoolCode);
 }
 
+export function parentEmailFor(phone, schoolCode) {
+  return studentEmailHelper().parentEmailFor(phone, schoolCode);
+}
+
 /** Public, pre-auth lookup: does this School Code exist, and what's its name/logo/settings? */
 export async function resolveSchoolByCode(code) {
   const trimmed = String(code || '').trim();
@@ -49,6 +53,19 @@ export async function loginStaff(email, password, schoolCode) {
 export async function loginStudent(admissionNo, password, schoolCode) {
   if (!String(schoolCode || '').trim()) return { ok: false, message: 'Enter your School Code.' };
   const email = studentEmailFor(admissionNo, schoolCode);
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) return { ok: false, message: friendlyAuthError(error) };
+  const guard = await verifySchoolMatch(schoolCode);
+  if (!guard.ok) { await supabase.auth.signOut(); return guard; }
+  return { ok: true, session: data.session };
+}
+
+/** Parents sign in with the phone number their school registered them with —
+ *  same synthetic-address pattern as loginStudent, folding in the School
+ *  Code so the same phone number at two different schools doesn't collide. */
+export async function loginParent(phone, password, schoolCode) {
+  if (!String(schoolCode || '').trim()) return { ok: false, message: 'Enter your School Code.' };
+  const email = parentEmailFor(phone, schoolCode);
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) return { ok: false, message: friendlyAuthError(error) };
   const guard = await verifySchoolMatch(schoolCode);

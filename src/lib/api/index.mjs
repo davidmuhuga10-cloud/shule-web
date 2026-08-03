@@ -16,6 +16,9 @@ import { createResultsApi } from './results.mjs';
 import { createDashboardApi } from './dashboard.mjs';
 import { createSettingsApi } from './settings.mjs';
 import { createUsersApi } from './users.mjs';
+import { createAttendanceApi } from './attendance.mjs';
+import { createMessagingApi } from './messaging.mjs';
+import { createParentsApi } from './parents.mjs';
 
 async function callAdminFunction(action, payload) {
   const token = await getAccessToken();
@@ -24,6 +27,24 @@ async function callAdminFunction(action, payload) {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify({ action, ...payload })
+  });
+  try {
+    return await res.json();
+  } catch (e) {
+    return { ok: false, message: 'Unexpected response from the server (' + res.status + ').' };
+  }
+}
+
+/** Same shape as callAdminFunction, but for the staff-level send-message
+ *  function (admin OR teacher) — kept separate so a caller can never
+ *  accidentally hit the admin-only endpoint with a messaging payload. */
+async function callSendMessage(payload) {
+  const token = await getAccessToken();
+  if (!token) return { ok: false, message: 'Not signed in.' };
+  const res = await fetch('/.netlify/functions/send-message', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload)
   });
   try {
     return await res.json();
@@ -48,5 +69,8 @@ export const Db = {
   results: createResultsApi(supabase, grading),
   dashboard: createDashboardApi(supabase),
   settings: createSettingsApi(supabase),
-  users: createUsersApi(supabase, callAdminFunction)
+  users: createUsersApi(supabase, callAdminFunction),
+  attendance: createAttendanceApi(supabase),
+  messaging: createMessagingApi(supabase, callSendMessage),
+  parents: createParentsApi(supabase, callAdminFunction)
 };

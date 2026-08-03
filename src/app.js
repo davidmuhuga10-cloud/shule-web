@@ -9,7 +9,7 @@
  * function is imported directly — no more string-name ROUTES table working
  * around load order.
  */
-import { loginStaff, loginStudent, logout as authLogout, getCurrentProfile, changePassword, resolveSchoolByCode } from './lib/auth.js';
+import { loginStaff, loginStudent, loginParent, logout as authLogout, getCurrentProfile, changePassword, resolveSchoolByCode } from './lib/auth.js';
 import { supabase } from './lib/supabaseClient.js';
 import { Db } from './lib/api/index.mjs';
 
@@ -31,6 +31,10 @@ import { viewClassList } from './views/classList.mjs';
 import { viewMyResults } from './views/myResults.mjs';
 import { viewSettings } from './views/schoolSettings.mjs';
 import { viewUsers } from './views/userAccounts.mjs';
+import { viewAttendance } from './views/attendance.mjs';
+import { viewMessaging } from './views/messaging.mjs';
+import { viewParentAccounts } from './views/parentAccounts.mjs';
+import { viewMyChildren } from './views/myChildren.mjs';
 import { renderComingSoon } from './views/_comingSoon.mjs';
 
 /* ------------------------------ Shared state ----------------------------- */
@@ -142,6 +146,7 @@ export function renderAuth(errorMsg) {
       <div class="tabs">
         <button id="tab-staff" class="${loginTab === 'staff' ? 'active' : ''}">Staff / Admin</button>
         <button id="tab-student" class="${loginTab === 'student' ? 'active' : ''}">Student</button>
+        <button id="tab-parent" class="${loginTab === 'parent' ? 'active' : ''}">Parent</button>
       </div>
       ${errorMsg ? `<div class="auth-err">${esc(errorMsg)}</div>` : ''}
       <form id="login-form">
@@ -151,9 +156,9 @@ export function renderAuth(errorMsg) {
           <div class="hint" id="school-preview" style="min-height:1.2em"></div>
         </div>
         <div class="field">
-          <label id="id-label">${loginTab === 'student' ? 'Admission Number' : 'Email address'}</label>
-          <input id="login-id" autocomplete="${loginTab === 'student' ? 'off' : 'username'}"
-            placeholder="${loginTab === 'student' ? 'e.g. 23' : 'you@school.com'}" required>
+          <label id="id-label">${loginTab === 'student' ? 'Admission Number' : loginTab === 'parent' ? 'Phone Number' : 'Email address'}</label>
+          <input id="login-id" autocomplete="${loginTab === 'staff' ? 'username' : 'off'}"
+            placeholder="${loginTab === 'student' ? 'e.g. 23' : loginTab === 'parent' ? 'e.g. 0712345678' : 'you@school.com'}" required>
         </div>
         <div class="field">
           <label>Password</label>
@@ -163,6 +168,8 @@ export function renderAuth(errorMsg) {
       </form>
       <p class="hint" id="login-hint">${loginTab === 'student'
         ? 'Ask your school admin for your password if you don\'t have one yet.'
+        : loginTab === 'parent'
+        ? 'Ask your child\'s school admin for your password if you don\'t have one yet.'
         : 'First time here? Ask your admin to set up your account.'}</p>
       <p class="hint">New school? <a href="#" id="go-signup">Create your school's account</a></p>
     </div></div>
@@ -172,6 +179,7 @@ export function renderAuth(errorMsg) {
 
   $('#tab-staff').onclick = () => { loginTab = 'staff'; renderAuth(); };
   $('#tab-student').onclick = () => { loginTab = 'student'; renderAuth(); };
+  $('#tab-parent').onclick = () => { loginTab = 'parent'; renderAuth(); };
   $('#login-form').onsubmit = doLogin;
   $('#go-signup').onclick = (e) => { e.preventDefault(); renderSignup(); };
 
@@ -190,7 +198,9 @@ async function doLogin(e) {
   const btn = $('#login-btn'); btn.disabled = true; btn.textContent = 'Signing in…';
   const code = $('#login-code').value;
   const id = $('#login-id').value, pw = $('#login-pw').value;
-  const res = loginTab === 'student' ? await loginStudent(id, pw, code) : await loginStaff(id, pw, code);
+  const res = loginTab === 'student' ? await loginStudent(id, pw, code)
+    : loginTab === 'parent' ? await loginParent(id, pw, code)
+    : await loginStaff(id, pw, code);
   if (!res.ok) { lastSchoolCode = code; renderAuth(res.message || 'Sign in failed.'); return; }
   await bootApp();
   return false;
@@ -308,10 +318,14 @@ const NAV = {
       { route: 'broadsheet', label: 'Mark List' },
       { route: 'reports', label: 'Report Forms' }
     ] },
+    { section: 'Daily' },
+    { route: 'attendance', label: 'Attendance', ico: '🗓️' },
+    { route: 'messaging', label: 'Messaging', ico: '💬' },
     { section: 'Configuration' },
     { route: 'academic-calendar', label: 'Academic Calendar', ico: '📅' },
     { route: 'settings', label: 'School Settings', ico: '⚙️' },
-    { route: 'users', label: 'User Accounts', ico: '🔐' }
+    { route: 'users', label: 'User Accounts', ico: '🔐' },
+    { route: 'parent-accounts', label: 'Parent Accounts', ico: '👨‍👩‍👧' }
   ],
   teacher: [
     { route: 'dashboard', label: 'Dashboard', ico: '🏠' },
@@ -320,6 +334,9 @@ const NAV = {
       { route: 'students', label: 'All Students' },
       { route: 'bulk-upload', label: 'Bulk Upload' }
     ] },
+    { section: 'Daily' },
+    { route: 'attendance', label: 'Attendance', ico: '🗓️' },
+    { route: 'messaging', label: 'Messaging', ico: '💬' },
     { section: 'Assessment' },
     { parent: 'Exams', ico: '📝', children: [
       { route: 'exams', label: 'Exams' },
@@ -333,6 +350,9 @@ const NAV = {
   ],
   student: [
     { route: 'my-results', label: 'My Results', ico: '🧾' }
+  ],
+  parent: [
+    { route: 'my-children', label: 'My Children', ico: '👨‍👩‍👧' }
   ]
 };
 
@@ -398,7 +418,11 @@ const ROUTES = {
   'class-list': viewClassList,
   'my-results': viewMyResults,
   'settings': viewSettings,
-  'users': viewUsers
+  'users': viewUsers,
+  'attendance': viewAttendance,
+  'messaging': viewMessaging,
+  'parent-accounts': viewParentAccounts,
+  'my-children': viewMyChildren
 };
 
 async function router() {
@@ -421,7 +445,11 @@ async function router() {
     view.innerHTML = `<div class="card pad">⚠️ Something went wrong loading this page: ${esc(e.message || e)}</div>`;
   }
 }
-function defaultRoute() { return state.profile.role === 'student' ? 'my-results' : 'dashboard'; }
+function defaultRoute() {
+  if (state.profile.role === 'student') return 'my-results';
+  if (state.profile.role === 'parent') return 'my-children';
+  return 'dashboard';
+}
 
 /* ============================================================================
  * APP object (topbar / sidebar / boot)
@@ -478,7 +506,7 @@ async function bootApp() {
   buildNav();
   $('#avatar').textContent = initials(state.profile.name);
   $('#um-name').textContent = state.profile.name;
-  $('#um-role').textContent = ({ admin: 'Administrator', teacher: 'Teacher / Staff', student: 'Student' })[state.profile.role] || state.profile.role;
+  $('#um-role').textContent = ({ admin: 'Administrator', teacher: 'Teacher / Staff', student: 'Student', parent: 'Parent' })[state.profile.role] || state.profile.role;
   if (state.settings && state.settings.school_name) $('#brand-school').textContent = state.settings.school_name;
 
   Db.dashboard.getActiveContext().then((active) => {

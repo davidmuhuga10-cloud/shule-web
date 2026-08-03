@@ -129,6 +129,15 @@ table.data td.num,table.data th.num{text-align:center}
 .badge.amber{background:var(--warn-bg);color:var(--warn)}.badge.blue{background:#e7f0fe;color:#2563eb}
 .badge.red{background:var(--danger-bg);color:var(--danger)}
 
+/* ---------- Status buttons (attendance marking) ---------- */
+.status-btn{border:1px solid var(--line);background:#fff;color:var(--muted);padding:6px 12px;border-radius:7px;
+  font-size:12px;font-weight:650;cursor:pointer;font-family:inherit;white-space:nowrap}
+.status-btn:hover{background:#fafbfc}
+.status-btn.on.green{background:var(--ok-bg);color:var(--ok);border-color:transparent}
+.status-btn.on.red{background:var(--danger-bg);color:var(--danger);border-color:transparent}
+.status-btn.on.amber{background:var(--warn-bg);color:var(--warn);border-color:transparent}
+.status-btn.on.blue{background:#e7f0fe;color:#2563eb;border-color:transparent}
+
 /* ---------- Empty states ---------- */
 .empty{text-align:center;padding:46px 24px;color:var(--muted)}
 .empty .e-ico{font-size:44px;margin-bottom:14px;opacity:.8}

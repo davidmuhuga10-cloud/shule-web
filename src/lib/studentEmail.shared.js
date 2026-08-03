@@ -28,7 +28,9 @@
   }
 })(typeof self !== 'undefined' ? self : this, function () {
   var STUDENT_EMAIL_DOMAIN_SUFFIX = 'students.shule.internal';
+  var PARENT_EMAIL_DOMAIN_SUFFIX = 'parents.shule.internal';
   var DEFAULT_TEACHER_PASSWORD = 'teacher123';
+  var DEFAULT_PARENT_PASSWORD = 'parent123';
 
   function slugify(v, fallback) {
     var slug = String(v || '')
@@ -60,10 +62,30 @@
     return 'student-' + String(admissionNo || '').trim();
   }
 
+  /**
+   * Same multi-tenancy problem as studentEmailFor: a parent's phone number is
+   * only unique WITHIN a school (or may not even be — the same guardian
+   * phone can appear on more than one student), so the school's code is
+   * folded into the synthetic login the same way. Two different parents at
+   * two different schools who both typed "0712345678" at signup still get
+   * distinct logins.
+   */
+  function parentEmailFor(phone, schoolCode) {
+    var phoneSlug = slugify(phone, 'parent');
+    var codeSlug = slugify(schoolCode, '');
+    if (!codeSlug) {
+      throw new Error('parentEmailFor() requires a school code — every school shares this one Supabase project, so the code is what keeps phone numbers from colliding across schools.');
+    }
+    return phoneSlug + '@' + codeSlug + '.' + PARENT_EMAIL_DOMAIN_SUFFIX;
+  }
+
   return {
     studentEmailFor: studentEmailFor,
     studentPasswordFor: studentPasswordFor,
+    parentEmailFor: parentEmailFor,
     DEFAULT_TEACHER_PASSWORD: DEFAULT_TEACHER_PASSWORD,
-    STUDENT_EMAIL_DOMAIN_SUFFIX: STUDENT_EMAIL_DOMAIN_SUFFIX
+    DEFAULT_PARENT_PASSWORD: DEFAULT_PARENT_PASSWORD,
+    STUDENT_EMAIL_DOMAIN_SUFFIX: STUDENT_EMAIL_DOMAIN_SUFFIX,
+    PARENT_EMAIL_DOMAIN_SUFFIX: PARENT_EMAIL_DOMAIN_SUFFIX
   };
 });
