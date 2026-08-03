@@ -30,11 +30,15 @@ export function createStaffApi(supabase) {
       const fullName = String(payload.full_name || '').trim();
       const email = String(payload.email || '').trim().toLowerCase();
       if (!fullName) return err('Full name is required.');
-      if (!email) return err('Email is required (used to sign in).');
+      // Email is optional now — sign-in uses a username (first name) or
+      // phone number instead, auto-assigned when the login is provisioned.
+      // A real email is just an optional contact detail.
 
-      const { data: existing } = await supabase.from('staff').select('id').eq('email', email);
-      const dup = (existing || []).find((r) => String(r.id) !== String(payload.id || ''));
-      if (dup) return err(`A staff member with email "${email}" already exists.`);
+      if (email) {
+        const { data: existing } = await supabase.from('staff').select('id').eq('email', email);
+        const dup = (existing || []).find((r) => String(r.id) !== String(payload.id || ''));
+        if (dup) return err(`A staff member with email "${email}" already exists.`);
+      }
 
       const rec = {
         full_name: fullName,

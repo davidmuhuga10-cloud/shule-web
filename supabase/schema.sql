@@ -227,6 +227,14 @@ create table public.profiles (
   school_id uuid not null references public.schools(id) on delete cascade,
   name text not null,
   email text,
+  -- 'username' (first-name-based, e.g. "mercy") and 'phone' are the two
+  -- alternate sign-in handles for admin/teacher accounts — see
+  -- resolve_staff_login_email() below and studentEmail.shared.js's
+  -- staffUsernameFor(). Both nullable (students/parents don't use them —
+  -- students are frozen on admission-number login, parents sign in with
+  -- their phone folded directly into their synthetic email instead).
+  username text,
+  phone text,
   role user_role not null default 'student',
   staff_id uuid references public.staff(id) on delete set null,
   student_id uuid references public.students(id) on delete set null,
@@ -237,6 +245,10 @@ create table public.profiles (
 create trigger trg_profiles_updated_at before update on public.profiles
   for each row execute function public.set_updated_at();
 create index idx_profiles_school on public.profiles(school_id);
+-- Partial (WHERE ... IS NOT NULL) so students/parents, which never set these,
+-- don't collide with each other on a shared "null = null" uniqueness check.
+create unique index idx_profiles_username_per_school on public.profiles(school_id, username) where username is not null;
+create unique index idx_profiles_phone_per_school on public.profiles(school_id, phone) where phone is not null;
 
 -- role/scope/tenant helpers — security definer so they can read profiles
 -- regardless of the calling row's RLS (avoids recursive-policy problems on
@@ -681,6 +693,39 @@ begin
 end;
 $$;
 grant execute on function public.get_school_public_info(text) to anon, authenticated;
+
+-- ============================================================================
+-- resolve_staff_login_email RPC — the second anonymous-safe read. An admin or
+-- teacher signs in with EITHER their assigned username ("mercy") or their
+-- phone number, folded with their School Code into one field at the login
+-- screen (e.g. "mercy@tumaini" or "0712345678@tumaini") — see
+-- studentEmail.shared.js's splitLoginUsername(). Since the actual Supabase
+-- Auth email is a server-generated synthetic address the person never sees
+-- (built from their assigned username, not necessarily what they just
+-- typed), the frontend has no way to construct it itself the way it can for
+-- students/parents — it has to ask. This function is deliberately narrow:
+-- given an identifier + school code, it returns ONLY the matching synthetic
+-- email (or null), for an active admin/teacher account, and nothing else —
+-- no name, no role, no way to enumerate who exists at a school.
+-- ============================================================================
+create or replace function public.resolve_staff_login_email(p_school_code text, p_identifier text)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.email
+  from public.profiles p
+  join public.schools s on s.id = p.school_id
+  where s.code = lower(trim(coalesce(p_school_code, '')))
+    and s.status = 'active'
+    and p.role in ('admin', 'teacher')
+    and p.status = 'active'
+    and (p.username = lower(trim(coalesce(p_identifier, ''))) or p.phone = trim(coalesce(p_identifier, '')))
+  limit 1;
+$$;
+grant execute on function public.resolve_staff_login_email(text, text) to anon, authenticated;
 
 -- ============================================================================
 -- seed_school_defaults RPC — populates a brand-new school with the same CBC

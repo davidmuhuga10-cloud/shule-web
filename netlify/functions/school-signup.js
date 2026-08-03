@@ -12,9 +12,10 @@
  * an existing session, because there is no admin yet for a school that
  * doesn't exist yet. Every safeguard below exists because of that:
  *   - the School Code must be unique, url/email-safe, and not already taken
- *   - the admin's email must not already have a Supabase Auth login (the
- *     platform-wide uniqueness constraint every synthetic/staff email is
- *     subject to — see studentEmail.shared.js's multi-tenancy note)
+ *   - the admin signs in with a username (their first name) or phone number
+ *     plus the School Code — not a real email — same as every other
+ *     admin/teacher (see studentEmail.shared.js's staffEmailFor). A brand
+ *     new school has no other accounts yet, so this can't collide.
  *   - on any failure partway through, everything already created is rolled
  *     back (auth user, then school row) so a failed signup never leaves an
  *     orphaned half-created tenant behind
@@ -31,6 +32,7 @@
  */
 
 const { getAdminClient } = require('./_lib/supabaseAdmin');
+const { staffUsernameFor, staffEmailFor } = require('./_lib/studentLogin');
 
 function json(statusCode, body) {
   return { statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
@@ -70,13 +72,13 @@ exports.handler = async (event) => {
 async function createSchoolAndAdmin(admin, payload) {
   const schoolName = String(payload.school_name || '').trim();
   const adminName = String(payload.admin_name || '').trim();
-  const adminEmail = String(payload.admin_email || '').trim().toLowerCase();
+  const adminPhone = String(payload.admin_phone || '').trim();
   const password = String(payload.password || '');
   let code = slugifyCode(payload.school_code);
 
   if (!schoolName || schoolName.length < 2) return { ok: false, message: 'Enter your school\'s name.' };
   if (!adminName) return { ok: false, message: 'Enter your (the admin\'s) full name.' };
-  if (!adminEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) return { ok: false, message: 'Enter a valid admin email address.' };
+  if (!adminPhone || adminPhone.length < 7) return { ok: false, message: 'Enter your (the admin\'s) phone number.' };
   if (password.length < 6) return { ok: false, message: 'Password must be at least 6 characters.' };
   if (!code || code.length < 3) return { ok: false, message: 'School Code must be at least 3 characters (letters, numbers, hyphens only).' };
 
@@ -96,6 +98,13 @@ async function createSchoolAndAdmin(admin, payload) {
     return { ok: false, message: 'Could not create the school: ' + schoolErr.message };
   }
 
+  // The admin signs in with a username (their first name) or phone number,
+  // combined with the School Code — not a real email address (see
+  // resolve_staff_login_email() in schema.sql). A brand-new school has no
+  // other profiles yet, so the first-name username can't collide here.
+  const username = staffUsernameFor(adminName);
+  const adminEmail = staffEmailFor(username, code);
+
   // Then the admin's Auth account + profile. If either fails, remove the
   // school row we just created so a failed signup never leaves an orphan.
   const { data: created, error: createErr } = await admin.auth.admin.createUser({
@@ -106,15 +115,12 @@ async function createSchoolAndAdmin(admin, payload) {
   });
   if (createErr) {
     await admin.from('schools').delete().eq('id', school.id);
-    const msg = /already.*registered|already.*exists/i.test(createErr.message || '')
-      ? 'That admin email is already in use on Shule (by this or another school). Please use a different email.'
-      : 'Could not create the admin login: ' + createErr.message;
-    return { ok: false, message: msg };
+    return { ok: false, message: 'Could not create the admin login: ' + createErr.message };
   }
 
   const { error: profileErr } = await admin
     .from('profiles')
-    .insert({ id: created.user.id, school_id: school.id, name: adminName, email: adminEmail, role: 'admin', status: 'active' });
+    .insert({ id: created.user.id, school_id: school.id, name: adminName, email: adminEmail, username, phone: adminPhone, role: 'admin', status: 'active' });
   if (profileErr) {
     await admin.auth.admin.deleteUser(created.user.id);
     await admin.from('schools').delete().eq('id', school.id);
@@ -134,7 +140,7 @@ async function createSchoolAndAdmin(admin, payload) {
     ok: true,
     school_code: school.code,
     school_name: school.name,
-    admin_email: adminEmail,
+    username,
     seeded: !seedErr
   };
 }

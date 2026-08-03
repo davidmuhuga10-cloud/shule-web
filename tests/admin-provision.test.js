@@ -8,7 +8,7 @@
  * happy path AND the cross-tenant rejection cases, since a bug there would
  * be a real privilege-escalation hole (service_role bypasses RLS entirely).
  */
-const { studentEmailFor, studentPasswordFor, parentEmailFor, DEFAULT_TEACHER_PASSWORD, DEFAULT_PARENT_PASSWORD } =
+const { studentEmailFor, studentPasswordFor, parentEmailFor, staffUsernameFor, staffEmailFor, DEFAULT_TEACHER_PASSWORD, DEFAULT_PARENT_PASSWORD } =
   require('../netlify/functions/_lib/studentLogin.js');
 const { requireAdmin } = require('../netlify/functions/_lib/supabaseAdmin.js');
 const {
@@ -29,7 +29,7 @@ function mockAdmin(opts) {
   opts = opts || {};
   const tables = {
     profiles: [],
-    students: [{ id: 'stu-1', admission_no: '5' }],
+    students: [{ id: 'stu-1', admission_no: '5', school_id: SCHOOL_A }],
     schools: [{ id: SCHOOL_A, code: 'alpha', name: 'Alpha School' }, { id: SCHOOL_B, code: 'beta', name: 'Beta School' }],
     ...opts.tables
   };
@@ -42,10 +42,19 @@ function mockAdmin(opts) {
       _filters: [],
       select() { return this; },
       eq(col, val) { this._filters.push([col, val]); return this; },
+      limit() { return this; }, // no-op, matches real supabase-js chain shape
       async maybeSingle() {
         const rows = tables[table] || [];
         const hit = rows.find(r => this._filters.every(([c, v]) => String(r[c]) === String(v)));
         return { data: hit || null, error: null };
+      },
+      // Fallback list-fetch: awaiting the chain directly (no .maybeSingle()/
+      // .single()) resolves to every matching row — e.g. findAvailableUsername's
+      // `await admin.from('profiles').select('username').eq('school_id', id)`.
+      then(resolve, reject) {
+        const rows = tables[table] || [];
+        const hits = rows.filter(r => this._filters.every(([c, v]) => String(r[c]) === String(v)));
+        return Promise.resolve({ data: hits, error: null }).then(resolve, reject);
       },
       async insert(obj) {
         if (opts.forceInsertError && table === 'profiles') {
@@ -209,21 +218,71 @@ function mockAdmin(opts) {
     check('createStudentLogin rolls back the auth user when the profile insert fails', res.ok === false && deleteCalled === true);
   }
 
+  // ---- staffUsernameFor / staffEmailFor --------------------------------------
+  check('staffUsernameFor takes the lowercased first name', staffUsernameFor('Mercy Njeri') === 'mercy');
+  check('staffEmailFor folds username + school code', staffEmailFor('mercy', 'alpha') === 'mercy@alpha.staff.shule.internal');
+  check('staffEmailFor keeps two schools\' identical usernames distinct', staffEmailFor('mercy', 'alpha') !== staffEmailFor('mercy', 'beta'));
+  check('staffEmailFor throws without a school code', (() => {
+    try { staffEmailFor('mercy'); return false; } catch (e) { return true; }
+  })());
+
   // ---- createStaffLogin -----------------------------------------------------
+  // Staff logins no longer require (or even accept) an email — sign-in is by
+  // username (first name) or phone number, both derived/assigned server-side.
   {
     const admin = mockAdmin();
-    const res = await createStaffLogin(admin, { staff_id: 'staff-1', email: 'teacher@test.school', full_name: 'Mr Teacher', role: 'teacher' }, SCHOOL_A);
+    const res = await createStaffLogin(admin, { staff_id: 'staff-1', full_name: 'Mercy Njeri', role: 'teacher', phone: '0712345678' }, SCHOOL_A);
     check('createStaffLogin succeeds', res.ok === true);
+    check('createStaffLogin assigns a first-name username', res.username === 'mercy');
     check('createStaffLogin defaults password to teacher123', res.defaultPassword === 'teacher123');
     const profile = admin._tables.profiles.find(p => p.staff_id === 'staff-1');
-    check('createStaffLogin tags admin-flagged staff correctly', profile && profile.role === 'teacher');
+    check('createStaffLogin tags teacher-role staff correctly', profile && profile.role === 'teacher');
     check('createStaffLogin stamps the profile with the caller\'s school_id', profile.school_id === SCHOOL_A);
+    check('createStaffLogin uses the school-scoped synthetic email', profile.email === 'mercy@alpha.staff.shule.internal');
+    check('createStaffLogin carries the phone number onto the profile', profile.phone === '0712345678');
   }
   {
     const admin = mockAdmin();
-    const res = await createStaffLogin(admin, { staff_id: 'staff-2', email: 'head@test.school', full_name: 'Head Teacher', role: 'admin' }, SCHOOL_A);
+    const res = await createStaffLogin(admin, { staff_id: 'staff-2', full_name: 'Head Teacher', role: 'admin' }, SCHOOL_A);
     const profile = admin._tables.profiles.find(p => p.staff_id === 'staff-2');
     check('createStaffLogin can provision an admin-role staff account', profile && profile.role === 'admin');
+    check('createStaffLogin phone is optional (null when not provided)', profile.phone === null);
+  }
+  {
+    // Two staff members sharing a first name at the SAME school must get
+    // distinct usernames — "mercy", then "mercy2".
+    const admin = mockAdmin();
+    const first = await createStaffLogin(admin, { staff_id: 'staff-a', full_name: 'Mercy Njeri', role: 'teacher' }, SCHOOL_A);
+    const second = await createStaffLogin(admin, { staff_id: 'staff-b', full_name: 'Mercy Otieno', role: 'teacher' }, SCHOOL_A);
+    check('createStaffLogin gives the first "Mercy" the plain username', first.username === 'mercy');
+    check('createStaffLogin gives a colliding "Mercy" a numeric suffix', second.username === 'mercy2');
+  }
+  {
+    // Same first name, but at a DIFFERENT school — must not collide, and both get the plain username.
+    const admin = mockAdmin();
+    const a = await createStaffLogin(admin, { staff_id: 'staff-a', full_name: 'Mercy Njeri', role: 'teacher' }, SCHOOL_A);
+    const b = await createStaffLogin(admin, { staff_id: 'staff-b', full_name: 'Mercy Otieno', role: 'teacher' }, SCHOOL_B);
+    check('createStaffLogin keeps the same first name distinct across schools', a.username === 'mercy' && b.username === 'mercy');
+  }
+  {
+    // Idempotency: calling twice for the same staff_id, in the SAME school, must not create a duplicate.
+    const admin = mockAdmin();
+    await createStaffLogin(admin, { staff_id: 'staff-1', full_name: 'Mercy Njeri', role: 'teacher' }, SCHOOL_A);
+    const res = await createStaffLogin(admin, { staff_id: 'staff-1', full_name: 'Mercy Njeri', role: 'teacher' }, SCHOOL_A);
+    check('createStaffLogin is idempotent for an already-provisioned staff_id', res.ok === true && res.alreadyProvisioned === true);
+  }
+  {
+    const admin = mockAdmin();
+    const res = await createStaffLogin(admin, { staff_id: 'staff-1' }, SCHOOL_A);
+    check('createStaffLogin validates required fields (full_name)', res.ok === false);
+  }
+  {
+    const admin = mockAdmin({ forceInsertError: true });
+    let deleteCalled = false;
+    const origDelete = admin.auth.admin.deleteUser;
+    admin.auth.admin.deleteUser = async (id) => { deleteCalled = true; return origDelete(id); };
+    const res = await createStaffLogin(admin, { staff_id: 'staff-9', full_name: 'Rollback Teacher', role: 'teacher' }, SCHOOL_A);
+    check('createStaffLogin rolls back the auth user when the profile insert fails', res.ok === false && deleteCalled === true);
   }
 
   // ---- parentEmailFor -------------------------------------------------------
@@ -235,43 +294,51 @@ function mockAdmin(opts) {
   check('DEFAULT_PARENT_PASSWORD meets 6-char floor', DEFAULT_PARENT_PASSWORD.length >= 6);
 
   // ---- createParentLogin -----------------------------------------------------
+  // A parent's password is now their linked child's admission number (not a
+  // generic fixed default), so every call must supply a student_id up front.
   {
     const admin = mockAdmin();
-    const res = await createParentLogin(admin, { full_name: 'Jane Parent', phone: '0712345678' }, SCHOOL_A);
+    const res = await createParentLogin(admin, { full_name: 'Jane Parent', phone: '0712345678', student_id: 'stu-1' }, SCHOOL_A);
     check('createParentLogin succeeds', res.ok === true);
     check('createParentLogin uses the school-scoped synthetic email', res.email === '0712345678@alpha.parents.shule.internal');
-    check('createParentLogin uses the fixed default password', res.defaultPassword === DEFAULT_PARENT_PASSWORD);
+    check('createParentLogin uses the linked child\'s admission number as the password', res.defaultPassword === studentPasswordFor('5'));
     const profile = admin._tables.profiles.find(p => p.email === res.email);
     check('createParentLogin inserts a linked profile row with role parent', profile && profile.role === 'parent');
     check('createParentLogin stamps the profile with the caller\'s school_id', profile.school_id === SCHOOL_A);
-    check('createParentLogin does not set a staff_id or student_id (linking happens separately)', !profile.staff_id && !profile.student_id);
+    check('createParentLogin does not set a staff_id or student_id on the profile itself (parent_links handles that)', !profile.staff_id && !profile.student_id);
   }
   {
     // Idempotency: calling twice for the same phone, in the SAME school, must not create a duplicate.
     const admin = mockAdmin();
-    await createParentLogin(admin, { full_name: 'Jane Parent', phone: '0712345678' }, SCHOOL_A);
-    const res = await createParentLogin(admin, { full_name: 'Jane Parent', phone: '0712345678' }, SCHOOL_A);
+    await createParentLogin(admin, { full_name: 'Jane Parent', phone: '0712345678', student_id: 'stu-1' }, SCHOOL_A);
+    const res = await createParentLogin(admin, { full_name: 'Jane Parent', phone: '0712345678', student_id: 'stu-1' }, SCHOOL_A);
     check('createParentLogin is idempotent for an already-provisioned phone', res.ok === true && res.alreadyProvisioned === true);
     check('createParentLogin did not insert a second profile', admin._tables.profiles.filter(p => p.role === 'parent').length === 1);
   }
   {
     // Same phone number, but a DIFFERENT school — must not collide.
-    const admin = mockAdmin();
-    await createParentLogin(admin, { full_name: 'Jane Parent', phone: '0712345678' }, SCHOOL_A);
-    const res = await createParentLogin(admin, { full_name: 'Jane B Parent', phone: '0712345678' }, SCHOOL_B);
+    const admin = mockAdmin({ tables: { students: [{ id: 'stu-1', admission_no: '5', school_id: SCHOOL_A }, { id: 'stu-2', admission_no: '7', school_id: SCHOOL_B }] } });
+    await createParentLogin(admin, { full_name: 'Jane Parent', phone: '0712345678', student_id: 'stu-1' }, SCHOOL_A);
+    const res = await createParentLogin(admin, { full_name: 'Jane B Parent', phone: '0712345678', student_id: 'stu-2' }, SCHOOL_B);
     check('createParentLogin keeps the same phone number distinct across schools', res.ok === true && !res.alreadyProvisioned);
   }
   {
     const admin = mockAdmin();
-    const res = await createParentLogin(admin, { full_name: 'Jane Parent' }, SCHOOL_A);
-    check('createParentLogin validates required fields', res.ok === false);
+    const res = await createParentLogin(admin, { full_name: 'Jane Parent', phone: '0712345678' }, SCHOOL_A);
+    check('createParentLogin validates required fields (student_id)', res.ok === false);
+  }
+  {
+    // A student_id from a DIFFERENT school must be rejected, not silently used.
+    const admin = mockAdmin({ tables: { students: [{ id: 'stu-2', admission_no: '7', school_id: SCHOOL_B }] } });
+    const res = await createParentLogin(admin, { full_name: 'Jane Parent', phone: '0712345678', student_id: 'stu-2' }, SCHOOL_A);
+    check('createParentLogin refuses a student_id belonging to a different school', res.ok === false);
   }
   {
     const admin = mockAdmin({ forceInsertError: true });
     let deleteCalled = false;
     const origDelete = admin.auth.admin.deleteUser;
     admin.auth.admin.deleteUser = async (id) => { deleteCalled = true; return origDelete(id); };
-    const res = await createParentLogin(admin, { full_name: 'Rollback Parent', phone: '0799999999' }, SCHOOL_A);
+    const res = await createParentLogin(admin, { full_name: 'Rollback Parent', phone: '0799999999', student_id: 'stu-1' }, SCHOOL_A);
     check('createParentLogin rolls back the auth user when the profile insert fails', res.ok === false && deleteCalled === true);
   }
 
@@ -295,6 +362,31 @@ function mockAdmin(opts) {
     const admin = mockAdmin({ tables: { profiles: [{ id: 'p-teacher', role: 'teacher', school_id: SCHOOL_A }] } });
     const res = await resetPassword(admin, { profile_id: 'p-teacher', new_password: 'abc' }, SCHOOL_A);
     check('resetPassword enforces the 6-char minimum on an explicit password', res.ok === false);
+  }
+  {
+    // A parent's default reset password is their linked child's admission
+    // number — same rule as creation (see createParentLogin's comment).
+    const admin = mockAdmin({
+      tables: {
+        profiles: [{ id: 'p-parent', role: 'parent', school_id: SCHOOL_A }],
+        parent_links: [{ parent_profile_id: 'p-parent', student_id: 'stu-1' }],
+        students: [{ id: 'stu-1', admission_no: '5' }]
+      }
+    });
+    const res = await resetPassword(admin, { profile_id: 'p-parent' }, SCHOOL_A);
+    check('resetPassword regenerates a parent\'s password from their linked child\'s admission number', res.ok === true && res.defaultPassword === 'student-5');
+  }
+  {
+    // A parent with no link yet (edge case) must not throw — falls back to
+    // studentPasswordFor('') rather than crashing.
+    const admin = mockAdmin({
+      tables: {
+        profiles: [{ id: 'p-parent-unlinked', role: 'parent', school_id: SCHOOL_A }],
+        parent_links: []
+      }
+    });
+    const res = await resetPassword(admin, { profile_id: 'p-parent-unlinked' }, SCHOOL_A);
+    check('resetPassword does not crash on an unlinked parent', res.ok === true);
   }
   {
     const admin = mockAdmin({ tables: { profiles: [] } });

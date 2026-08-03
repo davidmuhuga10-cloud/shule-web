@@ -18,7 +18,7 @@ export function createUsersApi(supabase, callAdminFunction) {
     async list() {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, name, email, role, status, staff_id, student_id')
+        .select('id, name, email, username, phone, role, status, staff_id, student_id')
         .order('name', { ascending: true });
       if (error) return err(error.message);
       return ok(data || []);
@@ -29,9 +29,9 @@ export function createUsersApi(supabase, callAdminFunction) {
       return callAdminFunction('create_student', { student_id, admission_no, full_name });
     },
 
-    async provisionStaffLogin({ staff_id, email, full_name, role }) {
-      if (!staff_id || !email || !full_name) return err('Missing staff details for login provisioning.');
-      return callAdminFunction('create_staff', { staff_id, email, full_name, role });
+    async provisionStaffLogin({ staff_id, full_name, role, phone }) {
+      if (!staff_id || !full_name) return err('Missing staff details for login provisioning.');
+      return callAdminFunction('create_staff', { staff_id, full_name, role, phone });
     },
 
     async resetPassword(profileId, newPassword) {

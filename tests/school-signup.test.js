@@ -4,6 +4,12 @@
  * whole backend — it creates a brand-new tenant — so these tests lean
  * heavily on: validation, code-uniqueness, and rollback-on-partial-failure
  * (never leave an orphaned school/auth-user behind).
+ *
+ * The signing-up admin gives their PHONE number, not an email — same
+ * username/phone login pattern every other admin/teacher account uses (see
+ * PRODUCT_ROADMAP.md's login-UX notes / studentEmail.shared.js's
+ * staffUsernameFor/staffEmailFor). A brand-new school has no other profiles
+ * yet, so the first-name-derived username can never collide at signup time.
  */
 const { createSchoolAndAdmin, slugifyCode } = require('../netlify/functions/school-signup.js');
 
@@ -107,22 +113,32 @@ function mockAdmin(opts) {
   // ---- validation --------------------------------------------------------
   {
     const admin = mockAdmin();
-    const res = await createSchoolAndAdmin(admin, { school_name: '', school_code: 'x', admin_name: 'A', admin_email: 'a@b.com', password: 'abcdef' });
+    const res = await createSchoolAndAdmin(admin, { school_name: '', school_code: 'x', admin_name: 'A', admin_phone: '0712345678', password: 'abcdef' });
     check('rejects missing school name', res.ok === false);
   }
   {
     const admin = mockAdmin();
-    const res = await createSchoolAndAdmin(admin, { school_name: 'Test School', school_code: 'test', admin_name: 'A', admin_email: 'not-an-email', password: 'abcdef' });
-    check('rejects an invalid admin email', res.ok === false);
+    const res = await createSchoolAndAdmin(admin, { school_name: 'Test School', school_code: 'test', admin_name: '', admin_phone: '0712345678', password: 'abcdef' });
+    check('rejects missing admin name', res.ok === false);
   }
   {
     const admin = mockAdmin();
-    const res = await createSchoolAndAdmin(admin, { school_name: 'Test School', school_code: 'test', admin_name: 'A', admin_email: 'a@b.com', password: '123' });
+    const res = await createSchoolAndAdmin(admin, { school_name: 'Test School', school_code: 'test', admin_name: 'A', admin_phone: '123', password: 'abcdef' });
+    check('rejects a too-short admin phone number', res.ok === false);
+  }
+  {
+    const admin = mockAdmin();
+    const res = await createSchoolAndAdmin(admin, { school_name: 'Test School', school_code: 'test', admin_name: 'A', admin_phone: '', password: 'abcdef' });
+    check('rejects a missing admin phone number', res.ok === false);
+  }
+  {
+    const admin = mockAdmin();
+    const res = await createSchoolAndAdmin(admin, { school_name: 'Test School', school_code: 'test', admin_name: 'A', admin_phone: '0712345678', password: '123' });
     check('rejects a too-short password', res.ok === false);
   }
   {
     const admin = mockAdmin();
-    const res = await createSchoolAndAdmin(admin, { school_name: 'Test School', school_code: 'x', admin_name: 'A', admin_email: 'a@b.com', password: 'abcdef' });
+    const res = await createSchoolAndAdmin(admin, { school_name: 'Test School', school_code: 'x', admin_name: 'A', admin_phone: '0712345678', password: 'abcdef' });
     check('rejects a too-short school code', res.ok === false);
   }
 
@@ -131,14 +147,16 @@ function mockAdmin(opts) {
     const admin = mockAdmin();
     const res = await createSchoolAndAdmin(admin, {
       school_name: 'Greenhill Academy', school_code: 'Greenhill', admin_name: 'Jane Wanjiru',
-      admin_email: 'Jane@Greenhill.ac.ke', password: 'supersecret'
+      admin_phone: '0712345678', password: 'supersecret'
     });
     check('happy path succeeds', res.ok === true);
     check('school code is normalized to lowercase', res.school_code === 'greenhill');
-    check('admin email is normalized to lowercase', res.admin_email === 'jane@greenhill.ac.ke');
+    check('reports the auto-assigned username (first name)', res.username === 'jane');
     check('a schools row was created', admin._tables.schools.some(s => s.code === 'greenhill'));
-    const profile = admin._tables.profiles.find(p => p.email === 'jane@greenhill.ac.ke');
+    const profile = admin._tables.profiles.find(p => p.username === 'jane');
     check('an admin profile row was created and linked to the new school', profile && profile.role === 'admin' && profile.school_id);
+    check('the profile carries the admin\'s phone number', profile.phone === '0712345678');
+    check('the profile\'s login email is the synthetic username@schoolcode address, not a real email', profile.email === 'jane@greenhill.staff.shule.internal');
     check('seed_school_defaults was called for the new school', admin._rpcCalls.some(c => c.name === 'seed_school_defaults'));
     check('reports seeded:true on success', res.seeded === true);
   }
@@ -147,7 +165,7 @@ function mockAdmin(opts) {
   {
     const admin = mockAdmin({ tables: { schools: [{ id: 'existing', code: 'taken', name: 'Existing School' }] } });
     const res = await createSchoolAndAdmin(admin, {
-      school_name: 'New School', school_code: 'taken', admin_name: 'A', admin_email: 'a@b.com', password: 'abcdef'
+      school_name: 'New School', school_code: 'taken', admin_name: 'A', admin_phone: '0712345678', password: 'abcdef'
     });
     check('rejects an already-taken school code', res.ok === false && /already taken/i.test(res.message));
     check('did not create a second school row for a rejected duplicate code', admin._tables.schools.length === 1);
@@ -155,12 +173,11 @@ function mockAdmin(opts) {
 
   // ---- rollback: auth user creation fails after school row was created --------
   {
-    const admin = mockAdmin({ forceCreateUserError: 'duplicate key value violates unique constraint (already registered)' });
+    const admin = mockAdmin({ forceCreateUserError: 'some auth provisioning error' });
     const res = await createSchoolAndAdmin(admin, {
-      school_name: 'Rollback School', school_code: 'rollback1', admin_name: 'A', admin_email: 'dup@b.com', password: 'abcdef'
+      school_name: 'Rollback School', school_code: 'rollback1', admin_name: 'A', admin_phone: '0712345678', password: 'abcdef'
     });
     check('reports failure when the admin auth user cannot be created', res.ok === false);
-    check('friendly message for an already-registered email', /already in use/i.test(res.message));
     check('the orphaned school row was rolled back', admin._deletedSchoolIds.includes('school-1'));
     check('no profile was left behind', admin._tables.profiles.length === 0);
   }
@@ -169,7 +186,7 @@ function mockAdmin(opts) {
   {
     const admin = mockAdmin({ forceProfileInsertError: 'forced failure' });
     const res = await createSchoolAndAdmin(admin, {
-      school_name: 'Rollback School 2', school_code: 'rollback2', admin_name: 'A', admin_email: 'b@b.com', password: 'abcdef'
+      school_name: 'Rollback School 2', school_code: 'rollback2', admin_name: 'A', admin_phone: '0712345678', password: 'abcdef'
     });
     check('reports failure when the profile insert fails', res.ok === false);
     check('the orphaned auth user was deleted', admin._deletedUserIds.length === 1);
@@ -180,7 +197,7 @@ function mockAdmin(opts) {
   {
     const admin = mockAdmin({ forceSeedError: true });
     const res = await createSchoolAndAdmin(admin, {
-      school_name: 'Seed Fail School', school_code: 'seedfail', admin_name: 'A', admin_email: 'c@b.com', password: 'abcdef'
+      school_name: 'Seed Fail School', school_code: 'seedfail', admin_name: 'A', admin_phone: '0712345678', password: 'abcdef'
     });
     check('signup still succeeds even if default-data seeding fails', res.ok === true);
     check('reports seeded:false when seeding failed', res.seeded === false);

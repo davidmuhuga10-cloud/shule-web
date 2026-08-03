@@ -43,10 +43,13 @@ async function run() {
     let calledWith = null;
     const sb = createMockSupabase({});
     const api = createParentsApi(sb, async (action, payload) => { calledWith = { action, payload }; return { ok: true }; });
-    check('provision rejects missing name/phone', (await api.provision({})).ok === false);
-    const res = await api.provision({ full_name: 'Jane Parent', phone: '0712345678' });
+    check('provision rejects missing name/phone/student', (await api.provision({})).ok === false);
+    check('provision rejects missing student_id (name+phone alone are not enough anymore)',
+      (await api.provision({ full_name: 'Jane Parent', phone: '0712345678' })).ok === false);
+    const res = await api.provision({ full_name: 'Jane Parent', phone: '0712345678', student_id: 's1' });
     check('provision delegates to create_parent', res.ok === true && calledWith.action === 'create_parent');
-    check('provision passes through name and phone', calledWith.payload.full_name === 'Jane Parent' && calledWith.payload.phone === '0712345678');
+    check('provision passes through name, phone, and student_id',
+      calledWith.payload.full_name === 'Jane Parent' && calledWith.payload.phone === '0712345678' && calledWith.payload.student_id === 's1');
   }
 
   // ---- linkStudent / unlink -------------------------------------------------------

@@ -1,18 +1,23 @@
 /**
  * auth.js
  * ----------------------------------------------------------------------------
- * Session/login/logout, wrapping Supabase Auth. Staff sign in with their real
- * email; students sign in with their admission number, translated to a
- * synthetic internal address via window.ShuleStudentEmail (loaded separately,
- * see index.html) — the exact same rule the admin-provision Netlify function
- * uses to create the login in the first place.
+ * Session/login/logout, wrapping Supabase Auth. Students sign in with their
+ * admission number, translated to a synthetic internal address via
+ * window.ShuleStudentEmail (loaded separately, see index.html) — the exact
+ * same rule the admin-provision Netlify function uses to create the login in
+ * the first place. Admins/teachers sign in with a username (their first
+ * name) or their phone number; parents sign in with their phone number —
+ * both also folded into a synthetic address, but since the actual address is
+ * server-assigned (not directly derivable from what the person types, unlike
+ * a student's admission number), staff logins are resolved via the
+ * resolve_staff_login_email RPC rather than a pure client-side formula.
  *
  * MULTI-TENANCY: one Supabase project now serves every school, so a School
- * Code (see resolveSchoolByCode()) is required up front — both to translate
- * a student's admission number into the right synthetic email (two schools
- * can each have a student "23") and, after sign-in, to double-check the
- * account that just logged in actually belongs to the school the person
- * typed (a defence-in-depth guard on top of RLS, not a replacement for it).
+ * Code is required up front — both to translate an identifier into the right
+ * synthetic email/RPC lookup (two schools can each have a student "23", or a
+ * teacher named "Mercy") and, after sign-in, to double-check the account
+ * that just logged in actually belongs to the school the person typed (a
+ * defence-in-depth guard on top of RLS, not a replacement for it).
  * ----------------------------------------------------------------------------
  */
 import { supabase } from './supabaseClient.js';
@@ -32,6 +37,12 @@ export function parentEmailFor(phone, schoolCode) {
   return studentEmailHelper().parentEmailFor(phone, schoolCode);
 }
 
+/** Splits a combined "identifier@schoolcode" login field — see
+ *  studentEmail.shared.js's splitLoginUsername() for the full reasoning. */
+export function splitLoginUsername(combined) {
+  return studentEmailHelper().splitLoginUsername(combined);
+}
+
 /** Public, pre-auth lookup: does this School Code exist, and what's its name/logo/settings? */
 export async function resolveSchoolByCode(code) {
   const trimmed = String(code || '').trim();
@@ -42,12 +53,46 @@ export async function resolveSchoolByCode(code) {
   return { ok: true, school: data };
 }
 
-export async function loginStaff(email, password, schoolCode) {
-  const { data, error } = await supabase.auth.signInWithPassword({ email: String(email || '').trim(), password });
+/**
+ * identifier is a username ("mercy") OR a phone number ("0712345678") — the
+ * caller doesn't need to know which, since both are resolved the same way.
+ * Unlike students/parents, the actual Supabase Auth email can't be derived
+ * client-side (it's a server-assigned username, not necessarily what was
+ * just typed), so it has to be looked up via the resolve_staff_login_email
+ * RPC first — see schema.sql for why that's still anonymous-safe.
+ */
+export async function loginStaff(identifier, password, schoolCode) {
+  if (!String(schoolCode || '').trim()) return { ok: false, message: 'Enter your School Code.' };
+  const trimmedId = String(identifier || '').trim();
+  if (!trimmedId) return { ok: false, message: 'Enter your username or phone number.' };
+
+  const { data: email, error: resolveErr } = await supabase.rpc('resolve_staff_login_email', {
+    p_school_code: schoolCode, p_identifier: trimmedId
+  });
+  if (resolveErr || !email) return { ok: false, message: 'Incorrect username/phone or password.' };
+
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) return { ok: false, message: friendlyAuthError(error) };
   const guard = await verifySchoolMatch(schoolCode);
   if (!guard.ok) { await supabase.auth.signOut(); return guard; }
   return { ok: true, session: data.session };
+}
+
+/** Used right after self-serve school signup, where the frontend already
+ *  knows the freshly-created username directly from the signup response —
+ *  no need to round-trip through the RPC lookup for an account that was
+ *  just created a second ago. */
+export async function loginStaffByUsername(username, password, schoolCode) {
+  const email = staffEmailFor(username, schoolCode);
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) return { ok: false, message: friendlyAuthError(error) };
+  const guard = await verifySchoolMatch(schoolCode);
+  if (!guard.ok) { await supabase.auth.signOut(); return guard; }
+  return { ok: true, session: data.session };
+}
+
+function staffEmailFor(username, schoolCode) {
+  return studentEmailHelper().staffEmailFor(username, schoolCode);
 }
 
 export async function loginStudent(admissionNo, password, schoolCode) {

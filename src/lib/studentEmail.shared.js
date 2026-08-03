@@ -29,6 +29,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   var STUDENT_EMAIL_DOMAIN_SUFFIX = 'students.shule.internal';
   var PARENT_EMAIL_DOMAIN_SUFFIX = 'parents.shule.internal';
+  var STAFF_EMAIL_DOMAIN_SUFFIX = 'staff.shule.internal';
   var DEFAULT_TEACHER_PASSWORD = 'teacher123';
   var DEFAULT_PARENT_PASSWORD = 'parent123';
 
@@ -79,13 +80,63 @@
     return phoneSlug + '@' + codeSlug + '.' + PARENT_EMAIL_DOMAIN_SUFFIX;
   }
 
+  /**
+   * A staff member's (admin or teacher) chosen sign-in handle — just their
+   * first name, lowercased (e.g. "Mercy Njeri" -> "mercy"). This is only the
+   * PROPOSED handle; the two schools sharing this Supabase project can each
+   * have their own "mercy", and even the SAME school could end up with two —
+   * the actual uniqueness check + "mercy2", "mercy3", ... fallback happens
+   * server-side (see admin-provision.js's createStaffLogin), where the
+   * existing usernames for that school can actually be queried.
+   */
+  function staffUsernameFor(fullName) {
+    var firstName = String(fullName || '').trim().split(/\s+/)[0] || '';
+    return slugify(firstName, 'staff');
+  }
+
+  /**
+   * Same multi-tenancy fold-in-the-school-code pattern as students/parents,
+   * but built from a server-assigned username rather than something the
+   * person typed themselves — see staffUsernameFor() above for why a school
+   * code alone isn't enough here (first names collide much more than
+   * admission numbers or phone numbers do).
+   */
+  function staffEmailFor(username, schoolCode) {
+    var userSlug = slugify(username, 'staff');
+    var codeSlug = slugify(schoolCode, '');
+    if (!codeSlug) {
+      throw new Error('staffEmailFor() requires a school code — every school shares this one Supabase project, so the code is what keeps usernames from colliding across schools.');
+    }
+    return userSlug + '@' + codeSlug + '.' + STAFF_EMAIL_DOMAIN_SUFFIX;
+  }
+
+  /**
+   * Splits what someone types at the login screen — "mercy@tumaini",
+   * "0712345678@tumaini" — into the identifier part (before the LAST '@')
+   * and the School Code part (after it). Used so the Staff/Admin and Parent
+   * login tabs can offer ONE combined field instead of a separate "School
+   * Code" box most people don't remember to fill in — see PRODUCT_ROADMAP.md
+   * Phase 1.5 notes. The Student tab is deliberately NOT changed to this
+   * pattern yet (frozen for now), so this helper isn't used there.
+   */
+  function splitLoginUsername(combined) {
+    var raw = String(combined || '').trim();
+    var at = raw.lastIndexOf('@');
+    if (at === -1) return { identifier: raw, schoolCode: '' };
+    return { identifier: raw.slice(0, at).trim(), schoolCode: raw.slice(at + 1).trim() };
+  }
+
   return {
     studentEmailFor: studentEmailFor,
     studentPasswordFor: studentPasswordFor,
     parentEmailFor: parentEmailFor,
+    staffUsernameFor: staffUsernameFor,
+    staffEmailFor: staffEmailFor,
+    splitLoginUsername: splitLoginUsername,
     DEFAULT_TEACHER_PASSWORD: DEFAULT_TEACHER_PASSWORD,
     DEFAULT_PARENT_PASSWORD: DEFAULT_PARENT_PASSWORD,
     STUDENT_EMAIL_DOMAIN_SUFFIX: STUDENT_EMAIL_DOMAIN_SUFFIX,
-    PARENT_EMAIL_DOMAIN_SUFFIX: PARENT_EMAIL_DOMAIN_SUFFIX
+    PARENT_EMAIL_DOMAIN_SUFFIX: PARENT_EMAIL_DOMAIN_SUFFIX,
+    STAFF_EMAIL_DOMAIN_SUFFIX: STAFF_EMAIL_DOMAIN_SUFFIX
   };
 });

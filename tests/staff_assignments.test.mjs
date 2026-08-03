@@ -11,9 +11,12 @@ async function run() {
     const sb = createMockSupabase({});
     const api = createStaffApi(sb);
     check('save rejects missing name', (await api.save({ email: 'a@b.com' })).ok === false);
-    check('save rejects missing email', (await api.save({ full_name: 'Mr Teacher' })).ok === false);
-    const created = await api.save({ full_name: 'Mr Teacher', email: 'Teacher@Test.School' });
-    check('save succeeds and lowercases the email', created.ok === true && created.data.email === 'teacher@test.school');
+    // Email is now optional — sign-in uses a username/phone assigned at
+    // login-provisioning time, not this contact-only field.
+    const noEmail = await api.save({ full_name: 'Mr Teacher' });
+    check('save succeeds without an email', noEmail.ok === true && noEmail.data.email === '');
+    const created = await api.save({ full_name: 'Mrs Teacher', email: 'Teacher@Test.School' });
+    check('save succeeds and lowercases the email when one is given', created.ok === true && created.data.email === 'teacher@test.school');
   }
   {
     const sb = createMockSupabase({ staff: [{ id: 'st1', full_name: 'Existing', email: 'existing@test.school' }] });

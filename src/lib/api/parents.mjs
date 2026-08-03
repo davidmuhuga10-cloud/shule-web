@@ -62,10 +62,12 @@ export function createParentsApi(supabase, callAdminFunction) {
       })));
     },
 
-    /** Create a parent's login. payload: { full_name, phone } */
-    async provision({ full_name, phone }) {
-      if (!full_name || !phone) return err('Parent name and phone number are required.');
-      return callAdminFunction('create_parent', { full_name, phone });
+    /** Create a parent's login. payload: { full_name, phone, student_id } —
+     *  a child must be chosen up front now, since the parent's password is
+     *  that child's admission number (not a generic default password). */
+    async provision({ full_name, phone, student_id }) {
+      if (!full_name || !phone || !student_id) return err('Parent name, phone number, and a child to link are required.');
+      return callAdminFunction('create_parent', { full_name, phone, student_id });
     },
 
     /** Link an already-provisioned parent account to one of their children.

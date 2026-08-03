@@ -47,8 +47,8 @@ function openStaffModal(root, existing) {
     body: `
       <div class="field"><label>Full name</label><input id="sf-name" value="${esc(existing ? existing.full_name : '')}"></div>
       <div class="grid2">
-        <div class="field"><label>Email (used to sign in)</label><input id="sf-email" type="email" value="${esc(existing ? existing.email : '')}"></div>
-        <div class="field"><label>Phone</label><input id="sf-phone" value="${esc(existing ? existing.phone || '' : '')}"></div>
+        <div class="field"><label>Phone${existing ? '' : ' (used to sign in, along with a username)'}</label><input id="sf-phone" value="${esc(existing ? existing.phone || '' : '')}"></div>
+        <div class="field"><label>Email (optional, contact only)</label><input id="sf-email" type="email" value="${esc(existing ? existing.email : '')}"></div>
       </div>
       <div class="grid2">
         <div class="field"><label>Job title</label><select id="sf-role">${options(titleChoices, 'id', 'name', existing ? existing.role : 'Teacher')}</select></div>
@@ -74,10 +74,10 @@ function openStaffModal(root, existing) {
       if (!existing) {
         const isAdmin = document.getElementById('sf-admin') && document.getElementById('sf-admin').checked;
         const prov = await Db.users.provisionStaffLogin({
-          staff_id: res.data.id, email: res.data.email, full_name: res.data.full_name, role: isAdmin ? 'admin' : 'teacher'
+          staff_id: res.data.id, full_name: res.data.full_name, role: isAdmin ? 'admin' : 'teacher', phone: res.data.phone
         });
-        if (prov && prov.ok && prov.defaultPassword) {
-          toast(`Staff saved. Login created — default password: ${prov.defaultPassword}`, 'ok');
+        if (prov && prov.ok && prov.username) {
+          toast(`Staff saved. Login created — username: ${prov.username}, default password: ${prov.defaultPassword}`, 'ok');
         } else {
           toast('Staff saved. (Login provisioning will be available once the Netlify function is deployed.)', 'warn');
         }

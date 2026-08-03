@@ -18,7 +18,7 @@
  */
 
 const { getAdminClient, requireAdmin } = require('./_lib/supabaseAdmin');
-const { studentEmailFor, studentPasswordFor, parentEmailFor, DEFAULT_TEACHER_PASSWORD, DEFAULT_PARENT_PASSWORD } = require('./_lib/studentLogin');
+const { studentEmailFor, studentPasswordFor, parentEmailFor, staffUsernameFor, staffEmailFor, DEFAULT_TEACHER_PASSWORD } = require('./_lib/studentLogin');
 
 function json(statusCode, body) {
   return {
@@ -120,10 +120,18 @@ async function createStudentLogin(admin, payload, schoolId) {
   return { ok: true, profile_id: created.user.id, email, defaultPassword: password };
 }
 
+/**
+ * Staff/admin accounts sign in with a short username (their first name, e.g.
+ * "mercy") or their phone number, combined with the School Code — NOT their
+ * real email — see splitLoginUsername() / resolve_staff_login_email() and
+ * the note at the top of PRODUCT_ROADMAP.md's login-UX section for why. The
+ * real email typed on the Staff form (if any) is kept only as contact info
+ * on the `staff` table; it plays no role in signing in.
+ */
 async function createStaffLogin(admin, payload, schoolId) {
-  const { staff_id, email, full_name, role } = payload;
-  if (!staff_id || !email || !full_name) {
-    return { ok: false, message: 'staff_id, email and full_name are required.' };
+  const { staff_id, full_name, role, phone } = payload;
+  if (!staff_id || !full_name) {
+    return { ok: false, message: 'staff_id and full_name are required.' };
   }
   const appRole = role === 'admin' ? 'admin' : 'teacher';
 
@@ -132,7 +140,14 @@ async function createStaffLogin(admin, payload, schoolId) {
     return { ok: true, alreadyProvisioned: true, profile_id: existing.id };
   }
 
+  const { data: school, error: schoolErr } = await admin
+    .from('schools').select('code').eq('id', schoolId).maybeSingle();
+  if (schoolErr || !school) return { ok: false, message: 'Could not resolve your school — please sign in again.' };
+
+  const username = await findAvailableUsername(admin, staffUsernameFor(full_name), schoolId);
+  const email = staffEmailFor(username, school.code);
   const password = DEFAULT_TEACHER_PASSWORD;
+
   const { data: created, error: createErr } = await admin.auth.admin.createUser({
     email,
     password,
@@ -143,29 +158,52 @@ async function createStaffLogin(admin, payload, schoolId) {
 
   const { error: profileErr } = await admin
     .from('profiles')
-    .insert({ id: created.user.id, school_id: schoolId, name: full_name, email, role: appRole, staff_id, status: 'active' });
+    .insert({ id: created.user.id, school_id: schoolId, name: full_name, email, username, phone: phone || null, role: appRole, staff_id, status: 'active' });
   if (profileErr) {
     await admin.auth.admin.deleteUser(created.user.id);
     return { ok: false, message: 'Could not link the profile: ' + profileErr.message };
   }
 
-  return { ok: true, profile_id: created.user.id, email, defaultPassword: password };
+  return { ok: true, profile_id: created.user.id, username, defaultPassword: password };
+}
+
+/** Finds the first available username at this school — "mercy", then
+ *  "mercy2", "mercy3", ... — since two different staff members (or two
+ *  different schools, but that's already scoped out by schoolId) can easily
+ *  share a first name, unlike an admission number or phone number. */
+async function findAvailableUsername(admin, baseUsername, schoolId) {
+  const { data } = await admin.from('profiles').select('username').eq('school_id', schoolId);
+  const taken = new Set((data || []).map((r) => r.username).filter(Boolean).map((u) => String(u).toLowerCase()));
+  if (!taken.has(baseUsername)) return baseUsername;
+  let suffix = 2;
+  while (taken.has(baseUsername + suffix)) suffix++;
+  return baseUsername + suffix;
 }
 
 /**
  * Parent accounts have no dedicated FK column on `profiles` the way
  * students/staff do (no `staff_id`/`student_id` to key off — a parent isn't
  * "the same row as" any one student, since one parent can be linked to
- * several children via parent_links, added separately by an admin after
- * this call via a plain authenticated insert — see src/lib/api/parents.mjs).
- * So idempotency here is keyed off the synthetic email instead, scoped to
- * the calling admin's own school.
+ * several children via parent_links). So idempotency here is keyed off the
+ * synthetic email instead, scoped to the calling admin's own school.
+ *
+ * A student_id is required up front (not just a name+phone) because the
+ * parent's password is their (first) linked child's admission number —
+ * something every parent reliably already knows, instead of a generic
+ * password an admin has to separately communicate and the parent has to
+ * remember. The actual parent_links row is still created as its own step by
+ * the frontend right after this call (see src/lib/api/parents.mjs) — this
+ * function only needs the student to derive the password from.
  */
 async function createParentLogin(admin, payload, schoolId) {
-  const { full_name, phone } = payload;
-  if (!full_name || !phone) {
-    return { ok: false, message: 'Parent name and phone number are required.' };
+  const { full_name, phone, student_id } = payload;
+  if (!full_name || !phone || !student_id) {
+    return { ok: false, message: 'Parent name, phone number, and a child to link are required.' };
   }
+
+  const { data: student, error: studentErr } = await admin
+    .from('students').select('id, admission_no').eq('id', student_id).eq('school_id', schoolId).maybeSingle();
+  if (studentErr || !student) return { ok: false, message: 'Student not found.' };
 
   const { data: school, error: schoolErr } = await admin
     .from('schools').select('code').eq('id', schoolId).maybeSingle();
@@ -178,9 +216,11 @@ async function createParentLogin(admin, payload, schoolId) {
     return { ok: true, alreadyProvisioned: true, profile_id: existing.id, email };
   }
 
+  const password = studentPasswordFor(student.admission_no);
+
   const { data: created, error: createErr } = await admin.auth.admin.createUser({
     email,
-    password: DEFAULT_PARENT_PASSWORD,
+    password,
     email_confirm: true,
     user_metadata: { role: 'parent', full_name, school_id: schoolId }
   });
@@ -194,7 +234,7 @@ async function createParentLogin(admin, payload, schoolId) {
     return { ok: false, message: 'Could not link the profile: ' + profileErr.message };
   }
 
-  return { ok: true, profile_id: created.user.id, email, defaultPassword: DEFAULT_PARENT_PASSWORD };
+  return { ok: true, profile_id: created.user.id, email, defaultPassword: password };
 }
 
 async function resetPassword(admin, payload, schoolId) {
@@ -224,6 +264,17 @@ async function resetPassword(admin, payload, schoolId) {
         .eq('id', profile.student_id)
         .maybeSingle();
       password = studentPasswordFor(student ? student.admission_no : '');
+    } else if (profile.role === 'parent') {
+      // Same rule as creation: a parent's default password is their (first)
+      // linked child's admission number — see createParentLogin's comment.
+      const { data: link } = await admin
+        .from('parent_links').select('student_id').eq('parent_profile_id', profile_id).limit(1).maybeSingle();
+      let admissionNo = '';
+      if (link) {
+        const { data: student } = await admin.from('students').select('admission_no').eq('id', link.student_id).maybeSingle();
+        admissionNo = student ? student.admission_no : '';
+      }
+      password = studentPasswordFor(admissionNo);
     } else {
       password = DEFAULT_TEACHER_PASSWORD;
     }
