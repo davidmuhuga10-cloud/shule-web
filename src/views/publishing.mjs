@@ -1,6 +1,7 @@
-import { esc, toast, options, renderPrereq, loader, confirmAction } from '../app.js';
+import { esc, toast, options, renderPrereq, loader, confirmAction, go } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { SUBMISSION_STATUS_LABELS } from '../lib/api/results.mjs';
+import { takeNavIntent, setNavIntent } from '../lib/navIntent.mjs';
 
 /** Publish Results — the school-side view of the publishing workflow
  *  (Subject Teacher -> Class Teacher -> Supervisor -> Admin; "Supervisor"
@@ -19,7 +20,10 @@ export async function viewPublishing(root) {
   const classes = classesRes.ok ? classesRes.data : [];
   if (!exams.length) { renderPrereq(root, 'No exams found', 'Please create an exam first.', 'exams', 'Go to Exams'); return; }
   if (!classes.length) { renderPrereq(root, 'No classes found', 'Please create a class first.', 'classes', 'Go to Classes'); return; }
-  render(root, exams, classes, {});
+  // A "Review & Publish" click from the Manage Exams board hands off exactly
+  // which exam+class to open here — see navIntent.mjs.
+  const intent = takeNavIntent('publishing') || {};
+  render(root, exams, classes, { exam_id: intent.exam_id || '', class_id: intent.class_id || '' });
 }
 
 function render(root, exams, classes, sel) {
@@ -73,20 +77,39 @@ async function loadList(root, sel) {
     return;
   }
 
+  const missing = rows.filter((r) => !r.complete);
+  const allPublished = rows.every((r) => r.status === 'published');
+
   listEl.innerHTML = `
+    ${allPublished ? `<div class="card" style="margin-bottom:16px;border-color:var(--ok)"><div class="card-b" style="display:flex;align-items:center;gap:12px">
+      <p class="hint" style="margin:0;flex:1"><b>✅ Every subject is published</b> for this class — report cards and analyses are ready to print, nothing further to do here.</p>
+      <button class="btn" id="pb-go-reports">🖨️ Go to Report Forms</button>
+    </div></div>` : ''}
+    ${missing.length ? `<div class="card" style="margin-bottom:16px;border-color:var(--warn)"><div class="card-b">
+      <p class="hint" style="margin:0"><b>⚠️ ${missing.length} subject(s) still have missing marks</b> — ${missing.map((r) => `${esc(r.subject_name)} (${r.entered_count}/${r.expected_count || '?'})`).join(', ')}. You can still publish what's complete, or wait for these to finish.</p>
+    </div></div>` : ''}
     <div class="card">
       <div class="card-b table-wrap"><table class="data">
-        <thead><tr><th>Subject</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Subject</th><th>Teacher</th><th>Marks entered</th><th>Status</th><th></th></tr></thead>
         <tbody>${rows.map((r) => `<tr>
           <td>${esc(r.subject_name)}${r.subject_code ? ' (' + esc(r.subject_code) + ')' : ''}</td>
+          <td>${r.teacher_name ? esc(r.teacher_name) : '<span class="muted">— unassigned —</span>'}</td>
+          <td>${r.complete ? `<span class="badge green">${r.entered_count}/${r.expected_count}</span>` : `<span class="badge amber">${r.entered_count}/${r.expected_count || '?'} — incomplete</span>`}</td>
           <td><span class="badge ${STATUS_BADGE_CLASS[r.status] || 'grey'}">${esc(SUBMISSION_STATUS_LABELS[r.status] || r.status)}</span></td>
           <td class="row-actions">
             ${r.status === 'submitted' ? `<button class="btn ghost sm" data-approve="${r.subject_id}">Approve</button>` : ''}
             ${r.status === 'approved' ? `<button class="btn ghost sm" data-publish="${r.subject_id}">Publish</button>` : ''}
+            ${r.status === 'draft' ? `<button class="btn ghost sm" data-approve="${r.subject_id}">Approve</button><button class="btn ghost sm" data-publish="${r.subject_id}">Publish</button>` : ''}
             ${r.status === 'published' ? `<button class="btn ghost sm" data-reopen="${r.subject_id}">Reopen</button>` : ''}
           </td></tr>`).join('')}</tbody>
       </table></div>
     </div>`;
+
+  const goReportsBtn = listEl.querySelector('#pb-go-reports');
+  if (goReportsBtn) goReportsBtn.onclick = () => {
+    setNavIntent('report-forms', { exam_id: sel.exam_id, class_id: sel.class_id });
+    go('reports');
+  };
 
   listEl.querySelectorAll('[data-approve]').forEach((b) => b.onclick = () => confirmAction(
     'Approve this subject\'s results? This confirms the class teacher has reviewed them.',

@@ -1,4 +1,4 @@
-import { esc, modal, closeModal, toast, confirmAction, options, renderPrereq, loader } from '../app.js';
+import { esc, modal, closeModal, toast, confirmAction, options, renderPrereq, loader, go } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { LEAVING_REASON_LABELS } from '../lib/api/students.mjs';
 
@@ -43,7 +43,7 @@ async function render(root, classes, filters) {
   root.querySelectorAll('[data-view]').forEach((b) => b.onclick = () => render(root, classes, { ...filters, view: b.dataset.view }));
   root.querySelector('#f-class').onchange = (e) => render(root, classes, { ...filters, class_id: e.target.value, stream_id: '' });
   root.querySelector('#f-stream').onchange = (e) => render(root, classes, { ...filters, stream_id: e.target.value });
-  root.querySelector('#add-student').onclick = () => openStudentModal(root, classes, filters);
+  root.querySelector('#add-student').onclick = () => openAddChoiceModal(root, classes, filters);
 
   const listEl = root.querySelector('#student-list');
   const res = await Db.students.list({
@@ -59,7 +59,7 @@ async function render(root, classes, filters) {
       ${isArchived ? '' : '<button class="btn" id="empty-add-student">+ Add student</button>'}
     </div></div>`;
     const b = listEl.querySelector('#empty-add-student');
-    if (b) b.onclick = () => openStudentModal(root, classes, filters);
+    if (b) b.onclick = () => openAddChoiceModal(root, classes, filters);
     return;
   }
 
@@ -118,6 +118,30 @@ async function render(root, classes, filters) {
     if (!ids.length) return;
     openMoveModal(root, classes, filters, ids);
   };
+}
+
+/** "+ Add student" now asks Single vs Bulk first, instead of always opening
+ *  the one-at-a-time form — enrolling a whole new class at once is common
+ *  enough (a new intake, promotion day) that it deserves equal billing with
+ *  adding one student, not a buried nav link elsewhere. */
+function openAddChoiceModal(root, classes, filters) {
+  modal({
+    title: 'Add student',
+    body: `
+      <p class="hint" style="margin-top:0">How would you like to add students?</p>
+      <div class="grid2">
+        <button class="btn secondary" id="choice-single" style="width:100%;padding:18px 12px;flex-direction:column;height:auto;gap:6px">
+          <div style="font-size:22px">🎒</div><div>Single student</div>
+        </button>
+        <button class="btn secondary" id="choice-bulk" style="width:100%;padding:18px 12px;flex-direction:column;height:auto;gap:6px">
+          <div style="font-size:22px">📥</div><div>Bulk upload</div>
+        </button>
+      </div>
+    `,
+    footer: false
+  });
+  document.getElementById('choice-single').onclick = () => { closeModal(); openStudentModal(root, classes, filters); };
+  document.getElementById('choice-bulk').onclick = () => { closeModal(); go('bulk-upload'); };
 }
 
 async function openStudentModal(root, classes, filters, existing) {

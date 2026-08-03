@@ -349,7 +349,7 @@ const NAV = {
     { route: 'teacher-assignments', label: 'Teacher Assignments', ico: '🔗' },
     { section: 'Assessment' },
     { parent: 'Exams', ico: '📝', children: [
-      { route: 'exams', label: 'Exams' },
+      { route: 'exams', label: 'Manage Exams' },
       { route: 'marks', label: 'Enter Marks' },
       { route: 'publishing', label: 'Publish Results' },
       { route: 'grading', label: 'Grading Scales' }
@@ -383,7 +383,7 @@ const NAV = {
     { route: 'messaging', label: 'Messaging', ico: '💬' },
     { section: 'Assessment' },
     { parent: 'Exams', ico: '📝', children: [
-      { route: 'exams', label: 'Exams' },
+      { route: 'exams', label: 'Manage Exams' },
       { route: 'marks', label: 'Enter Marks' },
       { route: 'publishing', label: 'Publish Results' }
     ] },

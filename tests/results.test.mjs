@@ -208,6 +208,70 @@ async function run() {
     check('publishExam errors when the class has no marks at all', empty.ok === false);
   }
 
+  // ---- listSubmissions: teacher name + entered/expected counts (Phase 2e) ---------
+  {
+    const { sb, results } = freshApis({
+      staff: [{ id: 'stf1', full_name: 'Mrs Njeri' }],
+      subject_teacher_assignments: [{ id: 'sta1', subject_id: 'su1', class_id: 'c1', staff_id: 'stf1' }]
+    });
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1' })).data;
+    // Only 2 of the 4 active students in c1 get a Maths mark -> incomplete.
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '50' }, { student_id: 's2', score: '60' }] });
+
+    const list = await results.listSubmissions(exam.id, 'c1');
+    const maths = list.data.find((r) => r.subject_id === 'su1');
+    check('listSubmissions reports the assigned teacher\'s name', maths.teacher_name === 'Mrs Njeri');
+    check('listSubmissions reports how many students have a mark', maths.entered_count === 2);
+    check('listSubmissions reports the full expected roster size', maths.expected_count === 4);
+    check('listSubmissions flags an incomplete subject as not complete', maths.complete === false);
+
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su2', scores: [{ student_id: 's1', score: '70' }] });
+    const listBoth = await results.listSubmissions(exam.id, 'c1');
+    const english = listBoth.data.find((r) => r.subject_id === 'su2');
+    check('listSubmissions leaves teacher_name blank when nobody is assigned to that subject', english.teacher_name === '');
+
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's3', score: '55' }, { student_id: 's4', score: '65' }] });
+    const list2 = await results.listSubmissions(exam.id, 'c1');
+    check('listSubmissions marks a subject complete once every active student has a mark', list2.data.find((r) => r.subject_id === 'su1').complete === true);
+  }
+
+  // ---- listExamClasses (the Manage Exams board's data source) ---------------------
+  {
+    const { sb, results } = freshApis({
+      classes: [{ id: 'c1', name: 'Grade 7' }, { id: 'c2', name: 'Grade 8' }],
+      students: [
+        { id: 's1', admission_no: '1', full_name: 'A', gender: 'Male', class_id: 'c1', status: 'active' },
+        { id: 's5', admission_no: '5', full_name: 'E', gender: 'Male', class_id: 'c2', status: 'active' }
+      ],
+      subject_class_assignments: [
+        { id: 'sca1', subject_id: 'su1', class_id: 'c1' }, { id: 'sca2', subject_id: 'su2', class_id: 'c1' },
+        { id: 'sca3', subject_id: 'su1', class_id: 'c2' }
+      ]
+    });
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1' })).data;
+
+    const none = await results.listExamClasses(exam.id);
+    check('listExamClasses is empty before any marks are entered anywhere', none.ok === true && none.data.length === 0);
+
+    // c1 has 2 assigned subjects; only 1 (su1) gets marks -> in progress.
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '50' }] });
+    // c2 has 1 assigned subject (su1); it gets marks -> fully entered, not yet published.
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c2', subject_id: 'su1', scores: [{ student_id: 's5', score: '50' }] });
+
+    const inProgress = await results.listExamClasses(exam.id);
+    check('listExamClasses now includes both classes with any activity', inProgress.data.length === 2);
+    const c1Row = inProgress.data.find((r) => r.class_id === 'c1');
+    const c2Row = inProgress.data.find((r) => r.class_id === 'c2');
+    check('a class missing marks for some assigned subjects is in_progress', c1Row.status === 'in_progress');
+    check('a class with marks for every assigned subject (not yet published) is ready_to_publish', c2Row.status === 'ready_to_publish');
+
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su2', scores: [{ student_id: 's1', score: '60' }] });
+    await results.publishExam(exam.id, 'c1');
+    await results.publishExam(exam.id, 'c2');
+    const done = await results.listExamClasses(exam.id);
+    check('a fully-published class shows status published', done.data.every((r) => r.status === 'published'));
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

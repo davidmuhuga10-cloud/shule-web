@@ -2,13 +2,23 @@ import { esc, modal, closeModal, toast, confirmAction } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { CBC_COMPETENCY_SCALE_NAME } from '../lib/api/grading.mjs';
 
+// Which scale cards are expanded — module-level so it survives a re-render
+// (e.g. after saving a band) but not a full page navigation away and back.
+// Starts empty ("all collapsed") once there's more than one scale, so a
+// school with several scales (e.g. a letter scale + the CBC scale) isn't
+// confronted with every band table open at once; a single scale just opens
+// itself automatically since there's nothing to declutter.
+let expandedIds = null;
+
 export async function viewGrading(root) {
+  expandedIds = null;
   await render(root);
 }
 
 async function render(root) {
   const res = await Db.grading.listScales();
   const scales = res.ok ? res.data : [];
+  if (expandedIds === null) expandedIds = new Set(scales.length <= 1 ? scales.map((sc) => sc.id) : []);
 
   const hasCbcScale = scales.some((sc) => sc.name === CBC_COMPETENCY_SCALE_NAME);
 
@@ -17,13 +27,18 @@ async function render(root) {
       <div class="spacer"></div>
       ${hasCbcScale ? '' : '<button class="btn secondary" id="load-cbc-scale">📥 Load CBC competency scale</button>'}
       <button class="btn" id="add-scale">+ Add scale</button></div>
-    ${scales.length ? scales.map((sc) => scaleCard(sc)).join('') : `<div class="card"><div class="card-b"><div class="empty">
+    ${scales.length ? scales.map((sc) => scaleCard(sc, expandedIds.has(sc.id))).join('') : `<div class="card"><div class="card-b"><div class="empty">
       <div class="e-ico">🎯</div><h3>No grading scales yet</h3><p>Add one to start grading exam results, or load the standard CBC competency scale below.</p>
       <button class="btn secondary" id="empty-load-cbc-scale">📥 Load CBC competency scale</button>
       <button class="btn" id="empty-add-scale">+ Add scale</button>
     </div></div></div>`}
   `;
 
+  root.querySelectorAll('[data-toggle-scale]').forEach((b) => b.onclick = () => {
+    const id = b.dataset.toggleScale;
+    if (expandedIds.has(id)) expandedIds.delete(id); else expandedIds.add(id);
+    render(root);
+  });
   root.querySelector('#add-scale').onclick = () => openScaleModal(root);
   const emptyBtn = root.querySelector('#empty-add-scale');
   if (emptyBtn) emptyBtn.onclick = () => openScaleModal(root);
@@ -47,10 +62,13 @@ async function render(root) {
       const r = await Db.grading.deleteScale(sc.id);
       if (r.ok) { toast('Scale deleted.', 'ok'); render(root); } else toast(r.message, 'err');
     }, true);
-    root.querySelector(`[data-add-band="${sc.id}"]`).onclick = () => openBandModal(root, sc);
+    const addBandBtn = root.querySelector(`[data-add-band="${sc.id}"]`);
+    if (addBandBtn) addBandBtn.onclick = () => openBandModal(root, sc);
     (sc.bands || []).forEach((b) => {
-      root.querySelector(`[data-edit-band="${b.id}"]`).onclick = () => openBandModal(root, sc, b);
-      root.querySelector(`[data-del-band="${b.id}"]`).onclick = () => confirmAction('Delete this band?', async () => {
+      const editBtn = root.querySelector(`[data-edit-band="${b.id}"]`);
+      const delBtn = root.querySelector(`[data-del-band="${b.id}"]`);
+      if (editBtn) editBtn.onclick = () => openBandModal(root, sc, b);
+      if (delBtn) delBtn.onclick = () => confirmAction('Delete this band?', async () => {
         const r = await Db.grading.deleteBand(b.id);
         if (r.ok) { toast('Band deleted.', 'ok'); render(root); } else toast(r.message, 'err');
       }, true);
@@ -58,7 +76,7 @@ async function render(root) {
   });
 }
 
-function scaleCard(sc) {
+function scaleCard(sc, expanded) {
   const bandsRows = (sc.bands || []).length
     ? sc.bands.map((b) => `<tr>
         <td>${b.min_score}–${b.max_score}</td><td><b>${esc(b.grade_label)}</b></td><td>${b.points ?? '—'}</td><td>${esc(b.remark || '—')}</td>
@@ -68,17 +86,22 @@ function scaleCard(sc) {
 
   return `<div class="card" style="margin-bottom:16px">
     <div class="card-h">
-      <h3>${esc(sc.name)}</h3>
-      ${sc.is_default ? '<span class="badge green">Default</span>' : `<button class="btn ghost sm" data-default-scale="${sc.id}">Make default</button>`}
-      <div class="spacer"></div>
+      <div data-toggle-scale="${sc.id}" style="display:flex;align-items:center;gap:12px;cursor:pointer;flex:1;min-width:0">
+        <span style="font-size:12px;color:var(--muted);width:14px;display:inline-block">${expanded ? '▾' : '▸'}</span>
+        <h3 style="margin:0">${esc(sc.name)}</h3>
+        <span class="badge grey">${(sc.bands || []).length} band${(sc.bands || []).length === 1 ? '' : 's'}</span>
+        ${sc.is_default ? '<span class="badge green">Default</span>' : ''}
+      </div>
+      ${sc.is_default ? '' : `<button class="btn ghost sm" data-default-scale="${sc.id}">Make default</button>`}
       <button class="icon-btn" data-edit-scale="${sc.id}">✏️</button>
       <button class="icon-btn danger" data-del-scale="${sc.id}">🗑️</button>
     </div>
+    ${expanded ? `
     <div class="card-b table-wrap">
       <table class="data"><thead><tr><th>Range</th><th>Grade</th><th>Points</th><th>Remark</th><th></th></tr></thead>
       <tbody>${bandsRows}</tbody></table>
     </div>
-    <div class="modal-f" style="border-top:1px solid var(--line)"><button class="btn sm" data-add-band="${sc.id}">+ Add band</button></div>
+    <div class="modal-f" style="border-top:1px solid var(--line)"><button class="btn sm" data-add-band="${sc.id}">+ Add band</button></div>` : ''}
   </div>`;
 }
 

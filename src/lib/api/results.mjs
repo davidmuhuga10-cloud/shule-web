@@ -313,11 +313,14 @@ export function createResultsApi(supabase, gradingApi) {
      *  current publishing status — the list the "Publish Results" screen
      *  works from (Subject Teacher -> Class Teacher -> Supervisor -> Admin;
      *  "Supervisor" here is any teacher granted the publish_results
-     *  capability, or an admin). */
+     *  capability, or an admin). Also reports who's assigned to teach it and
+     *  how many of the class's active students actually have a mark yet, so
+     *  an admin reviewing before publish can see at a glance who has and
+     *  hasn't submitted, and whether any student is still missing a score. */
     async listSubmissions(examId, classId) {
       if (!examId) return err('Please choose an exam.');
       if (!classId) return err('Please choose a class.');
-      const { data: examResults } = await supabase.from('results').select('subject_id').eq('exam_id', examId).eq('class_id', classId);
+      const { data: examResults } = await supabase.from('results').select('subject_id, student_id').eq('exam_id', examId).eq('class_id', classId);
       const subjectIds = [...new Set((examResults || []).map((r) => r.subject_id))];
       if (!subjectIds.length) return ok([]);
       const { data: subjects } = await supabase.from('subjects').select('id, name, code').in('id', subjectIds);
@@ -326,18 +329,93 @@ export function createResultsApi(supabase, gradingApi) {
         .eq('exam_id', examId).eq('class_id', classId).in('subject_id', subjectIds);
       const subMap = {};
       (submissions || []).forEach((s) => { subMap[s.subject_id] = s; });
+
+      const { count: expectedCount } = await supabase.from('students').select('id', { count: 'exact', head: true }).eq('class_id', classId).eq('status', 'active');
+
+      const { data: teacherRows } = await supabase.from('subject_teacher_assignments').select('subject_id, staff_id').eq('class_id', classId).in('subject_id', subjectIds);
+      const staffIds = [...new Set((teacherRows || []).map((r) => r.staff_id).filter(Boolean))];
+      const { data: staffRows } = staffIds.length ? await supabase.from('staff').select('id, full_name').in('id', staffIds) : { data: [] };
+      const staffMap = indexById(staffRows || []);
+      const teacherBySubject = {};
+      (teacherRows || []).forEach((r) => { if (!teacherBySubject[r.subject_id]) teacherBySubject[r.subject_id] = (staffMap[r.staff_id] || {}).full_name || ''; });
+
+      const enteredBySubject = {};
+      (examResults || []).forEach((r) => { enteredBySubject[r.subject_id] = (enteredBySubject[r.subject_id] || 0) + 1; });
+
       const rows = subjectIds.map((sid) => {
         const sub = subjectMap[sid] || { name: '(deleted subject)', code: '' };
         const row = subMap[sid];
+        const entered = enteredBySubject[sid] || 0;
+        const expected = expectedCount || 0;
         return {
           subject_id: sid, subject_name: sub.name, subject_code: sub.code || '',
           status: row ? row.status : 'draft',
           submitted_at: row ? row.submitted_at : null,
           approved_at: row ? row.approved_at : null,
-          published_at: row ? row.published_at : null
+          published_at: row ? row.published_at : null,
+          teacher_name: teacherBySubject[sid] || '',
+          entered_count: entered, expected_count: expected,
+          complete: expected > 0 && entered >= expected
         };
       });
       rows.sort((a, b) => String(a.subject_name).localeCompare(String(b.subject_name)));
+      return ok(rows);
+    },
+
+    /** The "Manage Exams" board's data source: for ONE exam, every class that
+     *  has any marks entered at all, each with an overall status derived from
+     *  how many of the class's assigned subjects have marks vs how many of
+     *  those have been published — so the UI can show a single, obvious
+     *  next action ("Continue marks entry" / "Review & publish" / "Published")
+     *  per class instead of making an admin dig into each subject one by one.
+     *  Classes with zero activity for this exam are NOT included — the
+     *  caller offers a separate "start marks entry for a class" picker for
+     *  those (any class is always eligible; there's no per-exam class
+     *  whitelist in this schema). */
+    async listExamClasses(examId) {
+      if (!examId) return err('Please choose an exam.');
+      const { data: examResults } = await supabase.from('results').select('class_id, subject_id').eq('exam_id', examId);
+      const classIds = [...new Set((examResults || []).map((r) => r.class_id).filter(Boolean))];
+      if (!classIds.length) return ok([]);
+
+      const { data: classes } = await supabase.from('classes').select('id, name').in('id', classIds);
+      const classMap = indexById(classes || []);
+
+      const { data: assignments } = await supabase.from('subject_class_assignments').select('class_id, subject_id').in('class_id', classIds);
+      const assignedByClass = {};
+      (assignments || []).forEach((a) => {
+        (assignedByClass[a.class_id] = assignedByClass[a.class_id] || new Set()).add(a.subject_id);
+      });
+
+      const { data: submissions } = await supabase.from('result_submissions').select('class_id, subject_id, status').eq('exam_id', examId).in('class_id', classIds);
+      const publishedByClass = {};
+      (submissions || []).forEach((s) => {
+        if (s.status === 'published') (publishedByClass[s.class_id] = publishedByClass[s.class_id] || new Set()).add(s.subject_id);
+      });
+
+      const withMarksByClass = {};
+      (examResults || []).forEach((r) => {
+        (withMarksByClass[r.class_id] = withMarksByClass[r.class_id] || new Set()).add(r.subject_id);
+      });
+
+      const rows = classIds.map((cid) => {
+        const withMarks = withMarksByClass[cid] || new Set();
+        const assigned = assignedByClass[cid] && assignedByClass[cid].size ? assignedByClass[cid] : withMarks;
+        const published = publishedByClass[cid] || new Set();
+        const subjectsTotal = assigned.size;
+        const subjectsWithMarks = withMarks.size;
+        const subjectsPublished = [...withMarks].filter((sid) => published.has(sid)).length;
+        let status;
+        if (subjectsWithMarks < subjectsTotal) status = 'in_progress';
+        else if (subjectsPublished >= subjectsTotal && subjectsTotal > 0) status = 'published';
+        else status = 'ready_to_publish';
+        return {
+          class_id: cid, class_name: (classMap[cid] || {}).name || '(deleted class)',
+          subjects_total: subjectsTotal, subjects_with_marks: subjectsWithMarks, subjects_published: subjectsPublished,
+          status
+        };
+      });
+      rows.sort((a, b) => String(a.class_name).localeCompare(String(b.class_name)));
       return ok(rows);
     },
 
