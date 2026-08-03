@@ -1,0 +1,174 @@
+/**
+ * attendance.mjs (view) — daily marking for students (by class) and staff
+ * (whole school), plus a simple per-class attendance-rate summary. Available
+ * to both admin and teacher (see NAV in app.js) — Zeraki-style, marking
+ * attendance is a day-to-day teacher action, not admin-only.
+ */
+import { esc, options, toast, renderPrereq, loader, state } from '../app.js';
+import { Db } from '../lib/api/index.mjs';
+
+const STATUSES = [
+  { key: 'present', label: 'Present', cls: 'green' },
+  { key: 'absent', label: 'Absent', cls: 'red' },
+  { key: 'late', label: 'Late', cls: 'amber' },
+  { key: 'excused', label: 'Excused', cls: 'blue' }
+];
+
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+export async function viewAttendance(root) {
+  const classesRes = await Db.classes.list();
+  const classes = classesRes.ok ? classesRes.data : [];
+  if (!classes.length) { renderPrereq(root, 'No classes found', 'Please create a class before marking attendance.', 'classes', 'Go to Classes'); return; }
+  render(root, classes, { tab: 'mark-students', class_id: classes[0].id, date: todayStr() });
+}
+
+function render(root, classes, sel) {
+  root.innerHTML = `
+    <div class="page-head"><div><h2>Attendance</h2><p>Mark daily attendance and review class summaries.</p></div></div>
+    <div class="tabs" style="max-width:520px">
+      <button data-tab="mark-students" class="${sel.tab === 'mark-students' ? 'active' : ''}">Mark Students</button>
+      <button data-tab="mark-staff" class="${sel.tab === 'mark-staff' ? 'active' : ''}">Mark Staff</button>
+      <button data-tab="summary" class="${sel.tab === 'summary' ? 'active' : ''}">Class Summary</button>
+    </div>
+    <div id="att-body"></div>
+  `;
+  root.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => render(root, classes, { ...sel, tab: b.dataset.tab }));
+
+  const body = root.querySelector('#att-body');
+  if (sel.tab === 'mark-students') renderMarkStudents(body, classes, sel);
+  else if (sel.tab === 'mark-staff') renderMarkStaff(body, sel);
+  else renderSummary(body, classes, sel);
+}
+
+async function renderMarkStudents(body, classes, sel) {
+  body.innerHTML = `
+    <div class="card" style="margin-bottom:16px"><div class="card-b grid2">
+      <div class="field"><label>Class</label><select id="att-class">${options(classes, 'id', 'name', sel.class_id)}</select></div>
+      <div class="field"><label>Date</label><input id="att-date" type="date" value="${esc(sel.date)}"></div>
+    </div></div>
+    <div class="card"><div id="att-roster">${loader()}</div></div>
+  `;
+  body.querySelector('#att-class').onchange = (e) => renderMarkStudents(body, classes, { ...sel, class_id: e.target.value });
+  body.querySelector('#att-date').onchange = (e) => renderMarkStudents(body, classes, { ...sel, date: e.target.value });
+
+  const rosterEl = body.querySelector('#att-roster');
+  const res = await Db.attendance.getRosterForDate({ class_id: sel.class_id, date: sel.date });
+  const roster = res.ok ? res.data : [];
+  if (!res.ok) { rosterEl.innerHTML = `<div class="card-b">⚠️ ${esc(res.message)}</div>`; return; }
+  if (!roster.length) { rosterEl.innerHTML = `<div class="card-b"><div class="empty"><div class="e-ico">🎒</div><h3>No students</h3><p>No active students in this class.</p></div></div>`; return; }
+
+  const marks = {};
+  roster.forEach((r) => { marks[r.student_id] = r.status || ''; });
+
+  rosterEl.innerHTML = `<div class="table-wrap"><table class="data">
+    <thead><tr><th>Admission No.</th><th>Name</th><th colspan="4">Status</th></tr></thead>
+    <tbody>${roster.map((r) => `<tr data-row="${r.student_id}">
+      <td>${esc(r.admission_no)}</td><td>${esc(r.full_name)}</td>
+      ${STATUSES.map((s) => `<td class="num"><button class="status-btn ${s.cls} ${marks[r.student_id] === s.key ? 'on' : ''}" data-student="${r.student_id}" data-status="${s.key}">${s.label}</button></td>`).join('')}
+    </tr>`).join('')}</tbody>
+  </table></div>
+  <div class="card-b" style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line)">
+    <button class="btn secondary" id="att-mark-all-present">Mark all Present</button>
+    <button class="btn" id="att-save">Save attendance</button>
+  </div>`;
+
+  rosterEl.querySelectorAll('.status-btn').forEach((b) => b.onclick = () => {
+    marks[b.dataset.student] = b.dataset.status;
+    rosterEl.querySelectorAll(`[data-student="${b.dataset.student}"]`).forEach((x) => x.classList.toggle('on', x === b));
+  });
+
+  rosterEl.querySelector('#att-mark-all-present').onclick = () => {
+    roster.forEach((r) => { marks[r.student_id] = 'present'; });
+    rosterEl.querySelectorAll('.status-btn').forEach((b) => b.classList.toggle('on', b.dataset.status === 'present'));
+  };
+
+  rosterEl.querySelector('#att-save').onclick = async () => {
+    const records = Object.keys(marks).filter((sid) => marks[sid]).map((sid) => ({ student_id: sid, status: marks[sid] }));
+    if (!records.length) { toast('Mark at least one student first.', 'err'); return; }
+    const r = await Db.attendance.saveStudentAttendance({ date: sel.date, class_id: sel.class_id, records, marked_by: state.profile.staff_id });
+    if (r.ok) toast(`Attendance saved for ${r.saved} student(s).`, 'ok'); else toast(r.message, 'err');
+  };
+}
+
+async function renderMarkStaff(body, sel) {
+  body.innerHTML = `
+    <div class="card" style="margin-bottom:16px"><div class="card-b" style="max-width:280px">
+      <div class="field"><label>Date</label><input id="att-staff-date" type="date" value="${esc(sel.date)}"></div>
+    </div></div>
+    <div class="card"><div id="att-staff-roster">${loader()}</div></div>
+  `;
+  body.querySelector('#att-staff-date').onchange = (e) => renderMarkStaff(body, { ...sel, date: e.target.value });
+
+  const rosterEl = body.querySelector('#att-staff-roster');
+  const res = await Db.attendance.getStaffRosterForDate({ date: sel.date });
+  const roster = res.ok ? res.data : [];
+  if (!res.ok) { rosterEl.innerHTML = `<div class="card-b">⚠️ ${esc(res.message)}</div>`; return; }
+  if (!roster.length) { rosterEl.innerHTML = `<div class="card-b"><div class="empty"><div class="e-ico">👨‍🏫</div><h3>No staff</h3><p>No active staff members yet.</p></div></div>`; return; }
+
+  const marks = {};
+  roster.forEach((r) => { marks[r.staff_id] = r.status || ''; });
+
+  rosterEl.innerHTML = `<div class="table-wrap"><table class="data">
+    <thead><tr><th>Name</th><th>Role</th><th colspan="4">Status</th></tr></thead>
+    <tbody>${roster.map((r) => `<tr>
+      <td>${esc(r.full_name)}</td><td>${esc(r.role || '—')}</td>
+      ${STATUSES.map((s) => `<td class="num"><button class="status-btn ${s.cls} ${marks[r.staff_id] === s.key ? 'on' : ''}" data-staff="${r.staff_id}" data-status="${s.key}">${s.label}</button></td>`).join('')}
+    </tr>`).join('')}</tbody>
+  </table></div>
+  <div class="card-b" style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line)">
+    <button class="btn" id="att-staff-save">Save attendance</button>
+  </div>`;
+
+  rosterEl.querySelectorAll('.status-btn').forEach((b) => b.onclick = () => {
+    marks[b.dataset.staff] = b.dataset.status;
+    rosterEl.querySelectorAll(`[data-staff="${b.dataset.staff}"]`).forEach((x) => x.classList.toggle('on', x === b));
+  });
+
+  rosterEl.querySelector('#att-staff-save').onclick = async () => {
+    const records = Object.keys(marks).filter((sid) => marks[sid]).map((sid) => ({ staff_id: sid, status: marks[sid] }));
+    if (!records.length) { toast('Mark at least one staff member first.', 'err'); return; }
+    const r = await Db.attendance.saveStaffAttendance({ date: sel.date, records, marked_by: state.profile.staff_id });
+    if (r.ok) toast(`Attendance saved for ${r.saved} staff member(s).`, 'ok'); else toast(r.message, 'err');
+  };
+}
+
+async function renderSummary(body, classes, sel) {
+  const from = sel.from || firstOfMonth();
+  const to = sel.to || todayStr();
+  body.innerHTML = `
+    <div class="card" style="margin-bottom:16px"><div class="card-b grid2">
+      <div class="field"><label>Class</label><select id="att-sum-class">${options(classes, 'id', 'name', sel.class_id)}</select></div>
+      <div></div>
+      <div class="field"><label>From</label><input id="att-sum-from" type="date" value="${esc(from)}"></div>
+      <div class="field"><label>To</label><input id="att-sum-to" type="date" value="${esc(to)}"></div>
+    </div></div>
+    <div class="card"><div id="att-sum-body">${loader()}</div></div>
+  `;
+  body.querySelector('#att-sum-class').onchange = (e) => renderSummary(body, classes, { ...sel, class_id: e.target.value, from, to });
+  body.querySelector('#att-sum-from').onchange = (e) => renderSummary(body, classes, { ...sel, from: e.target.value, to });
+  body.querySelector('#att-sum-to').onchange = (e) => renderSummary(body, classes, { ...sel, to: e.target.value, from });
+
+  const sumEl = body.querySelector('#att-sum-body');
+  const res = await Db.attendance.classSummary({ class_id: sel.class_id, from, to });
+  const rows = res.ok ? res.data : [];
+  if (!res.ok) { sumEl.innerHTML = `<div class="card-b">⚠️ ${esc(res.message)}</div>`; return; }
+  if (!rows.length) { sumEl.innerHTML = `<div class="card-b"><div class="empty"><div class="e-ico">🗓️</div><h3>No attendance recorded</h3><p>No attendance has been marked for this class in this date range yet.</p></div></div>`; return; }
+
+  sumEl.innerHTML = `<div class="table-wrap"><table class="data">
+    <thead><tr><th>Admission No.</th><th>Name</th><th class="num">Present</th><th class="num">Absent</th><th class="num">Late</th><th class="num">Excused</th><th class="num">Rate</th></tr></thead>
+    <tbody>${rows.map((r) => `<tr>
+      <td>${esc(r.admission_no)}</td><td>${esc(r.full_name)}</td>
+      <td class="num">${r.present}</td><td class="num">${r.absent}</td><td class="num">${r.late}</td><td class="num">${r.excused}</td>
+      <td class="num">${r.rate === null ? '—' : `<span class="badge ${r.rate >= 90 ? 'green' : r.rate >= 75 ? 'amber' : 'red'}">${r.rate}%</span>`}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+function firstOfMonth() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-01';
+}

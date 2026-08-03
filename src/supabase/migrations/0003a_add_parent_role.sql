@@ -1,0 +1,14 @@
+-- ============================================================================
+-- Shule — Migration 0003a: add the 'parent' role value
+-- ============================================================================
+-- RUN THIS FILE FIRST, BY ITSELF, then run 0003b in a separate query.
+--
+-- Postgres will not let a brand-new enum value be USED (in a policy, a
+-- function, anything) inside the same transaction that adds it — it must be
+-- committed first (error 55P04, "unsafe use of new value"). The Supabase SQL
+-- Editor runs everything you paste into one query as a single transaction,
+-- so adding the value and using it in the same paste always fails there,
+-- even though it's a completely normal, safe change on its own. Splitting it
+-- into two separate "Run" clicks is the fix — this file is step one.
+-- ============================================================================
+alter type user_role add value if not exists 'parent';

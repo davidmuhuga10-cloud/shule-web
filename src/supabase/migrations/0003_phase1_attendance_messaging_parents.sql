@@ -1,0 +1,19 @@
+-- ============================================================================
+-- SUPERSEDED — do not run this file.
+-- ============================================================================
+-- This single-file version of migration 0003 has a real bug: it adds the
+-- 'parent' enum value AND uses it (in RLS policies) in the same script. The
+-- Supabase SQL Editor runs everything you paste into one "Run" as a single
+-- transaction, and Postgres refuses to let a brand-new enum value be used
+-- inside the transaction that added it — error 55P04, "unsafe use of new
+-- value". Splitting the ALTER TYPE step into its own transaction fixes it.
+--
+-- Use these two files instead, IN ORDER, as two SEPARATE queries:
+--   1. 0003a_add_parent_role.sql
+--   2. 0003b_phase1_attendance_messaging_parents.sql
+--
+-- Both are verified against a real local Postgres instance, run exactly the
+-- way the Supabase SQL Editor runs them (each file as its own transaction).
+-- Kept here only as a record of what the original single-file attempt looked
+-- like — nothing in it should be run against a live project.
+-- ============================================================================
