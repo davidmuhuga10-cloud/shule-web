@@ -19,6 +19,7 @@ import { createUsersApi } from './users.mjs';
 import { createAttendanceApi } from './attendance.mjs';
 import { createMessagingApi } from './messaging.mjs';
 import { createParentsApi } from './parents.mjs';
+import { createCapabilitiesApi } from './capabilities.mjs';
 
 async function callAdminFunction(action, payload) {
   const token = await getAccessToken();
@@ -62,6 +63,7 @@ export const Db = {
   classes: academics.classes,
   streams: academics.streams,
   subjects: academics.subjects,
+  subjectPapers: academics.subjectPapers,
   students: createStudentsApi(supabase),
   staff: createStaffApi(supabase),
   assignments: createAssignmentsApi(supabase),
@@ -72,5 +74,6 @@ export const Db = {
   users: createUsersApi(supabase, callAdminFunction),
   attendance: createAttendanceApi(supabase),
   messaging: createMessagingApi(supabase, callSendMessage),
-  parents: createParentsApi(supabase, callAdminFunction)
+  parents: createParentsApi(supabase, callAdminFunction),
+  capabilities: createCapabilitiesApi(supabase)
 };

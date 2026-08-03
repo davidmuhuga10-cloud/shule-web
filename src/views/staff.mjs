@@ -40,8 +40,13 @@ async function render(root) {
   }, true));
 }
 
-function openStaffModal(root, existing) {
+async function openStaffModal(root, existing) {
   const titleChoices = JOB_TITLES.map((t) => ({ id: t, name: t }));
+  let canPublish = false;
+  if (existing) {
+    const capsRes = await Db.capabilities.listForStaff(existing.id);
+    canPublish = capsRes.ok && capsRes.data.indexOf('publish_results') !== -1;
+  }
   modal({
     title: existing ? 'Edit staff member' : 'Add staff member',
     body: `
@@ -55,6 +60,21 @@ function openStaffModal(root, existing) {
         <div class="field"><label>Gender</label><select id="sf-gender">${options([{ id: 'Male', name: 'Male' }, { id: 'Female', name: 'Female' }], 'id', 'name', existing ? existing.gender : '', 'Choose gender')}</select></div>
       </div>
       <div class="field"><label>Qualifications (optional)</label><input id="sf-qual" value="${esc(existing ? existing.qualifications || '' : '')}"></div>
+      <details style="margin-top:4px">
+        <summary style="cursor:pointer;font-weight:600;font-size:13px">More details (optional)</summary>
+        <div style="margin-top:10px">
+          <div class="grid2">
+            <div class="field"><label>Date of birth</label><input id="sf-dob" type="date" value="${esc(existing ? existing.date_of_birth || '' : '')}"></div>
+            <div class="field"><label>National ID number</label><input id="sf-national-id" value="${esc(existing ? existing.national_id || '' : '')}"></div>
+          </div>
+          <div class="field"><label>TSC number</label><input id="sf-tsc" value="${esc(existing ? existing.tsc_number || '' : '')}"></div>
+          <div class="grid2">
+            <div class="field"><label>Next of kin name</label><input id="sf-kin-name" value="${esc(existing ? existing.next_of_kin_name || '' : '')}"></div>
+            <div class="field"><label>Next of kin contact</label><input id="sf-kin-contact" value="${esc(existing ? existing.next_of_kin_contact || '' : '')}"></div>
+          </div>
+        </div>
+      </details>
+      ${existing ? `<div class="field"><label class="chk"><input type="checkbox" id="sf-publish" ${canPublish ? 'checked' : ''}> Can publish exam results (final step of the approval workflow)</label></div>` : ''}
       ${existing ? '' : `<div class="field"><label class="chk"><input type="checkbox" id="sf-admin"> Grant admin (full) access, not just teacher access</label></div>`}
     `,
     okLabel: 'Save',
@@ -66,7 +86,12 @@ function openStaffModal(root, existing) {
         phone: document.getElementById('sf-phone').value,
         role: document.getElementById('sf-role').value,
         gender: document.getElementById('sf-gender').value || null,
-        qualifications: document.getElementById('sf-qual').value
+        qualifications: document.getElementById('sf-qual').value,
+        date_of_birth: document.getElementById('sf-dob').value || null,
+        national_id: document.getElementById('sf-national-id').value,
+        tsc_number: document.getElementById('sf-tsc').value,
+        next_of_kin_name: document.getElementById('sf-kin-name').value,
+        next_of_kin_contact: document.getElementById('sf-kin-contact').value
       };
       const res = await Db.staff.save(payload);
       if (!res.ok) { toast(res.message, 'err'); return; }
@@ -82,6 +107,13 @@ function openStaffModal(root, existing) {
           toast('Staff saved. (Login provisioning will be available once the Netlify function is deployed.)', 'warn');
         }
       } else {
+        const wantsPublish = document.getElementById('sf-publish') && document.getElementById('sf-publish').checked;
+        if (wantsPublish !== canPublish) {
+          const capRes = wantsPublish
+            ? await Db.capabilities.grant(existing.id, 'publish_results')
+            : await Db.capabilities.revoke(existing.id, 'publish_results');
+          if (!capRes.ok) toast(capRes.message, 'err');
+        }
         toast('Staff saved.', 'ok');
       }
       render(root);

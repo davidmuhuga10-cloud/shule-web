@@ -1,5 +1,8 @@
 import { esc, modal, closeModal, toast, confirmAction, options, renderPrereq } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
+import { EXAM_TYPE_LABELS } from '../lib/api/results.mjs';
+
+const EXAM_TYPE_CHOICES = Object.keys(EXAM_TYPE_LABELS).map((k) => ({ id: k, name: EXAM_TYPE_LABELS[k] }));
 
 export async function viewExams(root) {
   const [yearsRes, termsRes] = await Promise.all([Db.academicYears.list(), Db.terms.list()]);
@@ -21,9 +24,10 @@ async function render(root, years, terms) {
       <div class="spacer"></div><button class="btn" id="add-exam">+ Add exam</button></div>
     <div class="card">
       ${exams.length ? `<div class="table-wrap"><table class="data">
-        <thead><tr><th>Exam</th><th>Year</th><th>Term</th><th class="num">Out of</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Exam</th><th>Type</th><th>Year</th><th>Term</th><th class="num">Out of</th><th>Status</th><th></th></tr></thead>
         <tbody>${exams.map((e) => `<tr>
-          <td>${esc(e.name)}</td><td>${esc(e.academic_year_name)}</td><td>${esc(e.term_name)}</td><td class="num">${e.out_of}</td>
+          <td>${esc(e.name)}</td><td><span class="badge grey">${esc(EXAM_TYPE_LABELS[e.exam_type] || e.exam_type || 'Summative')}</span></td>
+          <td>${esc(e.academic_year_name)}</td><td>${esc(e.term_name)}</td><td class="num">${e.out_of}</td>
           <td><span class="badge blue">${esc(e.status)}</span></td>
           <td class="row-actions">
             <button class="icon-btn" data-edit="${e.id}">✏️</button>
@@ -54,7 +58,10 @@ function openExamModal(root, years, terms, existing) {
         <div class="field"><label>Academic year</label><select id="ex-year">${options(years, 'id', 'name', existing ? existing.academic_year_id : '', 'Choose a year')}</select></div>
         <div class="field"><label>Term</label><select id="ex-term">${options(terms, 'id', 'name', existing ? existing.term_id : '', 'Choose a term')}</select></div>
       </div>
-      <div class="field"><label>Out of (max score)</label><input id="ex-outof" type="number" value="${existing ? existing.out_of : 100}"></div>
+      <div class="grid2">
+        <div class="field"><label>Exam type</label><select id="ex-type">${options(EXAM_TYPE_CHOICES, 'id', 'name', existing ? existing.exam_type : 'summative')}</select></div>
+        <div class="field"><label>Out of (max score)</label><input id="ex-outof" type="number" value="${existing ? existing.out_of : 100}"></div>
+      </div>
     `,
     okLabel: 'Save',
     onOk: async () => {
@@ -63,6 +70,7 @@ function openExamModal(root, years, terms, existing) {
         name: document.getElementById('ex-name').value,
         academic_year_id: document.getElementById('ex-year').value,
         term_id: document.getElementById('ex-term').value,
+        exam_type: document.getElementById('ex-type').value,
         out_of: document.getElementById('ex-outof').value
       });
       if (res.ok) { toast('Exam saved.', 'ok'); closeModal(); render(root, years, terms); } else toast(res.message, 'err');

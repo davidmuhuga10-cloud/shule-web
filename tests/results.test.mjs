@@ -26,8 +26,8 @@ const BASE_TABLES = {
   subject_class_assignments: [{ id: 'sca1', subject_id: 'su1', class_id: 'c1' }, { id: 'sca2', subject_id: 'su2', class_id: 'c1' }]
 };
 
-function freshApis() {
-  const sb = createMockSupabase(JSON.parse(JSON.stringify(BASE_TABLES)));
+function freshApis(extraTables) {
+  const sb = createMockSupabase(JSON.parse(JSON.stringify(Object.assign({}, BASE_TABLES, extraTables || {}))));
   const grading = createGradingApi(sb);
   const results = createResultsApi(sb, grading);
   return { sb, results };
@@ -41,9 +41,14 @@ async function run() {
     check('saveExam requires an academic year', (await results.saveExam({ name: 'Midterm', term_id: 't1' })).ok === false);
     const saved = await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1' });
     check('saveExam succeeds and defaults out_of to 100', saved.ok === true && saved.data.out_of === 100);
+    check('saveExam defaults exam_type to summative', saved.data.exam_type === 'summative');
+    const typed = await results.saveExam({ name: 'CAT 1', academic_year_id: 'y1', term_id: 't1', exam_type: 'cat' });
+    check('saveExam accepts a valid exam_type', typed.data.exam_type === 'cat');
+    const badType = await results.saveExam({ name: 'Weird', academic_year_id: 'y1', term_id: 't1', exam_type: 'nonsense' });
+    check('saveExam falls back to summative for an unrecognized exam_type', badType.data.exam_type === 'summative');
   }
 
-  // ---- getResultsEntry / saveResultsEntry ----------------------------------------
+  // ---- getResultsEntry / saveResultsEntry (whole-subject, no papers) ------------
   {
     const { sb, results } = freshApis();
     const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100 })).data;
@@ -52,8 +57,10 @@ async function run() {
     check('getResultsEntry returns all active students', entry.data.length === 4);
     check('getResultsEntry sorts numerically by admission number (5,9,10,23)', entry.data.map((r) => r.admission_no).join(',') === '5,9,10,23');
 
+    check('saveResultsEntry requires class_id', (await results.saveResultsEntry({ exam_id: exam.id, subject_id: 'su1', scores: [] })).ok === false);
+
     const saveRes = await results.saveResultsEntry({
-      exam_id: exam.id, subject_id: 'su1',
+      exam_id: exam.id, class_id: 'c1', subject_id: 'su1',
       scores: [
         { student_id: 's1', score: '85' },  // -> A
         { student_id: 's2', score: '60' },  // -> B
@@ -66,11 +73,39 @@ async function run() {
     const entry2 = await results.getResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1' });
     const jane = entry2.data.find((r) => r.student_id === 's1');
     check('saved score is graded correctly against the default scale', jane.score === 85 && jane.grade_label === 'A');
+    check('saved row is stamped with the class_id it was entered against', sb._tables.results.find((r) => r.student_id === 's1').class_id === 'c1');
 
-    const clearRes = await results.saveResultsEntry({ exam_id: exam.id, subject_id: 'su1', scores: [{ student_id: 's1', score: '' }] });
+    const clearRes = await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '' }] });
     check('saveResultsEntry clears a score when given an empty string', clearRes.cleared === 1);
     const entry3 = await results.getResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1' });
     check('cleared score no longer appears', entry3.data.find((r) => r.student_id === 's1').score === '');
+  }
+
+  // ---- getResultsEntry / saveResultsEntry (per-paper marks) ----------------------
+  {
+    const { sb, results } = freshApis({
+      subject_papers: [
+        { id: 'p1', subject_id: 'su1', name: 'Paper 1', paper_no: 1, weight: 0.6, out_of: 100 },
+        { id: 'p2', subject_id: 'su1', name: 'Paper 2', paper_no: 2, weight: 0.4, out_of: 50 }
+      ]
+    });
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100 })).data;
+
+    const entryP1 = await results.getResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', paper_id: 'p1' });
+    check('getResultsEntry uses the paper\'s own out_of', entryP1.out_of === 100);
+    const entryP2 = await results.getResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', paper_id: 'p2' });
+    check('getResultsEntry uses a different paper\'s own out_of', entryP2.out_of === 50);
+
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', paper_id: 'p1', scores: [{ student_id: 's1', score: '80' }] });
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', paper_id: 'p2', scores: [{ student_id: 's1', score: '40' }] });
+
+    const rows = sb._tables.results.filter((r) => r.student_id === 's1');
+    check('per-paper rows are saved separately (2 rows for one subject)', rows.length === 2);
+    check('per-paper rows are not individually graded', rows.every((r) => r.grade_label === null));
+
+    const sheet = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1' });
+    // 80/100*100*0.6 = 48, 40/50*100*0.4 = 32 -> 80 combined, on the exam's own out_of (100).
+    check('getBroadsheet combines per-paper marks into one weighted effective score', sheet.students.find((s) => s.student_id === 's1').scores.su1 === 80);
   }
 
   // ---- broadsheet ranking with ties -----------------------------------------------
@@ -78,18 +113,33 @@ async function run() {
     const { sb, results } = freshApis();
     const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100 })).data;
     // Jane: 90 total. Amos: 70. Tie A & Tie B: both 60 (tie for 3rd).
-    await results.saveResultsEntry({ exam_id: exam.id, subject_id: 'su1', scores: [
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [
       { student_id: 's1', score: '90' }, { student_id: 's2', score: '70' }, { student_id: 's3', score: '60' }, { student_id: 's4', score: '60' }
     ] });
 
     const sheet = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1' });
     check('getBroadsheet succeeds', sheet.ok === true);
     check('getBroadsheet includes the subjects assigned to the class', sheet.subjects.length === 2);
+    check('getBroadsheet reports each subject\'s (default draft) submission status', sheet.subjects.every((s) => s.submission_status === 'draft'));
     const byId = {}; sheet.students.forEach((s) => { byId[s.student_id] = s; });
     check('getBroadsheet ranks the top scorer #1', byId.s1.position === 1);
     check('getBroadsheet ranks second place #2', byId.s2.position === 2);
     check('tied students share the same rank (both #3)', byId.s3.position === 3 && byId.s4.position === 3);
     check('rows are sorted by total descending', sheet.students[0].student_id === 's1');
+  }
+
+  // ---- broadsheet honours min-subjects-for-ranking --------------------------------
+  {
+    const { sb, results } = freshApis({ settings: [{ id: 'set1', key: 'min_subjects_for_ranking', value: '2' }] });
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100 })).data;
+    // Jane has both subjects; Amos only one -> Amos should be excluded from ranking.
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '80' }, { student_id: 's2', score: '90' }] });
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su2', scores: [{ student_id: 's1', score: '70' }] });
+
+    const sheet = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1' });
+    const byId = {}; sheet.students.forEach((s) => { byId[s.student_id] = s; });
+    check('a student below min_subjects_for_ranking gets no position', byId.s2.position === '');
+    check('a student meeting min_subjects_for_ranking is still ranked', byId.s1.position === 1);
   }
 
   // ---- getReportCard (via mocked RPC) ---------------------------------------------
@@ -109,11 +159,53 @@ async function run() {
   {
     const { sb, results } = freshApis();
     const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1' })).data;
-    await results.saveResultsEntry({ exam_id: exam.id, subject_id: 'su1', scores: [{ student_id: 's1', score: '50' }] });
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '50' }] });
     const mine = await results.getStudentExams('s1');
     check('getStudentExams finds exams the student has results for', mine.data.length === 1 && mine.data[0].id === exam.id);
     const none = await results.getStudentExams('s2');
     check('getStudentExams returns empty for a student with no results', none.data.length === 0);
+  }
+
+  // ---- publishing workflow (submission-status functions) --------------------------
+  {
+    const { sb, results } = freshApis();
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1' })).data;
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '50' }] });
+
+    const initial = await results.getSubmissionStatus(exam.id, 'c1', 'su1');
+    check('getSubmissionStatus defaults to draft when no row exists yet', initial.data.status === 'draft');
+
+    const submitted = await results.submitForApproval(exam.id, 'c1', 'su1');
+    check('submitForApproval creates a submission row with status submitted', submitted.ok === true && submitted.data.status === 'submitted');
+
+    const approved = await results.approveSubmission(exam.id, 'c1', 'su1');
+    check('approveSubmission updates the SAME row (no duplicate) to approved', approved.ok === true && approved.data.status === 'approved'
+      && sb._tables.result_submissions.filter((r) => r.exam_id === exam.id && r.class_id === 'c1' && r.subject_id === 'su1').length === 1);
+
+    const published = await results.publishSubmission(exam.id, 'c1', 'su1');
+    check('publishSubmission updates status to published', published.ok === true && published.data.status === 'published');
+
+    const list = await results.listSubmissions(exam.id, 'c1');
+    check('listSubmissions reports the current status for every subject with marks', list.ok === true && list.data.length === 1 && list.data[0].status === 'published');
+
+    const reopened = await results.reopenSubmission(exam.id, 'c1', 'su1');
+    check('reopenSubmission moves status back to draft', reopened.ok === true && reopened.data.status === 'draft');
+  }
+
+  // ---- publishExam bulk shortcut ---------------------------------------------------
+  {
+    const { sb, results } = freshApis();
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1' })).data;
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '50' }] });
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su2', scores: [{ student_id: 's1', score: '60' }] });
+
+    const bulk = await results.publishExam(exam.id, 'c1');
+    check('publishExam publishes every subject with marks entered', bulk.ok === true && bulk.published === 2 && bulk.total === 2);
+    const list = await results.listSubmissions(exam.id, 'c1');
+    check('publishExam actually published both subjects', list.data.every((r) => r.status === 'published'));
+
+    const empty = await results.publishExam(exam.id, 'c2');
+    check('publishExam errors when the class has no marks at all', empty.ok === false);
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

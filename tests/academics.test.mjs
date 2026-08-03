@@ -1,5 +1,5 @@
 import { createMockSupabase } from './helpers/mockSupabase.mjs';
-import { createAcademicsApi, CBC_SUBJECTS } from '../src/lib/api/academics.mjs';
+import { createAcademicsApi, CBC_SUBJECTS, STANDARD_CLASS_LEVELS } from '../src/lib/api/academics.mjs';
 
 let passed = 0, failed = 0;
 function check(name, cond) { if (cond) passed++; else { failed++; console.error('FAIL:', name); } }
@@ -118,6 +118,61 @@ async function run() {
     const api = createAcademicsApi(sb);
     const res = await api.streams.remove('st1');
     check('streams.remove is blocked when students are assigned', res.ok === false);
+  }
+
+  // ---- classes: standardized levels (Phase 2b) -----------------------------------
+  {
+    check('STANDARD_CLASS_LEVELS spans Daycare through Grade 9 (12 levels)',
+      STANDARD_CLASS_LEVELS.length === 12 && STANDARD_CLASS_LEVELS[0] === 'Daycare' && STANDARD_CLASS_LEVELS[11] === 'Grade 9');
+
+    const sb = createMockSupabase({});
+    const api = createAcademicsApi(sb);
+    const g1 = await api.classes.save({ name: 'Grade 1' });
+    check('classes.save auto-derives level_order for a standard class name', g1.data.level_order === 4);
+    const daycare = await api.classes.save({ name: 'daycare' });
+    check('classes.save matches standard names case-insensitively', daycare.data.level_order === 1);
+    const g9 = await api.classes.save({ name: 'Grade 9' });
+    check('classes.save orders the last standard level correctly', g9.data.level_order === 12);
+  }
+  {
+    const sb = createMockSupabase({ classes: [{ id: 'c1', name: 'Custom Class', level_order: 99 }] });
+    const api = createAcademicsApi(sb);
+    const updated = await api.classes.save({ id: 'c1', name: 'Custom Class', description: 'updated' });
+    check('classes.save preserves level_order for a non-standard (legacy) class when none is given', updated.ok === true && updated.data.level_order === 99);
+  }
+
+  // ---- classes: class teacher designation (Phase 2a) ---------------------------
+  {
+    const sb = createMockSupabase({ staff: [{ id: 'st1', full_name: 'Mr. Otieno' }] });
+    const api = createAcademicsApi(sb);
+    const saved = await api.classes.save({ name: 'Grade 7', class_teacher_staff_id: 'st1' });
+    check('classes.save persists a class_teacher_staff_id', saved.data.class_teacher_staff_id === 'st1');
+    const cleared = await api.classes.save({ id: saved.data.id, name: 'Grade 7' });
+    check('classes.save clears class_teacher_staff_id when omitted', cleared.data.class_teacher_staff_id === null);
+  }
+
+  // ---- subject papers (Paper 1 / Paper 2 weighting, Phase 2a) -------------------
+  {
+    const sb = createMockSupabase({ subjects: [{ id: 'su1', name: 'English' }] });
+    const api = createAcademicsApi(sb);
+    check('subjectPapers.save requires a subject', (await api.subjectPapers.save({ name: 'Paper 1' })).ok === false);
+    check('subjectPapers.save requires a name', (await api.subjectPapers.save({ subject_id: 'su1' })).ok === false);
+
+    const p1 = await api.subjectPapers.save({ subject_id: 'su1', name: 'Paper 1', paper_no: 1, weight: 0.6, out_of: 100 });
+    check('subjectPapers.save creates a paper', p1.ok === true && p1.data.weight === 0.6);
+    const p2 = await api.subjectPapers.save({ subject_id: 'su1', name: 'Paper 2', paper_no: 2, weight: 0.4, out_of: 50 });
+    check('subjectPapers.save creates a second paper for the same subject', p2.ok === true);
+    const dup = await api.subjectPapers.save({ subject_id: 'su1', name: 'Paper 1 again', paper_no: 1 });
+    check('subjectPapers.save rejects a duplicate paper_no for the same subject', dup.ok === false);
+
+    const listed = await api.subjectPapers.list('su1');
+    check('subjectPapers.list orders by paper_no', listed.data.length === 2 && listed.data[0].paper_no === 1 && listed.data[1].paper_no === 2);
+    check('subjectPapers.save defaults weight to 1 when not given', (await api.subjectPapers.save({ subject_id: 'su1', name: 'Paper 3', paper_no: 3 })).data.weight === 1);
+
+    const removed = await api.subjectPapers.remove(p1.data.id);
+    check('subjectPapers.remove deletes a paper', removed.ok === true);
+    const afterRemove = await api.subjectPapers.list('su1');
+    check('removed paper no longer appears', afterRemove.data.length === 2);
   }
 
   // ---- subjects + CBC ----------------------------------------------------------

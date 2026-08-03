@@ -4,6 +4,15 @@
 import { ok, err, byAdmissionNo } from './_util.mjs';
 
 const VALID_GENDERS = ['Male', 'Female'];
+export const LEAVING_REASONS = ['transferred', 'graduated', 'withdrawn', 'other'];
+export const LEAVING_REASON_LABELS = {
+  transferred: 'Transferred to another school', graduated: 'Graduated', withdrawn: 'Withdrawn', other: 'Other'
+};
+
+function todayIso() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
 
 export function createStudentsApi(supabase) {
   async function withNames(rows) {
@@ -58,7 +67,16 @@ export function createStudentsApi(supabase) {
         stream_id: payload.stream_id || null,
         guardian_name: payload.guardian_name || '',
         guardian_contact: payload.guardian_contact || '',
-        status: payload.status || 'active'
+        status: payload.status || 'active',
+        // Richer bio-data (Phase 2c) — all optional.
+        date_of_birth: payload.date_of_birth || null,
+        admission_date: payload.admission_date || null,
+        upi_number: payload.upi_number || '',
+        assessment_number: payload.assessment_number || '',
+        previous_school: payload.previous_school || '',
+        guardian_relationship: payload.guardian_relationship || '',
+        guardian_id_number: payload.guardian_id_number || '',
+        medical_notes: payload.medical_notes || ''
       };
 
       let dupQuery = supabase.from('students').select('id').eq('admission_no', admissionNo);
@@ -76,10 +94,59 @@ export function createStudentsApi(supabase) {
       return ok(data);
     },
 
+    /** Permanently deletes the student AND every historical record tied to
+     *  them (results, attendance, parent links — all cascade). Kept for
+     *  genuine mistakes (a duplicate/test record entered in error); for the
+     *  ordinary "this student left the school" case, use archive() instead
+     *  — it keeps their historical results/attendance intact for reference
+     *  rather than erasing them. */
     async remove(id) {
       const { error } = await supabase.from('students').delete().eq('id', id);
       if (error) return err(error.message);
       return ok(true);
+    },
+
+    /** Soft-remove: takes the student off the active roster (list() no
+     *  longer returns them by default, and they automatically drop out of
+     *  class ranking cohorts) while keeping every historical record —
+     *  results, attendance, parent links — untouched. This is the normal
+     *  path for "this student transferred / graduated / withdrew." */
+    async archive(id, payload) {
+      if (!id) return err('Missing student.');
+      payload = payload || {};
+      const reason = LEAVING_REASONS.indexOf(payload.reason) !== -1 ? payload.reason : 'other';
+      const rec = {
+        status: 'left',
+        left_reason: reason,
+        left_date: payload.left_date || todayIso(),
+        left_notes: payload.notes || ''
+      };
+      const { data, error } = await supabase.from('students').update(rec).eq('id', id).select().single();
+      if (error) return err(error.message);
+      return ok(data);
+    },
+
+    /** Puts an archived student back on the active roster. */
+    async restore(id) {
+      if (!id) return err('Missing student.');
+      const { data, error } = await supabase.from('students')
+        .update({ status: 'active', left_reason: null, left_date: null, left_notes: null }).eq('id', id).select().single();
+      if (error) return err(error.message);
+      return ok(data);
+    },
+
+    /** Move one or more students to a different class/stream at once — the
+     *  "promotion day" case (moving a whole class up a grade), rather than
+     *  editing students one at a time. */
+    async bulkMove(payload) {
+      payload = payload || {};
+      const ids = Array.isArray(payload.student_ids) ? payload.student_ids.filter(Boolean) : [];
+      if (!ids.length) return err('Choose at least one student to move.');
+      if (!payload.class_id) return err('Please choose the class to move them to.');
+      const rec = { class_id: payload.class_id, stream_id: payload.stream_id || null };
+      const { error } = await supabase.from('students').update(rec).in('id', ids);
+      if (error) return err(error.message);
+      return ok(null, { moved: ids.length });
     },
 
     /**

@@ -92,6 +92,12 @@ create table public.staff (
   qualifications text,
   employment_start_date date,
   status row_status not null default 'active',
+  -- Richer HR bio-data (Phase 2c) — all optional, filled in as convenient.
+  date_of_birth date,
+  national_id text,
+  tsc_number text,
+  next_of_kin_name text,
+  next_of_kin_contact text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (school_id, email)
@@ -143,6 +149,10 @@ create table public.classes (
   name text not null,                          -- e.g. 'Grade 7'
   level_order int not null default 0,          -- controls display/sort order
   description text,
+  -- The "Class Teacher" step of the exam-publishing workflow (Phase 2) —
+  -- nullable; a class with none set can only be approved by an admin (see
+  -- is_class_teacher_of() below).
+  class_teacher_staff_id uuid references public.staff(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (school_id, name)
@@ -183,6 +193,27 @@ create trigger trg_subjects_updated_at before update on public.subjects
   for each row execute function public.set_updated_at();
 create index idx_subjects_school on public.subjects(school_id);
 
+-- Subject papers (e.g. English Paper 1 + Paper 2) — opt-in per subject; a
+-- subject with zero rows here is "single-paper" and works exactly as if
+-- this table didn't exist. `weight` is this paper's share of the combined
+-- subject score (a subject's papers should have weights summing to 1).
+create table public.subject_papers (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  subject_id uuid not null references public.subjects(id) on delete cascade,
+  name text not null,
+  paper_no int not null default 1,
+  weight numeric not null default 1,
+  out_of numeric not null default 100,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (subject_id, paper_no)
+);
+create trigger trg_subject_papers_updated_at before update on public.subject_papers
+  for each row execute function public.set_updated_at();
+create index idx_subject_papers_school on public.subject_papers(school_id);
+create index idx_subject_papers_subject on public.subject_papers(subject_id);
+
 -- ----------------------------------------------------------------------------
 -- students
 -- ----------------------------------------------------------------------------
@@ -196,7 +227,23 @@ create table public.students (
   stream_id uuid references public.streams(id) on delete set null,
   guardian_name text,
   guardian_contact text,
-  status row_status not null default 'active',
+  -- Deliberately plain text + its own check constraint, not row_status —
+  -- students have a third lifecycle value ('left') that the shared
+  -- active/inactive enum (used differently by staff/parent logins) doesn't
+  -- carry. See migrations/0006_students_lifecycle.sql for the full reasoning.
+  status text not null default 'active' check (status in ('active', 'left')),
+  left_reason text check (left_reason is null or left_reason in ('transferred', 'graduated', 'withdrawn', 'other')),
+  left_date date,
+  left_notes text,
+  -- Richer bio-data (Phase 2c) — all optional, filled in as convenient.
+  date_of_birth date,
+  admission_date date,
+  upi_number text,
+  assessment_number text,
+  previous_school text,
+  guardian_relationship text,
+  guardian_id_number text,
+  medical_notes text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (school_id, admission_no)
@@ -287,6 +334,43 @@ returns boolean language sql stable as $$ select public.current_role() = 'admin'
 
 create or replace function public.is_staff()
 returns boolean language sql stable as $$ select public.current_role() in ('admin','teacher') $$;
+
+-- ----------------------------------------------------------------------------
+-- staff_capabilities — a small, purpose-built capability grant (started
+-- minimal and real rather than speculative — see result_submissions below,
+-- the one thing this currently gates). Only 'publish_results' exists today;
+-- add more values to the check constraint as later phases give staff more
+-- granular grants.
+-- ----------------------------------------------------------------------------
+create table public.staff_capabilities (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  staff_id uuid not null references public.staff(id) on delete cascade,
+  capability text not null,
+  created_at timestamptz not null default now(),
+  unique (staff_id, capability),
+  constraint staff_capabilities_capability_check check (capability in ('publish_results'))
+);
+create index idx_staff_capabilities_school on public.staff_capabilities(school_id);
+create index idx_staff_capabilities_staff on public.staff_capabilities(staff_id);
+
+create or replace function public.has_capability(p_capability text)
+returns boolean language sql stable security definer set search_path = public
+as $$
+  select public.is_admin() or exists (
+    select 1 from public.staff_capabilities
+    where staff_id = public.current_staff_id() and capability = p_capability
+  );
+$$;
+
+create or replace function public.is_class_teacher_of(p_class_id uuid)
+returns boolean language sql stable security definer set search_path = public
+as $$
+  select public.is_admin() or exists (
+    select 1 from public.classes
+    where id = p_class_id and class_teacher_staff_id is not null and class_teacher_staff_id = public.current_staff_id()
+  );
+$$;
 
 -- Auto-stamp: every tenant table's BEFORE INSERT trigger fills in school_id
 -- from the signed-in user's own profile whenever the caller didn't set it
@@ -390,8 +474,10 @@ create table public.exams (
   term_id uuid not null references public.terms(id) on delete cascade,
   out_of numeric not null default 100,
   status text not null default 'open',         -- informational only (e.g. 'open'/'closed'); no fixed enum, no logic branches on it
+  exam_type text not null default 'summative',
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint exams_exam_type_check check (exam_type in ('summative', 'formative', 'cat', 'mock'))
 );
 create trigger trg_exams_updated_at before update on public.exams
   for each row execute function public.set_updated_at();
@@ -405,19 +491,139 @@ create table public.results (
   subject_id uuid not null references public.subjects(id) on delete cascade,
   academic_year_id uuid references public.academic_years(id) on delete set null,
   term_id uuid references public.terms(id) on delete set null,
+  -- Which paper this row is (null = whole-subject mark, the common case —
+  -- see subject_papers above), and a SNAPSHOT of the student's class at the
+  -- time marks were entered (needed for the publish gate below to key off
+  -- exactly the (exam, class, subject) grouping marks are actually entered
+  -- by, regardless of a student moving classes afterwards).
+  paper_id uuid references public.subject_papers(id) on delete set null,
+  class_id uuid references public.classes(id) on delete set null,
   score numeric,
   grade_label text,
   points numeric,
   remark text,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (exam_id, student_id, subject_id)
+  updated_at timestamptz not null default now()
 );
 create trigger trg_results_updated_at before update on public.results
   for each row execute function public.set_updated_at();
 create index idx_results_student on public.results(student_id);
 create index idx_results_exam on public.results(exam_id);
 create index idx_results_school on public.results(school_id);
+-- Partial (not a single plain UNIQUE) because a subject can have some
+-- students on a whole-subject mark (paper_id null) and others on a
+-- per-paper mark — exactly one row per student per subject per paper (or
+-- per subject, if none) either way.
+create unique index idx_results_unique_no_paper on public.results(exam_id, student_id, subject_id) where paper_id is null;
+create unique index idx_results_unique_with_paper on public.results(exam_id, student_id, subject_id, paper_id) where paper_id is not null;
+
+-- ----------------------------------------------------------------------------
+-- result_submissions — one row per (exam, class, subject); its `status` is
+-- the single source of truth for whether a student/parent may see the
+-- matching `results` rows (see the publish-gated RLS policies further
+-- below). A trigger (not a plain RLS clause) enforces who may move it to
+-- each next stage of Subject Teacher -> Class Teacher -> [capability
+-- holder/Admin], because the correct check depends on BOTH the old and new
+-- status, not just the new row in isolation.
+-- ----------------------------------------------------------------------------
+create table public.result_submissions (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  exam_id uuid not null references public.exams(id) on delete cascade,
+  class_id uuid not null references public.classes(id) on delete cascade,
+  subject_id uuid not null references public.subjects(id) on delete cascade,
+  status text not null default 'draft',
+  submitted_by uuid references public.staff(id) on delete set null,
+  submitted_at timestamptz,
+  approved_by uuid references public.staff(id) on delete set null,
+  approved_at timestamptz,
+  published_by uuid references public.staff(id) on delete set null,
+  published_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (exam_id, class_id, subject_id),
+  constraint result_submissions_status_check check (status in ('draft', 'submitted', 'approved', 'published'))
+);
+create trigger trg_result_submissions_updated_at before update on public.result_submissions
+  for each row execute function public.set_updated_at();
+create index idx_result_submissions_school on public.result_submissions(school_id);
+create index idx_result_submissions_exam on public.result_submissions(exam_id);
+
+create or replace function public.check_result_submission_transition()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_old_status text;
+begin
+  -- No signed-in session means this write is coming from a raw SQL
+  -- Editor/service-role context, not a real user request — trust it
+  -- unconditionally. RLS already requires is_staff() to reach this trigger
+  -- at all, and an anon/authenticated caller always has a resolvable
+  -- auth.uid() once signed in, so this branch can only be hit by a
+  -- superuser/service-role connection (e.g. a migration's own backfill).
+  if auth.uid() is null then
+    return new;
+  end if;
+
+  v_old_status := case when TG_OP = 'INSERT' then 'draft' else old.status end;
+
+  if new.status is distinct from v_old_status then
+    if new.status = 'submitted' then
+      if not public.is_staff() then
+        raise exception 'Only staff can submit results for approval' using errcode = '42501';
+      end if;
+      new.submitted_by := public.current_staff_id();
+      new.submitted_at := now();
+    elsif new.status = 'approved' then
+      if not public.is_class_teacher_of(new.class_id) then
+        raise exception 'Only this class''s class teacher (or an admin) can approve its results' using errcode = '42501';
+      end if;
+      if v_old_status <> 'submitted' and not public.is_admin() then
+        raise exception 'Results must be submitted by the subject teacher before they can be approved' using errcode = '42501';
+      end if;
+      new.approved_by := public.current_staff_id();
+      new.approved_at := now();
+    elsif new.status = 'published' then
+      if not public.has_capability('publish_results') then
+        raise exception 'You do not have permission to publish results' using errcode = '42501';
+      end if;
+      if v_old_status <> 'approved' and not public.is_admin() then
+        raise exception 'Results must be approved by the class teacher before they can be published' using errcode = '42501';
+      end if;
+      new.published_by := public.current_staff_id();
+      new.published_at := now();
+    elsif new.status = 'draft' then
+      if v_old_status <> 'draft' and not public.is_admin() then
+        raise exception 'Only an admin can reopen a submitted/approved/published result set' using errcode = '42501';
+      end if;
+      new.approved_by := null; new.approved_at := null;
+      new.published_by := null; new.published_at := null;
+    end if;
+  end if;
+  return new;
+end;
+$$;
+create trigger trg_result_submissions_transition before insert or update on public.result_submissions
+  for each row execute function public.check_result_submission_transition();
+
+-- SECURITY DEFINER so a plain RLS policy on `results` can check publish
+-- status without needing the CALLING role (a student/parent) to also have
+-- read access to result_submissions itself — same reasoning as
+-- current_parent_student_ids() further below: a policy's EXISTS subquery
+-- against another table is still subject to THAT table's own RLS for the
+-- caller, so without this wrapper a student could never satisfy the check
+-- at all (result_submissions' own policy only lets staff read it directly).
+create or replace function public.is_result_published(p_exam_id uuid, p_class_id uuid, p_subject_id uuid)
+returns boolean language sql stable security definer set search_path = public
+as $$
+  select exists (
+    select 1 from public.result_submissions
+    where exam_id = p_exam_id and class_id = p_class_id and subject_id = p_subject_id and status = 'published'
+  );
+$$;
 
 -- ----------------------------------------------------------------------------
 -- settings (key/value, same shape as the Apps Script version, now one row
@@ -465,6 +671,12 @@ create trigger trg_results_school_id before insert on public.results
   for each row execute function public.set_school_id();
 create trigger trg_settings_school_id before insert on public.settings
   for each row execute function public.set_school_id();
+create trigger trg_subject_papers_school_id before insert on public.subject_papers
+  for each row execute function public.set_school_id();
+create trigger trg_staff_capabilities_school_id before insert on public.staff_capabilities
+  for each row execute function public.set_school_id();
+create trigger trg_result_submissions_school_id before insert on public.result_submissions
+  for each row execute function public.set_school_id();
 
 -- ============================================================================
 -- Row-Level Security
@@ -494,6 +706,9 @@ alter table public.grade_ranges enable row level security;
 alter table public.exams enable row level security;
 alter table public.results enable row level security;
 alter table public.settings enable row level security;
+alter table public.subject_papers enable row level security;
+alter table public.staff_capabilities enable row level security;
+alter table public.result_submissions enable row level security;
 
 -- schools: a signed-in user may read their OWN school's row (for branding /
 -- account screens). Creating, renaming, suspending a school is a service-role
@@ -642,15 +857,55 @@ create policy exams_staff_update on public.exams for update
 create policy exams_admin_delete on public.exams for delete
   using (public.is_admin() and school_id = public.current_school_id());
 
--- results: staff (admin+teacher) can enter/edit; nobody but admin deletes;
--- a student can read only rows that are their own
+-- results: staff (admin+teacher) can enter/edit and always read everything
+-- in their own school (published or not — they need to review before
+-- publishing); a student can read only their OWN rows, and only once the
+-- matching (exam, class, subject) result_submissions row is 'published' —
+-- see Phase 2's publishing workflow further below. Nobody but admin deletes.
 create policy results_read on public.results for select
-  using ((public.is_staff() or student_id = public.current_student_id()) and school_id = public.current_school_id());
+  using (
+    (public.is_staff() and school_id = public.current_school_id())
+    or (
+      student_id = public.current_student_id()
+      and school_id = public.current_school_id()
+      and public.is_result_published(exam_id, class_id, subject_id)
+    )
+  );
 create policy results_staff_write on public.results for insert
   with check (public.is_staff() and school_id = public.current_school_id());
 create policy results_staff_update on public.results for update
   using (public.is_staff() and school_id = public.current_school_id());
 create policy results_admin_delete on public.results for delete
+  using (public.is_admin() and school_id = public.current_school_id());
+
+create policy subject_papers_read on public.subject_papers for select
+  using (school_id = public.current_school_id());
+create policy subject_papers_admin_write on public.subject_papers for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy subject_papers_admin_update on public.subject_papers for update
+  using (public.is_admin() and school_id = public.current_school_id());
+create policy subject_papers_admin_delete on public.subject_papers for delete
+  using (public.is_admin() and school_id = public.current_school_id());
+
+create policy staff_capabilities_read on public.staff_capabilities for select
+  using (public.is_staff() and school_id = public.current_school_id());
+create policy staff_capabilities_admin_write on public.staff_capabilities for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy staff_capabilities_admin_delete on public.staff_capabilities for delete
+  using (public.is_admin() and school_id = public.current_school_id());
+
+-- result_submissions: broad RLS gate is just "any staff member in this
+-- school" — the SPECIFIC per-stage authorization (only the class teacher
+-- may approve, only a capability holder may publish, etc.) is enforced by
+-- the check_result_submission_transition() trigger above, not here, because
+-- it depends on both the old and new status together.
+create policy result_submissions_read on public.result_submissions for select
+  using (public.is_staff() and school_id = public.current_school_id());
+create policy result_submissions_staff_write on public.result_submissions for insert
+  with check (public.is_staff() and school_id = public.current_school_id());
+create policy result_submissions_staff_update on public.result_submissions for update
+  using (public.is_staff() and school_id = public.current_school_id());
+create policy result_submissions_admin_delete on public.result_submissions for delete
   using (public.is_admin() and school_id = public.current_school_id());
 
 -- ============================================================================
@@ -808,7 +1063,10 @@ begin
     (p_school_id, 'po_box', ''),
     (p_school_id, 'phone', ''),
     (p_school_id, 'email', ''),
-    (p_school_id, 'logo', '')
+    (p_school_id, 'logo', ''),
+    -- Minimum-subjects-for-ranking rule (Phase 2a) — '0' means "no rule, rank
+    -- everyone with a total > 0", the same behaviour every school already had.
+    (p_school_id, 'min_subjects_for_ranking', '0')
   on conflict (school_id, key) do nothing;
 end;
 $$;
@@ -1223,3 +1481,199 @@ begin
 end;
 $$;
 grant execute on function public.get_report_card(uuid, uuid) to authenticated;
+
+-- ============================================================================
+-- Phase 2a — Exam Workflow Maturity
+-- ============================================================================
+-- results_parent_read (Phase 1, above) now also needs the publish gate —
+-- create-or-replace-ing it here rather than editing the Phase 1 block keeps
+-- this file's own history readable phase-by-phase, same convention
+-- get_report_card already uses.
+drop policy if exists results_parent_read on public.results;
+create policy results_parent_read on public.results for select
+  using (
+    public.current_role() = 'parent'
+    and student_id = any(public.current_parent_student_ids())
+    and school_id = public.current_school_id()
+    and public.is_result_published(exam_id, class_id, subject_id)
+  );
+
+-- get_report_card(): re-implemented on top of the publish gate + subject
+-- paper weighting + minimum-subjects-for-ranking rule. Staff (admin/teacher)
+-- still see every entered mark when previewing (published or not — useful
+-- to check work before publishing); a student/parent only ever sees
+-- published subjects. Class ranking is ALWAYS computed from published
+-- results only, for every student in the cohort, regardless of who's
+-- asking — so a position never depends on what a staff member happens to
+-- be mid-editing, and is always a fair, stable, apples-to-apples number.
+create or replace function public.get_report_card(p_exam_id uuid, p_student_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_role user_role;
+  v_own_student_id uuid;
+  v_caller_school uuid;
+  v_student public.students%rowtype;
+  v_exam public.exams%rowtype;
+  v_class public.classes%rowtype;
+  v_stream public.streams%rowtype;
+  v_year public.academic_years%rowtype;
+  v_term public.terms%rowtype;
+  v_subjects jsonb;
+  v_total numeric := 0;
+  v_count int := 0;
+  v_average numeric := 0;
+  v_overall_grade text;
+  v_position int;
+  v_class_size int;
+  v_authorized boolean := false;
+  v_staff_view boolean;
+  v_min_subjects int := 0;
+begin
+  v_role := public.current_role();
+  v_own_student_id := public.current_student_id();
+  v_caller_school := public.current_school_id();
+
+  if v_role is null or v_caller_school is null then
+    raise exception 'Not authorized to view this report card' using errcode = '42501';
+  end if;
+
+  if v_role in ('admin', 'teacher') then
+    v_authorized := true;
+  elsif v_role = 'student' and v_own_student_id is not distinct from p_student_id then
+    v_authorized := true;
+  elsif v_role = 'parent' and p_student_id = any(public.current_parent_student_ids()) then
+    v_authorized := true;
+  end if;
+  if not v_authorized then
+    raise exception 'Not authorized to view this report card' using errcode = '42501';
+  end if;
+  v_staff_view := v_role in ('admin', 'teacher');
+
+  select * into v_student from public.students where id = p_student_id and school_id = v_caller_school;
+  if not found then raise exception 'Student not found'; end if;
+
+  select * into v_exam from public.exams where id = p_exam_id and school_id = v_caller_school;
+  if not found then raise exception 'Exam not found'; end if;
+
+  select * into v_class from public.classes where id = v_student.class_id;
+  select * into v_stream from public.streams where id = v_student.stream_id;
+  select * into v_year from public.academic_years where id = v_exam.academic_year_id;
+  select * into v_term from public.terms where id = v_exam.term_id;
+
+  select coalesce(nullif(value, '')::int, 0) into v_min_subjects
+    from public.settings where school_id = v_caller_school and key = 'min_subjects_for_ranking';
+  if v_min_subjects is null then v_min_subjects := 0; end if;
+
+  with per_row as (
+    select
+      r.subject_id,
+      coalesce(s.name, '(deleted)') as subject_name,
+      r.score,
+      coalesce(sp.weight, 1) as weight,
+      coalesce(sp.out_of, v_exam.out_of, 100) as row_out_of
+    from public.results r
+    left join public.subjects s on s.id = r.subject_id
+    left join public.subject_papers sp on sp.id = r.paper_id
+    where r.exam_id = p_exam_id and r.student_id = p_student_id and r.school_id = v_caller_school
+      and r.score is not null
+      and (v_staff_view or exists (
+        select 1 from public.result_submissions rs2
+        where rs2.exam_id = r.exam_id and rs2.class_id = r.class_id and rs2.subject_id = r.subject_id
+          and rs2.status = 'published'
+      ))
+  ),
+  per_subject as (
+    select subject_id, subject_name, sum(score * weight / row_out_of * v_exam.out_of) as effective_score
+    from per_row
+    group by subject_id, subject_name
+  ),
+  graded as (
+    select ps.subject_id, ps.subject_name, ps.effective_score, gr.grade_label, gr.points, gr.remark
+    from per_subject ps
+    left join lateral (
+      select gr.grade_label, gr.points, gr.remark
+      from public.grade_ranges gr
+      join public.grading_scales gs on gs.id = gr.grading_scale_id
+      where gs.is_default = true and gs.school_id = v_caller_school
+        and ps.effective_score >= gr.min_score and ps.effective_score <= gr.max_score
+      limit 1
+    ) gr on true
+  )
+  select
+    coalesce(jsonb_agg(jsonb_build_object(
+      'subject_id', subject_id, 'subject_name', subject_name,
+      'score', round(effective_score, 2), 'grade_label', coalesce(grade_label, ''),
+      'points', points, 'remark', coalesce(remark, '')
+    ) order by subject_name), '[]'::jsonb),
+    coalesce(sum(effective_score), 0),
+    count(*)
+  into v_subjects, v_total, v_count
+  from graded;
+
+  v_average := case when v_count > 0 then round(v_total / v_count, 2) else 0 end;
+
+  select grade_label into v_overall_grade
+    from public.grade_ranges gr
+    join public.grading_scales gs on gs.id = gr.grading_scale_id and gs.is_default = true and gs.school_id = v_caller_school
+    where v_average >= gr.min_score and v_average <= gr.max_score
+    limit 1;
+
+  with cohort as (
+    select
+      st.id,
+      coalesce((
+        select sum(r2.score * coalesce(sp2.weight, 1) / coalesce(sp2.out_of, v_exam.out_of, 100) * v_exam.out_of)
+        from public.results r2
+        left join public.subject_papers sp2 on sp2.id = r2.paper_id
+        where r2.exam_id = p_exam_id and r2.student_id = st.id and r2.school_id = v_caller_school
+          and r2.score is not null
+          and exists (
+            select 1 from public.result_submissions rs3
+            where rs3.exam_id = r2.exam_id and rs3.class_id = r2.class_id and rs3.subject_id = r2.subject_id
+              and rs3.status = 'published'
+          )
+      ), 0) as total,
+      (
+        select count(distinct r3.subject_id)
+        from public.results r3
+        where r3.exam_id = p_exam_id and r3.student_id = st.id and r3.school_id = v_caller_school
+          and r3.score is not null
+          and exists (
+            select 1 from public.result_submissions rs4
+            where rs4.exam_id = r3.exam_id and rs4.class_id = r3.class_id and rs4.subject_id = r3.subject_id
+              and rs4.status = 'published'
+          )
+      ) as subject_count
+    from public.students st
+    where st.class_id = v_student.class_id and st.status = 'active' and st.school_id = v_caller_school
+  ),
+  ranked as (
+    select id, total, rank() over (order by total desc) as pos
+    from cohort
+    where total > 0 and subject_count >= v_min_subjects
+  )
+  select (select pos from ranked where id = p_student_id),
+         (select count(*) from ranked)
+    into v_position, v_class_size;
+
+  return jsonb_build_object(
+    'student', jsonb_build_object(
+      'full_name', v_student.full_name, 'admission_no', v_student.admission_no,
+      'class_name', coalesce(v_class.name, ''), 'stream_name', coalesce(v_stream.name, ''),
+      'gender', v_student.gender
+    ),
+    'exam', jsonb_build_object('name', v_exam.name, 'out_of', v_exam.out_of, 'exam_type', v_exam.exam_type),
+    'session_name', coalesce(v_year.name, ''), 'term_name', coalesce(v_term.name, ''),
+    'subjects', v_subjects, 'total', v_total, 'average', v_average,
+    'overall_grade', coalesce(v_overall_grade, ''), 'position', v_position,
+    'class_size', coalesce(v_class_size, 0)
+  );
+end;
+$$;
+grant execute on function public.get_report_card(uuid, uuid) to authenticated;
+grant execute on function public.has_capability(text) to authenticated;
+grant execute on function public.is_class_teacher_of(uuid) to authenticated;

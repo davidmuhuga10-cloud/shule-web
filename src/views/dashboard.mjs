@@ -11,7 +11,6 @@ export async function viewDashboard(root) {
     ['👨‍🏫', counts.staff, 'Staff', 't-green'],
     ['🏫', counts.classes, 'Classes', 't-amber'],
     ['🔀', counts.streams, 'Streams', 't-purple'],
-    ['📚', counts.subjects, 'Subjects', 't-teal'],
     ['📝', counts.exams, 'Exams', 't-rose']
   ].map(([ico, val, lab, cls]) => `<div class="stat">
     <div class="s-ico ${cls}">${ico}</div>

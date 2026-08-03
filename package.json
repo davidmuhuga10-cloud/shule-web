@@ -5,7 +5,7 @@
   "description": "Shule — School Management System for Kenyan schools (Netlify + Supabase).",
   "scripts": {
     "dev": "netlify dev",
-    "test": "node tests/admin-provision.test.js && node tests/school-signup.test.js && node tests/send-message.test.js && node tests/academics.test.mjs && node tests/students.test.mjs && node tests/staff_assignments.test.mjs && node tests/grading.test.mjs && node tests/results.test.mjs && node tests/dashboard_settings_users.test.mjs && node tests/attendance.test.mjs && node tests/messaging.test.mjs && node tests/parents.test.mjs",
+    "test": "node tests/admin-provision.test.js && node tests/school-signup.test.js && node tests/send-message.test.js && node tests/academics.test.mjs && node tests/students.test.mjs && node tests/staff_assignments.test.mjs && node tests/grading.test.mjs && node tests/results.test.mjs && node tests/capabilities.test.mjs && node tests/dashboard_settings_users.test.mjs && node tests/attendance.test.mjs && node tests/messaging.test.mjs && node tests/parents.test.mjs",
     "build:vendor": "esbuild --bundle --format=esm --platform=browser --outfile=src/vendor/supabase-js.esm.js ./node_modules/@supabase/supabase-js/dist/index.mjs"
   },
   "dependencies": {

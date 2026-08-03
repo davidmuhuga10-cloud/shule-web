@@ -5,6 +5,23 @@
  */
 import { ok, err, gradeScore } from './_util.mjs';
 
+/** The official 8-band CBC competency scale (Below/Approaching/Meeting/Exceeding
+ *  Expectation, split 1/2). Offered as a loadable preset alongside a school's
+ *  default letter-grade scale — schools pick whichever they report with via
+ *  the existing "Make default" mechanism; loading this one never touches or
+ *  removes the letter-grade scale. */
+export const CBC_COMPETENCY_SCALE_NAME = 'CBC Competency Scale';
+export const CBC_COMPETENCY_BANDS = [
+  { min_score: 0, max_score: 12, grade_label: 'BE2', points: 1, remark: 'Below Expectation' },
+  { min_score: 13, max_score: 24, grade_label: 'BE1', points: 2, remark: 'Below Expectation' },
+  { min_score: 25, max_score: 36, grade_label: 'AE2', points: 3, remark: 'Approaching Expectation' },
+  { min_score: 37, max_score: 49, grade_label: 'AE1', points: 4, remark: 'Approaching Expectation' },
+  { min_score: 50, max_score: 60, grade_label: 'ME2', points: 5, remark: 'Meeting Expectation' },
+  { min_score: 61, max_score: 72, grade_label: 'ME1', points: 6, remark: 'Meeting Expectation' },
+  { min_score: 73, max_score: 84, grade_label: 'EE2', points: 7, remark: 'Exceeding Expectation' },
+  { min_score: 85, max_score: 100, grade_label: 'EE1', points: 8, remark: 'Exceeding Expectation' }
+];
+
 export function createGradingApi(supabase) {
   const api = {
     async listScales() {
@@ -81,6 +98,28 @@ export function createGradingApi(supabase) {
       const { error } = await supabase.from('grade_ranges').delete().eq('id', id);
       if (error) return err(error.message);
       return ok(true);
+    },
+
+    /** (Re)load the CBC competency scale preset. Safe to click more than once —
+     *  if the scale already exists this is a no-op rather than a duplicate. */
+    async loadCbcCompetencyScale() {
+      const { data: existing } = await supabase.from('grading_scales').select('id')
+        .ilike('name', CBC_COMPETENCY_SCALE_NAME).maybeSingle();
+      if (existing) return ok(null, { added: false });
+
+      const { count } = await supabase.from('grading_scales').select('id', { count: 'exact', head: true });
+      const { data: scale, error } = await supabase.from('grading_scales')
+        .insert({
+          name: CBC_COMPETENCY_SCALE_NAME,
+          description: 'The 8-band CBC competency-based scale (Below/Approaching/Meeting/Exceeding Expectation).',
+          is_default: (count || 0) === 0
+        }).select().single();
+      if (error) return err(error.message);
+
+      const { error: bandErr } = await supabase.from('grade_ranges')
+        .insert(CBC_COMPETENCY_BANDS.map((b) => ({ ...b, grading_scale_id: scale.id })));
+      if (bandErr) return err(bandErr.message);
+      return ok(null, { added: true });
     },
 
     /** The default scale's bands — used internally by results.mjs to grade a score. */

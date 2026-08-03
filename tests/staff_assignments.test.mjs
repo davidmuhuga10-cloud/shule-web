@@ -27,6 +27,23 @@ async function run() {
     check('save allows re-saving the same staff member with their own email', selfEdit.ok === true);
   }
 
+  // ---- richer HR profile fields (Phase 2c) -------------------------------------
+  {
+    const sb = createMockSupabase({});
+    const api = createStaffApi(sb);
+    const saved = await api.save({
+      full_name: 'Mr Teacher', date_of_birth: '1985-06-20', national_id: '11223344',
+      tsc_number: 'TSC998877', next_of_kin_name: 'Mrs Teacher', next_of_kin_contact: '0700111222'
+    });
+    check('save persists richer HR profile fields', saved.ok === true
+      && saved.data.date_of_birth === '1985-06-20' && saved.data.national_id === '11223344'
+      && saved.data.tsc_number === 'TSC998877' && saved.data.next_of_kin_name === 'Mrs Teacher'
+      && saved.data.next_of_kin_contact === '0700111222');
+    const minimal = await api.save({ full_name: 'Mrs Teacher 2' });
+    check('save defaults richer HR profile fields to blank/null when omitted', minimal.ok === true
+      && minimal.data.date_of_birth === null && minimal.data.tsc_number === '');
+  }
+
   // ---- setClassSubjects (with stream-inheritance reporting) --------------------
   {
     const sb = createMockSupabase({

@@ -102,9 +102,9 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .card.pad{padding:20px}
 
 /* ---------- Stat tiles ---------- */
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:22px}
+.stats{display:flex;flex-wrap:wrap;justify-content:center;gap:16px;margin-bottom:22px}
 .stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;
-  box-shadow:var(--shadow);display:flex;align-items:center;gap:15px}
+  box-shadow:var(--shadow);display:flex;align-items:center;gap:15px;flex:1 1 210px;max-width:240px}
 .stat .s-ico{width:48px;height:48px;border-radius:12px;display:grid;place-items:center;font-size:22px;flex-shrink:0}
 .stat .s-val{font-size:26px;font-weight:750;line-height:1}
 .stat .s-lab{color:var(--muted);font-size:12.5px;margin-top:4px}
@@ -242,6 +242,8 @@ table.data td.num,table.data th.num{text-align:center}
   .report{border:none;box-shadow:none;max-width:none}
   body{background:#fff}
   .col.print-hide{display:none!important}
+  .batch-page{page-break-after:always}
+  .batch-page:last-child{page-break-after:auto}
 }
 
 /* ---------- Loader ---------- */

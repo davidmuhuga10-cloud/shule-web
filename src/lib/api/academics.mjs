@@ -14,6 +14,20 @@ import { ok, err, fromResult } from './_util.mjs';
  *  Junior Secondary rationalisation to 9 core subjects — identical list to
  *  the Apps Script version's CBC_SUBJECTS. */
 export const CBC_LEVELS = ['Pre-Primary', 'Lower Primary', 'Upper Primary', 'Junior Secondary'];
+
+/** The 12 standard class levels this product supports, Daycare through
+ *  Grade 9 (CBC pre-primary through junior secondary). Phase 2b: a class is
+ *  now chosen from this fixed list rather than typed freehand, so every
+ *  school's class names line up exactly the same way across the whole
+ *  platform — this is what makes cross-school reporting/printouts and the
+ *  CBC level groupings elsewhere (subjects, promotions) reliable. Streams
+ *  (a class's own arms, e.g. "North"/"South") are still freely named per
+ *  school — only the class level itself is standardized. */
+export const STANDARD_CLASS_LEVELS = [
+  'Daycare', 'PP1', 'PP2',
+  'Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 'Grade 6',
+  'Grade 7', 'Grade 8', 'Grade 9'
+];
 export const CBC_SUBJECTS = [
   { name: 'Language Activities', level: 'Pre-Primary' },
   { name: 'Mathematical Activities', level: 'Pre-Primary' },
@@ -159,12 +173,34 @@ export function createAcademicsApi(supabase) {
         }
         return ok(rows);
       },
-      /** payload.streams: optional array of stream names to ensure exist for this class. */
+      /** payload.streams: optional array of stream names to ensure exist for this class.
+       *  level_order is derived automatically when `name` matches one of
+       *  STANDARD_CLASS_LEVELS (Daycare=1 ... Grade 9=12), so every school's
+       *  classes sort identically without anyone having to set an order by
+       *  hand. A class saved under a non-standard name (legacy data from
+       *  before this list existed) keeps whatever level_order it already
+       *  had, or the caller's explicit value, so nothing already in the
+       *  database breaks. */
       async save(payload) {
         payload = payload || {};
         const name = String(payload.name || '').trim();
-        if (!name) return err('Class name is required (e.g. "Form 1" or "Grade 7").');
-        const rec = { name, level_order: payload.level_order || 0, description: payload.description || '' };
+        if (!name) return err('Please choose a class.');
+        const stdIndex = STANDARD_CLASS_LEVELS.findIndex((n) => n.toLowerCase() === name.toLowerCase());
+        let level_order;
+        if (stdIndex !== -1) {
+          level_order = stdIndex + 1;
+        } else if (payload.level_order !== undefined && payload.level_order !== null && payload.level_order !== '') {
+          level_order = Number(payload.level_order) || 0;
+        } else if (payload.id) {
+          const { data: current } = await supabase.from('classes').select('level_order').eq('id', payload.id).maybeSingle();
+          level_order = current ? current.level_order : 0;
+        } else {
+          level_order = 0;
+        }
+        const rec = {
+          name, level_order, description: payload.description || '',
+          class_teacher_staff_id: payload.class_teacher_staff_id || null
+        };
         let saved;
         if (payload.id) {
           const { data, error } = await supabase.from('classes').update(rec).eq('id', payload.id).select().single();
@@ -299,6 +335,49 @@ export function createAcademicsApi(supabase) {
           .select();
         if (error) return err(error.message);
         return ok(null, { added: (data || []).length });
+      }
+    },
+
+    /** Paper 1 / Paper 2 (etc.) weighting per subject — see subject_papers
+     *  in migrations/0005_exam_workflow.sql. A subject with zero rows here
+     *  is "single-paper" and marks entry/broadsheets/report cards all work
+     *  exactly as they always have. */
+    subjectPapers: {
+      async list(subjectId) {
+        let q = supabase.from('subject_papers').select('*');
+        if (subjectId) q = q.eq('subject_id', subjectId);
+        const { data, error } = await q.order('paper_no', { ascending: true });
+        if (error) return err(error.message);
+        return ok(data || []);
+      },
+      async save(payload) {
+        payload = payload || {};
+        if (!payload.subject_id) return err('Please choose the subject this paper belongs to.');
+        const name = String(payload.name || '').trim();
+        if (!name) return err('Paper name is required (e.g. "Paper 1").');
+        const rec = {
+          subject_id: payload.subject_id,
+          name,
+          paper_no: Number(payload.paper_no) || 1,
+          weight: payload.weight === '' || payload.weight === undefined || payload.weight === null ? 1 : Number(payload.weight),
+          out_of: Number(payload.out_of) || 100
+        };
+        if (payload.id) {
+          const { data, error } = await supabase.from('subject_papers').update(rec).eq('id', payload.id).select().single();
+          if (error) return err(error.message);
+          return ok(data);
+        }
+        const { data: dup } = await supabase.from('subject_papers').select('id')
+          .eq('subject_id', payload.subject_id).eq('paper_no', rec.paper_no).maybeSingle();
+        if (dup) return err(`Paper ${rec.paper_no} already exists for this subject.`);
+        const { data, error } = await supabase.from('subject_papers').insert(rec).select().single();
+        if (error) return err(error.message);
+        return ok(data);
+      },
+      async remove(id) {
+        const { error } = await supabase.from('subject_papers').delete().eq('id', id);
+        if (error) return err(error.message);
+        return ok(true);
       }
     }
   };

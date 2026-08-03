@@ -1,5 +1,6 @@
 import { esc, modal, closeModal, toast, confirmAction } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
+import { CBC_COMPETENCY_SCALE_NAME } from '../lib/api/grading.mjs';
 
 export async function viewGrading(root) {
   await render(root);
@@ -9,11 +10,16 @@ async function render(root) {
   const res = await Db.grading.listScales();
   const scales = res.ok ? res.data : [];
 
+  const hasCbcScale = scales.some((sc) => sc.name === CBC_COMPETENCY_SCALE_NAME);
+
   root.innerHTML = `
     <div class="page-head"><div><h2>Grading Scales</h2><p>Configure how raw scores map to letter grades. One scale is used as the default for grading.</p></div>
-      <div class="spacer"></div><button class="btn" id="add-scale">+ Add scale</button></div>
+      <div class="spacer"></div>
+      ${hasCbcScale ? '' : '<button class="btn secondary" id="load-cbc-scale">📥 Load CBC competency scale</button>'}
+      <button class="btn" id="add-scale">+ Add scale</button></div>
     ${scales.length ? scales.map((sc) => scaleCard(sc)).join('') : `<div class="card"><div class="card-b"><div class="empty">
-      <div class="e-ico">🎯</div><h3>No grading scales yet</h3><p>Add one to start grading exam results.</p>
+      <div class="e-ico">🎯</div><h3>No grading scales yet</h3><p>Add one to start grading exam results, or load the standard CBC competency scale below.</p>
+      <button class="btn secondary" id="empty-load-cbc-scale">📥 Load CBC competency scale</button>
       <button class="btn" id="empty-add-scale">+ Add scale</button>
     </div></div></div>`}
   `;
@@ -21,6 +27,15 @@ async function render(root) {
   root.querySelector('#add-scale').onclick = () => openScaleModal(root);
   const emptyBtn = root.querySelector('#empty-add-scale');
   if (emptyBtn) emptyBtn.onclick = () => openScaleModal(root);
+  const doLoadCbcScale = async () => {
+    const r = await Db.grading.loadCbcCompetencyScale();
+    if (!r.ok) { toast(r.message, 'err'); return; }
+    toast(r.added ? 'CBC competency scale loaded.' : 'The CBC competency scale is already loaded.', 'ok');
+    render(root);
+  };
+  const loadBtn = root.querySelector('#load-cbc-scale'), emptyLoadBtn = root.querySelector('#empty-load-cbc-scale');
+  if (loadBtn) loadBtn.onclick = doLoadCbcScale;
+  if (emptyLoadBtn) emptyLoadBtn.onclick = doLoadCbcScale;
 
   scales.forEach((sc) => {
     root.querySelector(`[data-edit-scale="${sc.id}"]`).onclick = () => openScaleModal(root, sc);

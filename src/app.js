@@ -25,9 +25,13 @@ import { viewTeacherAssignments } from './views/teacherAssignments.mjs';
 import { viewGrading } from './views/gradingScales.mjs';
 import { viewExams } from './views/exams.mjs';
 import { viewMarks } from './views/marksEntry.mjs';
+import { viewPublishing } from './views/publishing.mjs';
 import { viewBroadsheet } from './views/broadsheet.mjs';
 import { viewReports } from './views/reportForms.mjs';
 import { viewClassList } from './views/classList.mjs';
+import { viewMeritList } from './views/meritList.mjs';
+import { viewTranscript } from './views/transcript.mjs';
+import { viewCertificates } from './views/certificates.mjs';
 import { viewMyResults } from './views/myResults.mjs';
 import { viewSettings } from './views/schoolSettings.mjs';
 import { viewUsers } from './views/userAccounts.mjs';
@@ -347,12 +351,16 @@ const NAV = {
     { parent: 'Exams', ico: '📝', children: [
       { route: 'exams', label: 'Exams' },
       { route: 'marks', label: 'Enter Marks' },
+      { route: 'publishing', label: 'Publish Results' },
       { route: 'grading', label: 'Grading Scales' }
     ] },
     { parent: 'Reports', ico: '🧾', children: [
       { route: 'class-list', label: 'Class List' },
       { route: 'broadsheet', label: 'Mark List' },
-      { route: 'reports', label: 'Report Forms' }
+      { route: 'reports', label: 'Report Forms' },
+      { route: 'merit-list', label: 'Merit List' },
+      { route: 'transcript', label: 'Transcript' },
+      { route: 'certificates', label: 'Leaving Certificate' }
     ] },
     { section: 'Daily' },
     { route: 'attendance', label: 'Attendance', ico: '🗓️' },
@@ -376,12 +384,16 @@ const NAV = {
     { section: 'Assessment' },
     { parent: 'Exams', ico: '📝', children: [
       { route: 'exams', label: 'Exams' },
-      { route: 'marks', label: 'Enter Marks' }
+      { route: 'marks', label: 'Enter Marks' },
+      { route: 'publishing', label: 'Publish Results' }
     ] },
     { parent: 'Reports', ico: '🧾', children: [
       { route: 'class-list', label: 'Class List' },
       { route: 'broadsheet', label: 'Mark List' },
-      { route: 'reports', label: 'Report Forms' }
+      { route: 'reports', label: 'Report Forms' },
+      { route: 'merit-list', label: 'Merit List' },
+      { route: 'transcript', label: 'Transcript' },
+      { route: 'certificates', label: 'Leaving Certificate' }
     ] }
   ],
   student: [
@@ -449,9 +461,13 @@ const ROUTES = {
   'grading': viewGrading,
   'exams': viewExams,
   'marks': viewMarks,
+  'publishing': viewPublishing,
   'broadsheet': viewBroadsheet,
   'reports': viewReports,
   'class-list': viewClassList,
+  'merit-list': viewMeritList,
+  'transcript': viewTranscript,
+  'certificates': viewCertificates,
   'my-results': viewMyResults,
   'settings': viewSettings,
   'users': viewUsers,

@@ -48,7 +48,13 @@ export function createStaffApi(supabase) {
         gender: payload.gender || null,
         qualifications: payload.qualifications || '',
         employment_start_date: payload.employment_start_date || null,
-        status: payload.status || 'active'
+        status: payload.status || 'active',
+        // Richer HR bio-data (Phase 2c) — all optional.
+        date_of_birth: payload.date_of_birth || null,
+        national_id: payload.national_id || '',
+        tsc_number: payload.tsc_number || '',
+        next_of_kin_name: payload.next_of_kin_name || '',
+        next_of_kin_contact: payload.next_of_kin_contact || ''
       };
       if (payload.id) {
         const { data, error } = await supabase.from('staff').update(rec).eq('id', payload.id).select().single();

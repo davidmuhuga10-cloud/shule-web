@@ -66,7 +66,7 @@ function openSubjectModal(root, levels, existing) {
         <div class="field"><label>Code (optional)</label><input id="su-code" value="${esc(existing ? existing.code || '' : '')}"></div>
         <div class="field"><label>Description (optional)</label><input id="su-desc" value="${esc(existing ? existing.description || '' : '')}"></div>
       </div>
-      ${existing ? '' : ''}
+      ${existing ? '<p class="hint"><a href="#" id="su-papers-link">📄 Manage papers (Paper 1 / Paper 2 weighting) for this subject</a></p>' : ''}
     `,
     okLabel: 'Save',
     footer: true,
@@ -84,6 +84,8 @@ function openSubjectModal(root, levels, existing) {
           }, true);
           footer.insertBefore(delBtn, footer.firstChild);
         }
+        const papersLink = document.getElementById('su-papers-link');
+        if (papersLink) papersLink.onclick = (e) => { e.preventDefault(); openPapersModal(root, levels, existing); };
       }
     },
     onOk: async () => {
@@ -98,4 +100,89 @@ function openSubjectModal(root, levels, existing) {
       if (res.ok) { toast('Subject saved.', 'ok'); closeModal(); render(root); } else toast(res.message, 'err');
     }
   });
+}
+
+/** Paper 1 / Paper 2 weighting (Phase 2a) — a subject with no papers here
+ *  keeps working exactly as before (one whole-subject mark). Papers'
+ *  weights don't have to sum to 1, but should for the combined score to
+ *  land on the exam's own out_of scale — that's on the admin setting them
+ *  up, not enforced here. */
+async function openPapersModal(root, levels, subject) {
+  const res = await Db.subjectPapers.list(subject.id);
+  const papers = res.ok ? res.data : [];
+  renderPapersModal(papers);
+
+  function renderPapersModal(currentPapers) {
+    modal({
+      title: `Papers — ${subject.name}`,
+      wide: true,
+      body: `
+        ${currentPapers.length ? `<div class="table-wrap"><table class="data">
+          <thead><tr><th>Paper</th><th class="num">#</th><th class="num">Weight</th><th class="num">Out of</th><th></th></tr></thead>
+          <tbody>${currentPapers.map((p) => `<tr>
+            <td>${esc(p.name)}</td><td class="num">${p.paper_no}</td><td class="num">${p.weight}</td><td class="num">${p.out_of}</td>
+            <td class="row-actions">
+              <button class="icon-btn" data-edit-paper="${p.id}">✏️</button>
+              <button class="icon-btn danger" data-del-paper="${p.id}">🗑️</button>
+            </td></tr>`).join('')}</tbody>
+        </table></div>` : `<p class="muted" style="margin:12px 0">No papers configured — this subject uses one whole-subject mark.</p>`}
+        <p class="hint" style="margin-top:10px">Weights should add up to 1 across a subject's papers (e.g. 0.6 + 0.4) so the combined score lands correctly on the exam's own "out of".</p>
+      `,
+      okLabel: 'Close',
+      footer: true,
+      onOpen: () => {
+        const footer = document.querySelector('.modal-f');
+        if (footer && !footer.querySelector('#pp-add')) {
+          const addBtn = document.createElement('button');
+          addBtn.className = 'btn secondary'; addBtn.id = 'pp-add'; addBtn.textContent = '+ Add paper';
+          addBtn.style.marginRight = 'auto';
+          addBtn.onclick = () => openPaperFieldsModal(root, subject, currentPapers);
+          footer.insertBefore(addBtn, footer.firstChild);
+        }
+        document.querySelectorAll('[data-edit-paper]').forEach((b) => b.onclick = () => openPaperFieldsModal(root, subject, currentPapers, currentPapers.find((p) => p.id === b.dataset.editPaper)));
+        document.querySelectorAll('[data-del-paper]').forEach((b) => b.onclick = () => confirmAction(
+          'Delete this paper? Any marks entered against it are kept, but will no longer be included in the combined subject score.',
+          async () => {
+            const r = await Db.subjectPapers.remove(b.dataset.delPaper);
+            if (!r.ok) { toast(r.message, 'err'); return; }
+            toast('Paper deleted.', 'ok');
+            renderPapersModal(currentPapers.filter((p) => p.id !== b.dataset.delPaper));
+          }, true
+        ));
+      },
+      onOk: () => closeModal()
+    });
+  }
+
+  function openPaperFieldsModal(root, subject, currentPapers, existingPaper) {
+    modal({
+      title: existingPaper ? 'Edit paper' : 'Add paper',
+      body: `
+        <div class="grid2">
+          <div class="field"><label>Paper name</label><input id="pp-name" value="${esc(existingPaper ? existingPaper.name : `Paper ${currentPapers.length + 1}`)}" placeholder="e.g. Paper 1"></div>
+          <div class="field"><label>Paper number</label><input id="pp-no" type="number" min="1" value="${existingPaper ? existingPaper.paper_no : currentPapers.length + 1}"></div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label>Weight (share of subject score)</label><input id="pp-weight" type="number" step="0.05" min="0" max="1" value="${existingPaper ? existingPaper.weight : (currentPapers.length ? '' : 1)}"></div>
+          <div class="field"><label>Out of (max score for this paper)</label><input id="pp-outof" type="number" value="${existingPaper ? existingPaper.out_of : 100}"></div>
+        </div>
+      `,
+      okLabel: 'Save',
+      onOk: async () => {
+        const payload = {
+          id: existingPaper ? existingPaper.id : undefined,
+          subject_id: subject.id,
+          name: document.getElementById('pp-name').value,
+          paper_no: document.getElementById('pp-no').value,
+          weight: document.getElementById('pp-weight').value,
+          out_of: document.getElementById('pp-outof').value
+        };
+        const res = await Db.subjectPapers.save(payload);
+        if (!res.ok) { toast(res.message, 'err'); return; }
+        toast('Paper saved.', 'ok');
+        closeModal();
+        openPapersModal(root, levels, subject);
+      }
+    });
+  }
 }

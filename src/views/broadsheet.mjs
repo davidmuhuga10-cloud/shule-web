@@ -1,6 +1,9 @@
 import { esc, options, renderPrereq, loader } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 
+const STATUS_BADGE_CLASS = { draft: 'grey', submitted: 'blue', approved: 'blue', published: 'green' };
+const STATUS_SHORT = { draft: 'Draft', submitted: 'Submitted', approved: 'Approved', published: 'Published' };
+
 export async function viewBroadsheet(root) {
   const [examsRes, classesRes] = await Promise.all([Db.results.listExams(), Db.classes.list()]);
   const exams = examsRes.ok ? examsRes.data : [];
@@ -64,7 +67,7 @@ async function load(root, sel) {
         <button class="btn secondary no-print" onclick="window.print()">🖨️ Print</button></div>
       <div class="card-b table-wrap"><table class="data">
         <thead><tr><th class="num">#</th><th>Adm. No.</th><th>Name</th><th>Stream</th>
-          ${res.subjects.map((s) => `<th class="num">${esc(s.code || s.name)}</th>`).join('')}
+          ${res.subjects.map((s) => `<th class="num">${esc(s.code || s.name)}<br><span class="badge ${STATUS_BADGE_CLASS[s.submission_status] || 'grey'}" style="font-size:10px">${esc(STATUS_SHORT[s.submission_status] || s.submission_status)}</span></th>`).join('')}
           <th class="num">Total</th><th class="num">Avg</th><th class="num">Position</th></tr></thead>
         <tbody>${res.students.map((s, i) => `<tr>
           <td class="num">${i + 1}</td><td>${esc(s.admission_no)}</td><td>${esc(s.full_name)}</td><td>${esc(s.stream_name || '—')}</td>

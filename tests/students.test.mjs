@@ -44,6 +44,26 @@ async function run() {
     check('save allows re-saving the same student with their own admission number', selfEdit.ok === true);
   }
 
+  // ---- richer profile fields (Phase 2c) -----------------------------------------
+  {
+    const sb = createMockSupabase({});
+    const api = createStudentsApi(sb);
+    const saved = await api.save({
+      admission_no: '1', full_name: 'Amos', gender: 'Male', class_id: 'c1',
+      date_of_birth: '2015-03-14', admission_date: '2022-01-10',
+      upi_number: 'UPI123', assessment_number: 'KNEC456', previous_school: 'Green Hills Academy',
+      guardian_relationship: 'Mother', guardian_id_number: '12345678', medical_notes: 'Asthma'
+    });
+    check('save persists richer profile fields', saved.ok === true
+      && saved.data.date_of_birth === '2015-03-14' && saved.data.admission_date === '2022-01-10'
+      && saved.data.upi_number === 'UPI123' && saved.data.assessment_number === 'KNEC456'
+      && saved.data.previous_school === 'Green Hills Academy' && saved.data.guardian_relationship === 'Mother'
+      && saved.data.guardian_id_number === '12345678' && saved.data.medical_notes === 'Asthma');
+    const minimal = await api.save({ admission_no: '2', full_name: 'Bee', gender: 'Female', class_id: 'c1' });
+    check('save defaults richer profile fields to blank/null when omitted', minimal.ok === true
+      && minimal.data.date_of_birth === null && minimal.data.upi_number === '');
+  }
+
   // ---- bulkCreate --------------------------------------------------------------
   {
     const sb = createMockSupabase({ students: [{ id: 's1', admission_no: '10', full_name: 'Existing Kid' }] });
@@ -73,6 +93,71 @@ async function run() {
     const api = createStudentsApi(sb);
     const res = await api.bulkCreate({ rows: [{ admission_no: '1', full_name: 'X', gender: 'Male' }] });
     check('bulkCreate requires a class to be chosen', res.ok === false);
+  }
+
+  // ---- archive / restore (Phase 2b: soft-remove instead of hard delete) --------
+  {
+    const sb = createMockSupabase({
+      classes: [{ id: 'c1', name: 'Grade 7' }],
+      students: [{ id: 's1', admission_no: '1', full_name: 'Jane', gender: 'Female', class_id: 'c1', status: 'active' }]
+    });
+    const api = createStudentsApi(sb);
+
+    const archived = await api.archive('s1', { reason: 'transferred', notes: 'Moved to Nairobi' });
+    check('archive() moves status to left', archived.ok === true && archived.data.status === 'left');
+    check('archive() records the reason and notes', archived.data.left_reason === 'transferred' && archived.data.left_notes === 'Moved to Nairobi');
+    check('archive() stamps a left_date automatically when none given', !!archived.data.left_date);
+
+    const activeList = await api.list({ class_id: 'c1' });
+    check('archived student no longer appears in the default (active) list', activeList.data.length === 0);
+    const archivedList = await api.list({ class_id: 'c1', status: 'left' });
+    check('archived student appears when explicitly asking for status=left', archivedList.data.length === 1);
+
+    const restored = await api.restore('s1');
+    check('restore() moves status back to active', restored.ok === true && restored.data.status === 'active');
+    check('restore() clears the leaving reason/date/notes', restored.data.left_reason === null && restored.data.left_date === null);
+    const activeAgain = await api.list({ class_id: 'c1' });
+    check('restored student reappears in the active list', activeAgain.data.length === 1);
+  }
+  {
+    const sb = createMockSupabase({});
+    const api = createStudentsApi(sb);
+    const noId = await api.archive(null, {});
+    check('archive() requires a student id', noId.ok === false);
+  }
+  {
+    const sb = createMockSupabase({
+      students: [{ id: 's1', admission_no: '1', full_name: 'Jane', gender: 'Female', class_id: 'c1', status: 'active' }]
+    });
+    const api = createStudentsApi(sb);
+    const archived = await api.archive('s1', { reason: 'not-a-real-reason' });
+    check('archive() falls back to "other" for an unrecognized reason', archived.ok === true && archived.data.left_reason === 'other');
+  }
+
+  // ---- bulkMove (Phase 2b: move a whole class/stream at once) ------------------
+  {
+    const sb = createMockSupabase({
+      classes: [{ id: 'c1', name: 'Grade 7' }, { id: 'c2', name: 'Grade 8' }],
+      streams: [{ id: 'str1', class_id: 'c2', name: 'North' }],
+      students: [
+        { id: 's1', admission_no: '1', full_name: 'A', gender: 'Male', class_id: 'c1', status: 'active' },
+        { id: 's2', admission_no: '2', full_name: 'B', gender: 'Female', class_id: 'c1', status: 'active' },
+        { id: 's3', admission_no: '3', full_name: 'C', gender: 'Male', class_id: 'c1', status: 'active' }
+      ]
+    });
+    const api = createStudentsApi(sb);
+
+    check('bulkMove requires at least one student', (await api.bulkMove({ class_id: 'c2' })).ok === false);
+    check('bulkMove requires a target class', (await api.bulkMove({ student_ids: ['s1'] })).ok === false);
+
+    const moved = await api.bulkMove({ student_ids: ['s1', 's2'], class_id: 'c2', stream_id: 'str1' });
+    check('bulkMove reports how many students moved', moved.ok === true && moved.moved === 2);
+
+    const inC2 = await api.list({ class_id: 'c2' });
+    check('the two moved students are now in the new class', inC2.data.length === 2);
+    check('the two moved students carried the new stream', inC2.data.every((s) => s.stream_id === 'str1'));
+    const stillInC1 = await api.list({ class_id: 'c1' });
+    check('the un-selected student stayed in the original class', stillInC1.data.length === 1 && stillInC1.data[0].id === 's3');
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);
