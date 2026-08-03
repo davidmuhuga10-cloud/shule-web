@@ -16,18 +16,26 @@ async function run() {
         { id: 's3', gender: 'Male', class_id: 'c2', status: 'active' },
         { id: 's4', gender: 'Male', class_id: 'c2', status: 'inactive' }
       ],
-      staff: [{ id: 'st1', status: 'active' }, { id: 'st2', status: 'inactive' }],
+      staff: [
+        { id: 'st1', status: 'active', role: 'teacher' },
+        { id: 'st2', status: 'inactive', role: 'teacher' },
+        { id: 'st3', status: 'active', role: 'admin-staff' },
+        { id: 'st4', status: 'active', role: '' }
+      ],
       classes: [{ id: 'c1', name: 'Grade 7' }, { id: 'c2', name: 'Grade 8' }],
       streams: [{ id: 'str1', class_id: 'c1' }],
       subjects: [{ id: 'su1' }],
       exams: [],
       academic_years: [{ id: 'y1', name: '2026', status: 'active' }],
-      terms: [{ id: 't1', academic_year_id: 'y1', name: 'Term 1', status: 'active' }]
+      terms: [{ id: 't1', academic_year_id: 'y1', name: 'Term 1', status: 'active' }],
+      settings: [{ key: 'sms_credit_balance', value: '4,500 credits' }]
     });
     const api = createDashboardApi(sb);
     const res = await api.get();
     check('dashboard counts only active students', res.counts.students === 3);
-    check('dashboard counts only active staff', res.counts.staff === 1);
+    check('dashboard counts only active staff', res.counts.staff === 3);
+    check('dashboard counts teachers (active + role=teacher, blank role defaults to teacher)', res.counts.teachers === 2);
+    check('dashboard reports the sms balance from settings', res.smsBalance === '4,500 credits');
     check('dashboard gender split is correct', res.gender.M === 2 && res.gender.F === 1);
     check('dashboard perClass sorted by count desc', res.perClass[0].name === 'Grade 7' && res.perClass[0].count === 2);
     check('dashboard reports the active academic year/term', res.active.academic_year_name === '2026' && res.active.term_name === 'Term 1');
@@ -41,6 +49,8 @@ async function run() {
     const res = await api.get();
     check('an empty school has an incomplete checklist', res.setupComplete === false);
     check('an empty school has no active context', res.active.academic_year_name === '' && res.active.term_name === '');
+    check('an empty school has no sms balance set', res.smsBalance === null);
+    check('an empty school has zero teachers', res.counts.teachers === 0);
   }
 
   // ---- settings -------------------------------------------------------------------

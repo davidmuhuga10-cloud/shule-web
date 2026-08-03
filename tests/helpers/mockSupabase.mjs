@@ -153,7 +153,8 @@ export function createMockSupabase(initialTables) {
     _tables: tables,
     from(table) { return builder(table); },
     rpc(name, args) {
-      const handler = rpcHandlers[name];
+      const builtin = BUILTIN_RPCS[name];
+      const handler = rpcHandlers[name] || (builtin ? (a) => builtin(a, tables) : null);
       const p = handler ? Promise.resolve(handler(args, tables)) : Promise.resolve({ data: null, error: { message: 'No mock handler for rpc ' + name } });
       p.then = p.then.bind(p);
       return p;
@@ -161,3 +162,62 @@ export function createMockSupabase(initialTables) {
     __registerRpc(name, fn) { rpcHandlers[name] = fn; }
   };
 }
+
+/** Built-in mock for save_results_batch() (see
+ *  supabase/migrations/0008_bulk_marks_rpc.sql) — a faithful-enough replica
+ *  of the real PL/pgSQL logic (exists-check, range validation, default-scale
+ *  grading, blank clears the row) so every existing test that seeds results
+ *  via saveResultsEntry() keeps working unchanged now that the real
+ *  implementation moved server-side. Registered as a BUILT-IN (not a
+ *  per-test __registerRpc call) because nearly every results.test.mjs case
+ *  uses saveResultsEntry() purely to seed fixture data, not to test the RPC
+ *  itself — the real logic is verified against actual Postgres instead (see
+ *  PRODUCT_ROADMAP.md's Phase 2f notes), same division of responsibility as
+ *  every other SECURITY DEFINER RPC in this app (get_report_card, etc). */
+function mockSaveResultsBatch(args, tables) {
+  const { p_exam_id, p_class_id, p_subject_id, p_paper_id, p_scores } = args || {};
+  const exam = (tables.exams || []).find((e) => e.id === p_exam_id);
+  if (!exam) return { data: null, error: { message: 'Exam not found.' } };
+
+  let outOf = Number(exam.out_of) || 100;
+  if (p_paper_id) {
+    const paper = (tables.subject_papers || []).find((p) => p.id === p_paper_id);
+    if (!paper) return { data: null, error: { message: 'Paper not found.' } };
+    outOf = Number(paper.out_of) || 100;
+  }
+  const scale = (tables.grading_scales || []).find((s) => s.is_default);
+  const bands = scale ? (tables.grade_ranges || []).filter((b) => b.grading_scale_id === scale.id) : [];
+
+  const results = tables.results = tables.results || [];
+  let saved = 0, cleared = 0;
+  (p_scores || []).forEach((entry) => {
+    const raw = String(entry.score == null ? '' : entry.score).trim();
+    const idx = results.findIndex((r) => r.exam_id === p_exam_id && r.subject_id === p_subject_id && r.student_id === entry.student_id
+      && (p_paper_id ? r.paper_id === p_paper_id : !r.paper_id));
+
+    if (raw === '') {
+      if (idx !== -1) { results.splice(idx, 1); cleared++; }
+      return;
+    }
+    const score = Number(raw);
+    if (isNaN(score) || score < 0 || score > outOf) return; // skip invalid silently, same as the real RPC
+
+    let grade_label = null, points = null, remark = null;
+    if (!p_paper_id) {
+      const band = bands.find((b) => score >= Number(b.min_score) && score <= Number(b.max_score));
+      if (band) { grade_label = band.grade_label; points = band.points; remark = band.remark; }
+    }
+    const rec = {
+      exam_id: p_exam_id, student_id: entry.student_id, subject_id: p_subject_id,
+      academic_year_id: exam.academic_year_id, term_id: exam.term_id,
+      class_id: p_class_id, paper_id: p_paper_id || null,
+      score, grade_label, points, remark
+    };
+    if (idx !== -1) Object.assign(results[idx], rec, { updated_at: new Date(0).toISOString() });
+    else results.push({ id: genId(), created_at: new Date(0).toISOString(), updated_at: new Date(0).toISOString(), ...rec });
+    saved++;
+  });
+  return { data: [{ saved, cleared }], error: null };
+}
+
+const BUILTIN_RPCS = { save_results_batch: mockSaveResultsBatch };

@@ -9,60 +9,16 @@
  * ----------------------------------------------------------------------------
  */
 import { ok, err, fromResult } from './_util.mjs';
+import { CBC_LEVELS, STANDARD_CLASS_LEVELS, CBC_SUBJECTS, levelBucketForClassName } from './cbcDefaults.mjs';
+import { seedDefaultSubjectsForNewStream } from './assignments.mjs';
 
-/** Official Kenyan CBC learning areas (KICD), per level, including the 2024
- *  Junior Secondary rationalisation to 9 core subjects — identical list to
- *  the Apps Script version's CBC_SUBJECTS. */
-export const CBC_LEVELS = ['Pre-Primary', 'Lower Primary', 'Upper Primary', 'Junior Secondary'];
-
-/** The 12 standard class levels this product supports, Daycare through
- *  Grade 9 (CBC pre-primary through junior secondary). Phase 2b: a class is
- *  now chosen from this fixed list rather than typed freehand, so every
- *  school's class names line up exactly the same way across the whole
- *  platform — this is what makes cross-school reporting/printouts and the
- *  CBC level groupings elsewhere (subjects, promotions) reliable. Streams
- *  (a class's own arms, e.g. "North"/"South") are still freely named per
- *  school — only the class level itself is standardized. */
-export const STANDARD_CLASS_LEVELS = [
-  'Daycare', 'PP1', 'PP2',
-  'Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 'Grade 6',
-  'Grade 7', 'Grade 8', 'Grade 9'
-];
-export const CBC_SUBJECTS = [
-  { name: 'Language Activities', level: 'Pre-Primary' },
-  { name: 'Mathematical Activities', level: 'Pre-Primary' },
-  { name: 'Environmental Activities', level: 'Pre-Primary' },
-  { name: 'Psychomotor and Creative Activities', level: 'Pre-Primary' },
-  { name: 'Religious Education Activities', level: 'Pre-Primary' },
-  { name: 'Literacy Activities', level: 'Lower Primary' },
-  { name: 'English Language Activities', level: 'Lower Primary' },
-  { name: 'Kiswahili Language Activities', level: 'Lower Primary' },
-  { name: 'Indigenous Language Activities', level: 'Lower Primary' },
-  { name: 'Mathematical Activities', level: 'Lower Primary' },
-  { name: 'Environmental Activities', level: 'Lower Primary' },
-  { name: 'Hygiene and Nutrition Activities', level: 'Lower Primary' },
-  { name: 'Religious Education', level: 'Lower Primary' },
-  { name: 'Movement and Creative Activities', level: 'Lower Primary' },
-  { name: 'English', level: 'Upper Primary' },
-  { name: 'Kiswahili', level: 'Upper Primary' },
-  { name: 'Mathematics', level: 'Upper Primary' },
-  { name: 'Science and Technology', level: 'Upper Primary' },
-  { name: 'Social Studies', level: 'Upper Primary' },
-  { name: 'Religious Education', level: 'Upper Primary' },
-  { name: 'Agriculture', level: 'Upper Primary' },
-  { name: 'Home Science', level: 'Upper Primary' },
-  { name: 'Creative Arts', level: 'Upper Primary' },
-  { name: 'Physical and Health Education', level: 'Upper Primary' },
-  { name: 'English', level: 'Junior Secondary' },
-  { name: 'Kiswahili', level: 'Junior Secondary' },
-  { name: 'Mathematics', level: 'Junior Secondary' },
-  { name: 'Integrated Science', level: 'Junior Secondary' },
-  { name: 'Pre-Technical Studies', level: 'Junior Secondary' },
-  { name: 'Social Studies', level: 'Junior Secondary' },
-  { name: 'Agriculture', level: 'Junior Secondary' },
-  { name: 'Religious Education', level: 'Junior Secondary' },
-  { name: 'Creative Arts and Sports', level: 'Junior Secondary' }
-];
+// Re-exported for backward compatibility — these used to be defined here
+// directly; existing imports (e.g. views/classes.mjs) keep working
+// unchanged. See cbcDefaults.mjs for the canonical source and
+// the reasoning for why this moved out (avoids a circular import with
+// assignments.mjs, which also needs this data to seed a new stream's
+// default subjects — Phase 2g / brief §4.2).
+export { CBC_LEVELS, STANDARD_CLASS_LEVELS, CBC_SUBJECTS };
 
 export function createAcademicsApi(supabase) {
   return {
@@ -227,8 +183,16 @@ export function createAcademicsApi(supabase) {
             }
           });
           if (toInsert.length) {
-            const { error: streamErr } = await supabase.from('streams').insert(toInsert);
-            if (!streamErr) streamsAdded = toInsert.length;
+            const { data: insertedStreams, error: streamErr } = await supabase.from('streams').insert(toInsert).select();
+            if (!streamErr) {
+              streamsAdded = toInsert.length;
+              // Brief §4.2: a brand-new stream starts with the correct default
+              // CBC subject set for its grade, instead of every subject in the
+              // system — see seedDefaultSubjectsForNewStream in assignments.mjs.
+              for (const s of insertedStreams || []) {
+                await seedDefaultSubjectsForNewStream(supabase, s.id, saved.id, saved.name);
+              }
+            }
           }
         }
         return ok(saved, { streamsAdded });
@@ -274,6 +238,12 @@ export function createAcademicsApi(supabase) {
         if (dup) return err('That stream already exists for this class.');
         const { data, error } = await supabase.from('streams').insert(rec).select().single();
         if (error) return err(error.message);
+        // Brief §4.2: seed the correct default CBC subjects for this stream's
+        // grade level right away (best-effort — a lookup/insert hiccup here
+        // shouldn't fail the stream creation itself; the admin can still add
+        // subjects manually from the class's subject screen).
+        const { data: cls } = await supabase.from('classes').select('name').eq('id', payload.class_id).maybeSingle();
+        if (cls) await seedDefaultSubjectsForNewStream(supabase, data.id, payload.class_id, cls.name);
         return ok(data);
       },
       async remove(id) {

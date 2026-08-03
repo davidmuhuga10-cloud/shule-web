@@ -16,11 +16,10 @@ import { Db } from './lib/api/index.mjs';
 import { viewDashboard } from './views/dashboard.mjs';
 import { viewAcademicCalendar } from './views/academicCalendar.mjs';
 import { viewClasses } from './views/classes.mjs';
-import { viewSubjects } from './views/subjects.mjs';
 import { viewStudents } from './views/students.mjs';
 import { viewBulkUpload } from './views/bulkUpload.mjs';
 import { viewStaff } from './views/staff.mjs';
-import { viewClassSubjects } from './views/classSubjects.mjs';
+import { viewTeachers } from './views/teachers.mjs';
 import { viewTeacherAssignments } from './views/teacherAssignments.mjs';
 import { viewGrading } from './views/gradingScales.mjs';
 import { viewExams } from './views/exams.mjs';
@@ -139,7 +138,7 @@ export function renderAuth(errorMsg) {
   const name = (state.settings && state.settings.school_name) || (window.SHULE_CONFIG && window.SHULE_CONFIG.SCHOOL_BRAND_NAME) || 'Shule';
   const features = [
     ['🎒', 'Students', 'Classes, streams & enrollment'],
-    ['📚', 'Subjects', 'Assign subjects & teachers'],
+    ['🍎', 'Teachers', 'Subjects & teacher assignment'],
     ['📝', 'Exams', 'Marks with automatic grading'],
     ['🧾', 'Reports', 'Mark lists & report forms']
   ].map(([ico, title, sub]) => `<div class="feat-tile"><div class="ft-ico">${ico}</div>
@@ -337,15 +336,14 @@ const NAV = {
     { route: 'dashboard', label: 'Dashboard', ico: '🏠' },
     { section: 'Academics' },
     { route: 'classes', label: 'Classes & Streams', ico: '🏫' },
-    { route: 'subjects', label: 'Subjects', ico: '📚' },
     { section: 'People' },
     { parent: 'Students', ico: '🎒', children: [
       { route: 'students', label: 'All Students' },
       { route: 'bulk-upload', label: 'Bulk Upload' }
     ] },
     { route: 'staff', label: 'Staff', ico: '👨‍🏫' },
+    { route: 'teachers', label: 'Teachers', ico: '🍎' },
     { section: 'Teaching' },
-    { route: 'class-subjects', label: 'Class Subjects', ico: '🧩' },
     { route: 'teacher-assignments', label: 'Teacher Assignments', ico: '🔗' },
     { section: 'Assessment' },
     { parent: 'Exams', ico: '📝', children: [
@@ -452,11 +450,10 @@ const ROUTES = {
   'dashboard': viewDashboard,
   'academic-calendar': viewAcademicCalendar,
   'classes': viewClasses,
-  'subjects': viewSubjects,
   'students': viewStudents,
   'bulk-upload': viewBulkUpload,
   'staff': viewStaff,
-  'class-subjects': viewClassSubjects,
+  'teachers': viewTeachers,
   'teacher-assignments': viewTeacherAssignments,
   'grading': viewGrading,
   'exams': viewExams,

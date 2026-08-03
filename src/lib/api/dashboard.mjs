@@ -23,16 +23,27 @@ export function createDashboardApi(supabase) {
     async get() {
       const [
         { count: studentCount }, { data: staffAll }, { count: classCount },
-        { count: streamCount }, { count: subjectCount }, { count: examCount }
+        { count: streamCount }, { count: subjectCount }, { count: examCount },
+        { data: settingsRows }
       ] = await Promise.all([
         supabase.from('students').select('id', { count: 'exact', head: true }).eq('status', 'active'),
-        supabase.from('staff').select('status'),
+        supabase.from('staff').select('status, role'),
         supabase.from('classes').select('id', { count: 'exact', head: true }),
         supabase.from('streams').select('id', { count: 'exact', head: true }),
         supabase.from('subjects').select('id', { count: 'exact', head: true }),
-        supabase.from('exams').select('id', { count: 'exact', head: true })
+        supabase.from('exams').select('id', { count: 'exact', head: true }),
+        supabase.from('settings').select('key, value')
       ]);
       const staffActive = (staffAll || []).filter((s) => s.status !== 'inactive').length;
+      // Teachers count (Phase 2f, brief §3/§2): staff.role is a free-text column
+      // (default 'teacher', no enum) — treat a blank/missing role as 'teacher' too,
+      // since that's the save()-time default in staff.mjs.
+      const teacherCount = (staffAll || []).filter((s) => s.status !== 'inactive' && String(s.role || 'teacher').toLowerCase() === 'teacher').length;
+
+      const settingsMap = {};
+      (settingsRows || []).forEach((r) => { settingsMap[r.key] = r.value; });
+      const smsBalance = (settingsMap.sms_credit_balance === undefined || settingsMap.sms_credit_balance === null || settingsMap.sms_credit_balance === '')
+        ? null : settingsMap.sms_credit_balance;
 
       const { data: students } = await supabase.from('students').select('gender, class_id').eq('status', 'active');
       const gender = { M: 0, F: 0 };
@@ -55,13 +66,14 @@ export function createDashboardApi(supabase) {
         { key: 'term', label: 'Add terms to the academic year', done: (await supabase.from('terms').select('id', { count: 'exact', head: true })).count > 0, route: '#/academic-calendar' },
         { key: 'classes', label: 'Set up classes', done: classCount > 0, route: '#/classes' },
         { key: 'streams', label: 'Add streams to classes', done: streamCount > 0, route: '#/classes' },
-        { key: 'subjects', label: 'Add subjects', done: subjectCount > 0, route: '#/subjects' },
+        { key: 'subjects', label: 'Assign subjects to a stream', done: subjectCount > 0, route: '#/classes' },
         { key: 'students', label: 'Enroll students', done: studentCount > 0, route: '#/students' },
         { key: 'staff', label: 'Add teachers / staff', done: staffActive > 0, route: '#/staff' }
       ];
 
       return ok(null, {
-        counts: { students: studentCount || 0, staff: staffActive, classes: classCount || 0, streams: streamCount || 0, subjects: subjectCount || 0, exams: examCount || 0 },
+        counts: { students: studentCount || 0, staff: staffActive, teachers: teacherCount, classes: classCount || 0, streams: streamCount || 0, subjects: subjectCount || 0, exams: examCount || 0 },
+        smsBalance,
         gender,
         perClass,
         active,

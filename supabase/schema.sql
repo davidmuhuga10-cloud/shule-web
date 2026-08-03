@@ -403,13 +403,24 @@ create table public.subject_class_assignments (
   school_id uuid not null references public.schools(id) on delete cascade,
   subject_id uuid not null references public.subjects(id) on delete cascade,
   class_id uuid not null references public.classes(id) on delete cascade,
+  -- Phase 2g (brief §4.2): nullable — null means this row is a legacy/
+  -- class-wide assignment (applies to every stream of the class); set means
+  -- it's specific to that one stream. See migrations/0009_stream_subjects.sql
+  -- for the full rationale and assignments.mjs for how "effective subjects"
+  -- is computed from this.
+  stream_id uuid references public.streams(id) on delete cascade,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (subject_id, class_id)
+  updated_at timestamptz not null default now()
 );
 create trigger trg_sca_updated_at before update on public.subject_class_assignments
   for each row execute function public.set_updated_at();
 create index idx_sca_school on public.subject_class_assignments(school_id);
+create index idx_sca_stream on public.subject_class_assignments(stream_id);
+-- Partial unique indexes (not a plain table-level unique()) so a subject can
+-- be assigned once as a class-wide default AND once per stream without
+-- colliding — same pattern as public.results' paper/no-paper indexes.
+create unique index idx_sca_unique_classwide on public.subject_class_assignments(subject_id, class_id) where stream_id is null;
+create unique index idx_sca_unique_stream on public.subject_class_assignments(subject_id, class_id, stream_id) where stream_id is not null;
 
 -- ----------------------------------------------------------------------------
 -- teacher <-> subject/class/stream assignment
@@ -482,6 +493,21 @@ create table public.exams (
 create trigger trg_exams_updated_at before update on public.exams
   for each row execute function public.set_updated_at();
 create index idx_exams_school on public.exams(school_id);
+
+-- Phase 2h (brief §7.1): which classes were explicitly chosen to sit a given
+-- exam — purely a "should this class show on the exam's board at all"
+-- record. Marks entry/publishing still key off (exam_id, class_id) on
+-- results/result_submissions exactly as before; nothing here gates that.
+create table public.exam_classes (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  exam_id uuid not null references public.exams(id) on delete cascade,
+  class_id uuid not null references public.classes(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (exam_id, class_id)
+);
+create index idx_exam_classes_school on public.exam_classes(school_id);
+create index idx_exam_classes_exam on public.exam_classes(exam_id);
 
 create table public.results (
   id uuid primary key default gen_random_uuid(),
@@ -667,6 +693,8 @@ create trigger trg_grade_ranges_school_id before insert on public.grade_ranges
   for each row execute function public.set_school_id();
 create trigger trg_exams_school_id before insert on public.exams
   for each row execute function public.set_school_id();
+create trigger trg_exam_classes_school_id before insert on public.exam_classes
+  for each row execute function public.set_school_id();
 create trigger trg_results_school_id before insert on public.results
   for each row execute function public.set_school_id();
 create trigger trg_settings_school_id before insert on public.settings
@@ -704,6 +732,7 @@ alter table public.subject_teacher_assignments enable row level security;
 alter table public.grading_scales enable row level security;
 alter table public.grade_ranges enable row level security;
 alter table public.exams enable row level security;
+alter table public.exam_classes enable row level security;
 alter table public.results enable row level security;
 alter table public.settings enable row level security;
 alter table public.subject_papers enable row level security;
@@ -855,6 +884,15 @@ create policy exams_staff_write on public.exams for insert
 create policy exams_staff_update on public.exams for update
   using (public.is_staff() and school_id = public.current_school_id());
 create policy exams_admin_delete on public.exams for delete
+  using (public.is_admin() and school_id = public.current_school_id());
+
+-- exam_classes: same read access as exams (students/staff both need to know
+-- which classes sit an exam); only an admin picks/changes the class list.
+create policy exam_classes_read on public.exam_classes for select
+  using (school_id = public.current_school_id());
+create policy exam_classes_admin_write on public.exam_classes for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy exam_classes_admin_delete on public.exam_classes for delete
   using (public.is_admin() and school_id = public.current_school_id());
 
 -- results: staff (admin+teacher) can enter/edit and always read everything
@@ -1677,3 +1715,102 @@ $$;
 grant execute on function public.get_report_card(uuid, uuid) to authenticated;
 grant execute on function public.has_capability(text) to authenticated;
 grant execute on function public.is_class_teacher_of(uuid) to authenticated;
+
+-- ============================================================================
+-- save_results_batch — Phase 2f bulk-marks-save RPC (see
+-- migrations/0008_bulk_marks_rpc.sql for full rationale). Folded in here for
+-- fresh-install parity.
+-- ============================================================================
+create or replace function public.save_results_batch(
+  p_exam_id uuid, p_class_id uuid, p_subject_id uuid, p_paper_id uuid, p_scores jsonb
+)
+returns table(saved int, cleared int)
+language plpgsql
+as $$
+declare
+  v_exam public.exams%rowtype;
+  v_paper public.subject_papers%rowtype;
+  v_out_of numeric;
+  v_row jsonb;
+  v_student_id uuid;
+  v_raw text;
+  v_score numeric;
+  v_existing_id uuid;
+  v_saved int := 0;
+  v_cleared int := 0;
+  v_grade_label text;
+  v_points numeric;
+  v_remark text;
+begin
+  if p_exam_id is null then raise exception 'Missing exam.'; end if;
+  if p_subject_id is null then raise exception 'Missing subject.'; end if;
+  if p_class_id is null then raise exception 'Missing class.'; end if;
+
+  select * into v_exam from public.exams where id = p_exam_id;
+  if v_exam.id is null then raise exception 'Exam not found.'; end if;
+  v_out_of := coalesce(v_exam.out_of, 100);
+
+  if p_paper_id is not null then
+    select * into v_paper from public.subject_papers where id = p_paper_id;
+    if v_paper.id is null then raise exception 'Paper not found.'; end if;
+    v_out_of := coalesce(v_paper.out_of, 100);
+  end if;
+
+  for v_row in select * from jsonb_array_elements(coalesce(p_scores, '[]'::jsonb))
+  loop
+    v_student_id := nullif(v_row->>'student_id', '')::uuid;
+    if v_student_id is null then continue; end if;
+    v_raw := trim(both from coalesce(v_row->>'score', ''));
+
+    select id into v_existing_id from public.results
+      where exam_id = p_exam_id and subject_id = p_subject_id and student_id = v_student_id
+        and ((p_paper_id is null and paper_id is null) or paper_id = p_paper_id)
+      limit 1;
+
+    if v_raw = '' then
+      if v_existing_id is not null then
+        delete from public.results where id = v_existing_id;
+        v_cleared := v_cleared + 1;
+      end if;
+      continue;
+    end if;
+
+    -- Same "skip invalid silently" behaviour as the client-side version —
+    -- the UI already validates before calling this, this is just the
+    -- server-side backstop against a malformed row slipping through.
+    begin
+      v_score := v_raw::numeric;
+    exception when others then
+      continue;
+    end;
+    if v_score < 0 or v_score > v_out_of then continue; end if;
+
+    v_grade_label := null; v_points := null; v_remark := null;
+    if p_paper_id is null then
+      select gr.grade_label, gr.points, gr.remark into v_grade_label, v_points, v_remark
+      from public.grade_ranges gr
+      join public.grading_scales gs on gs.id = gr.grading_scale_id
+      where gs.is_default = true and gs.school_id = public.current_school_id()
+        and v_score >= gr.min_score and v_score <= gr.max_score
+      limit 1;
+    end if;
+
+    if v_existing_id is not null then
+      update public.results set
+        score = v_score, grade_label = v_grade_label, points = v_points, remark = v_remark,
+        class_id = p_class_id, academic_year_id = v_exam.academic_year_id, term_id = v_exam.term_id
+      where id = v_existing_id;
+    else
+      insert into public.results
+        (exam_id, student_id, subject_id, academic_year_id, term_id, class_id, paper_id, score, grade_label, points, remark)
+      values
+        (p_exam_id, v_student_id, p_subject_id, v_exam.academic_year_id, v_exam.term_id, p_class_id, p_paper_id, v_score, v_grade_label, v_points, v_remark);
+    end if;
+    v_saved := v_saved + 1;
+  end loop;
+
+  return query select v_saved, v_cleared;
+end;
+$$;
+
+grant execute on function public.save_results_batch(uuid, uuid, uuid, uuid, jsonb) to authenticated;

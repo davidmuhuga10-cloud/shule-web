@@ -15,7 +15,7 @@ export async function viewMarks(root) {
 
   if (!exams.length) { renderPrereq(root, 'No exams found', 'Please create an exam first.', 'exams', 'Go to Exams'); return; }
   if (!classes.length) { renderPrereq(root, 'No classes found', 'Please create a class first.', 'classes', 'Go to Classes'); return; }
-  if (!subjects.length) { renderPrereq(root, 'No subjects found', 'Please add subjects first.', 'subjects', 'Go to Subjects'); return; }
+  if (!subjects.length) { renderPrereq(root, 'No subjects found', 'Open a class\'s stream and assign it some subjects first.', 'classes', 'Go to Classes'); return; }
 
   // A "🎯 Enter Marks" click from the Manage Exams board hands off exactly
   // which exam+class to open here — see navIntent.mjs. Falls back to the
@@ -163,6 +163,7 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
         <p class="hint">This subject's results are <b>${esc(SUBMISSION_STATUS_LABELS[status] || status)}</b> for this class.
         ${isAdmin ? 'You can save corrected marks here, or reopen it below to let the workflow run again.' : 'You can still save corrected marks here, but ask an admin to reopen it (in Publish Results) so the review can happen again.'}</p>
       </div>`;
+    const hasAnyMarks = rows.some((r) => r.score !== '' && r.score !== null && r.score !== undefined);
 
     gridEl.innerHTML = `
       <div class="card">
@@ -171,6 +172,7 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
           <div class="spacer"></div>
           ${status === 'draft' ? '<button class="btn secondary" id="mk-submit">Submit for approval</button>' : ''}
           ${status !== 'draft' && isAdmin ? '<button class="btn secondary" id="mk-reopen">Reopen</button>' : ''}
+          ${hasAnyMarks && status !== 'published' ? '<button class="btn danger sm" id="mk-delete-all">🗑️ Delete All Results</button>' : ''}
           <button class="btn" id="mk-save">Save marks</button></div>
         ${statusNote}
         <div class="card-b table-wrap"><table class="data">
@@ -213,6 +215,15 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
       async () => {
         const r = await Db.results.reopenSubmission(examId, classId, subject.id);
         if (r.ok) { toast('Reopened.', 'ok'); renderGridForPaper(); } else toast(r.message, 'err');
+      },
+      true
+    );
+    const deleteAllBtn = gridEl.querySelector('#mk-delete-all');
+    if (deleteAllBtn) deleteAllBtn.onclick = () => confirmAction(
+      `Delete ALL recorded marks for ${subject.name} in this class? This cannot be undone — use this for a genuine re-do, not a small correction (edit the cell above instead for that).`,
+      async () => {
+        const r = await Db.results.deleteAllResults(examId, classId, subject.id);
+        if (r.ok) { toast(`Deleted ${r.deleted} mark(s).`, 'ok'); renderGridForPaper(); } else toast(r.message, 'err');
       },
       true
     );

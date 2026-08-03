@@ -62,15 +62,15 @@ async function load(root, sel) {
   }
 
   sheetEl.innerHTML = `
-    <div class="card">
+    <div class="card print-landscape">
       <div class="card-h"><h3>${esc(res.exam.name)} — Mark List</h3><div class="spacer"></div>
         <button class="btn secondary no-print" onclick="window.print()">🖨️ Print</button></div>
-      <div class="card-b table-wrap"><table class="data">
-        <thead><tr><th class="num">#</th><th>Adm. No.</th><th>Name</th><th>Stream</th>
+      <div class="card-b table-wrap"><table class="data broadsheet-table">
+        <thead><tr><th>Adm. No.</th><th>Name</th><th>Stream</th>
           ${res.subjects.map((s) => `<th class="num">${esc(s.code || s.name)}<br><span class="badge ${STATUS_BADGE_CLASS[s.submission_status] || 'grey'}" style="font-size:10px">${esc(STATUS_SHORT[s.submission_status] || s.submission_status)}</span></th>`).join('')}
           <th class="num">Total</th><th class="num">Avg</th><th class="num">Position</th></tr></thead>
-        <tbody>${res.students.map((s, i) => `<tr>
-          <td class="num">${i + 1}</td><td>${esc(s.admission_no)}</td><td>${esc(s.full_name)}</td><td>${esc(s.stream_name || '—')}</td>
+        <tbody>${res.students.map((s) => `<tr>
+          <td>${esc(s.admission_no)}</td><td>${esc(s.full_name)}</td><td>${esc(s.stream_name || '—')}</td>
           ${res.subjects.map((sub) => `<td class="num">${s.scores[sub.id] === null || s.scores[sub.id] === undefined ? '—' : s.scores[sub.id]}</td>`).join('')}
           <td class="num"><b>${s.total}</b></td><td class="num">${s.average}</td><td class="num">${s.position || '—'}</td>
         </tr>`).join('')}</tbody>

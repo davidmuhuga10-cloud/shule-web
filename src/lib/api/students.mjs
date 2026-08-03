@@ -41,6 +41,26 @@ export function createStudentsApi(supabase) {
       return ok(withN);
     },
 
+    /** Search ACROSS every active student (ignoring any class/stream filter
+     *  currently applied in the UI) by admission number or name — brief §5's
+     *  "search-student feature." Small/medium school roster sizes make a
+     *  client-side substring match perfectly fine here; no need for a
+     *  database-side ilike-or() (which the mock query builder doesn't
+     *  support anyway). */
+    async search(query) {
+      query = String(query || '').trim().toLowerCase();
+      if (!query) return ok([]);
+      const { data, error } = await supabase.from('students').select('*').eq('status', 'active');
+      if (error) return err(error.message);
+      const matched = (data || []).filter((s) =>
+        String(s.admission_no || '').toLowerCase().indexOf(query) !== -1 ||
+        String(s.full_name || '').toLowerCase().indexOf(query) !== -1
+      );
+      const withN = await withNames(matched);
+      withN.sort(byAdmissionNo);
+      return ok(withN);
+    },
+
     async get(id) {
       const { data, error } = await supabase.from('students').select('*').eq('id', id).maybeSingle();
       if (error) return err(error.message);

@@ -1,6 +1,6 @@
 import { createMockSupabase } from './helpers/mockSupabase.mjs';
 import { createStaffApi } from '../src/lib/api/staff.mjs';
-import { createAssignmentsApi } from '../src/lib/api/assignments.mjs';
+import { createAssignmentsApi, seedDefaultSubjectsForNewStream } from '../src/lib/api/assignments.mjs';
 
 let passed = 0, failed = 0;
 function check(name, cond) { if (cond) passed++; else { failed++; console.error('FAIL:', name); } }
@@ -66,6 +66,65 @@ async function run() {
     const got2 = await api.getClassSubjects('c1');
     const ids = got2.data.map((r) => r.subject_id).sort();
     check('setClassSubjects replaces the full set (adds new, removes unchecked)', JSON.stringify(ids) === JSON.stringify(['su2', 'su3'].sort()));
+  }
+
+  // ---- per-stream subjects (Phase 2g / brief §4.2) -----------------------------
+  {
+    const sb = createMockSupabase({
+      classes: [{ id: 'c1', name: 'Grade 7' }],
+      streams: [{ id: 'str1', class_id: 'c1', name: 'North' }, { id: 'str2', class_id: 'c1', name: 'South' }],
+      subjects: [{ id: 'su1', name: 'Mathematics' }, { id: 'su2', name: 'English' }, { id: 'su3', name: 'Kiswahili' }],
+      staff: [{ id: 'stf1', full_name: 'Mr Teacher' }]
+    });
+    const api = createAssignmentsApi(sb);
+
+    // Class-wide legacy row exists (su1) — a not-yet-customized stream inherits it.
+    await api.setClassSubjects('c1', ['su1']);
+    const inheritedView = await api.getStreamSubjects('str1');
+    check('getStreamSubjects falls back to the class-wide row when the stream has no rows of its own', inheritedView.data.length === 1 && inheritedView.inherited === true);
+
+    // Customize str1 specifically: now it has its OWN authoritative set,
+    // independent of the class-wide row and of str2.
+    const setRes = await api.setStreamSubjects('str1', 'c1', ['su2', 'su3']);
+    check('setStreamSubjects succeeds', setRes.ok === true && setRes.count === 2);
+    const customizedView = await api.getStreamSubjects('str1');
+    check('getStreamSubjects reflects the stream-specific set once customized', customizedView.data.map((r) => r.subject_id).sort().join(',') === 'su2,su3');
+    check('a customized stream no longer reports as inherited', customizedView.inherited === false);
+
+    const str2View = await api.getStreamSubjects('str2');
+    check('an un-customized sibling stream still inherits the class-wide row untouched', str2View.data.length === 1 && str2View.data[0].subject_id === 'su1' && str2View.inherited === true);
+
+    // getClassSubjects (used by marks entry / results, unaware of streams)
+    // is the union: su1 (from str2's inherited class-wide row) + su2/su3 (str1).
+    const classView = await api.getClassSubjects('c1');
+    check('getClassSubjects unions every stream\'s effective subjects', classView.data.map((r) => r.subject_id).sort().join(',') === 'su1,su2,su3');
+
+    // Assign a teacher to su2 specifically within str1.
+    const teachRes = await api.setStreamSubjectTeacher({ stream_id: 'str1', class_id: 'c1', subject_id: 'su2', staff_id: 'stf1' });
+    check('setStreamSubjectTeacher succeeds', teachRes.ok === true);
+    const withTeacher = await api.getStreamSubjects('str1');
+    const englishRow = withTeacher.data.find((r) => r.subject_id === 'su2');
+    check('getStreamSubjects reports the assigned teacher name', englishRow.teacher_name === 'Mr Teacher');
+
+    // Remove su3 via the single-subject remove action.
+    const removeRes = await api.removeStreamSubject('str1', 'su3');
+    check('removeStreamSubject succeeds', removeRes.ok === true);
+    const afterRemove = await api.getStreamSubjects('str1');
+    check('removeStreamSubject drops just that one subject', afterRemove.data.length === 1 && afterRemove.data[0].subject_id === 'su2');
+  }
+
+  // ---- seedDefaultSubjectsForNewStream (Phase 2g / brief §4.2) -----------------
+  {
+    const sb = createMockSupabase({});
+    await seedDefaultSubjectsForNewStream(sb, 'strX', 'clsX', 'Grade 8');
+    const assigned = sb._tables.subject_class_assignments || [];
+    check('seedDefaultSubjectsForNewStream assigns subjects to the new stream', assigned.length > 0 && assigned.every((a) => a.stream_id === 'strX'));
+    const subjects = sb._tables.subjects || [];
+    check('seedDefaultSubjectsForNewStream creates the missing Junior Secondary subjects first', subjects.some((s) => s.name === 'Integrated Science' && s.level === 'Junior Secondary'));
+
+    const sb2 = createMockSupabase({});
+    await seedDefaultSubjectsForNewStream(sb2, 'strY', 'clsY', 'Some Custom Class Name');
+    check('seedDefaultSubjectsForNewStream does nothing for a non-standard class name', !(sb2._tables.subject_class_assignments || []).length);
   }
 
   // ---- teacher assignments ------------------------------------------------------

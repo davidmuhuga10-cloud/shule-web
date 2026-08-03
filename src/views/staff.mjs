@@ -40,7 +40,12 @@ async function render(root) {
   }, true));
 }
 
-async function openStaffModal(root, existing) {
+/** onSaved: optional callback run after a successful save instead of this
+ *  module's own flat-table render — lets other screens (e.g. teachers.mjs's
+ *  card grid) reuse this same form without being redirected back to the
+ *  Staff list. Defaults to re-rendering the Staff screen itself. */
+export async function openStaffModal(root, existing, onSaved) {
+  onSaved = onSaved || (() => render(root));
   const titleChoices = JOB_TITLES.map((t) => ({ id: t, name: t }));
   let canPublish = false;
   if (existing) {
@@ -116,7 +121,7 @@ async function openStaffModal(root, existing) {
         }
         toast('Staff saved.', 'ok');
       }
-      render(root);
+      onSaved();
     }
   });
 }

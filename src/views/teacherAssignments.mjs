@@ -8,7 +8,7 @@ export async function viewTeacherAssignments(root) {
   const classes = classesRes.ok ? classesRes.data : [];
 
   if (!staff.length) { renderPrereq(root, 'No staff found', 'Please add a staff member before assigning them to teach.', 'staff', 'Go to Staff'); return; }
-  if (!subjects.length) { renderPrereq(root, 'No subjects found', 'Please add subjects first.', 'subjects', 'Go to Subjects'); return; }
+  if (!subjects.length) { renderPrereq(root, 'No subjects found', 'Open a class\'s stream and assign it some subjects first.', 'classes', 'Go to Classes'); return; }
   if (!classes.length) { renderPrereq(root, 'No classes found', 'Please create a class first.', 'classes', 'Go to Classes'); return; }
 
   await render(root, staff, subjects, classes);

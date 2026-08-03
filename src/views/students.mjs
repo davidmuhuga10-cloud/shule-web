@@ -1,6 +1,24 @@
 import { esc, modal, closeModal, toast, confirmAction, options, renderPrereq, loader, go } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { LEAVING_REASON_LABELS } from '../lib/api/students.mjs';
+import { setNavIntent } from '../lib/navIntent.mjs';
+import { toCsv, downloadCsv } from '../lib/csvExport.mjs';
+
+/** Every exportable field, brief §5: "let the admin choose which fields to
+ *  include, rather than forcing every field into the export." */
+const EXPORT_COLS = [
+  { key: 'admission_no', label: 'Admission No.', on: true },
+  { key: 'full_name', label: 'Name', on: true },
+  { key: 'gender', label: 'Gender', on: true },
+  { key: 'class_name', label: 'Class', on: true },
+  { key: 'stream_name', label: 'Stream', on: true },
+  { key: 'guardian_name', label: 'Guardian Name', on: false },
+  { key: 'guardian_contact', label: 'Guardian Contact', on: false },
+  { key: 'date_of_birth', label: 'Date of Birth', on: false },
+  { key: 'admission_date', label: 'Admission Date', on: false },
+  { key: 'upi_number', label: 'UPI Number', on: false },
+  { key: 'assessment_number', label: 'Assessment Number', on: false }
+];
 
 function genderBadge(g) {
   return `<span class="badge ${g === 'Female' ? 'red' : 'blue'}">${esc(g)}</span>`;
@@ -34,16 +52,56 @@ async function render(root, classes, filters) {
       <button data-view="archived" class="${isArchived ? 'active' : ''}">Left / Archived</button>
     </div>
     <div class="toolbar">
+      <div class="field grow" style="margin:0"><input id="student-search" placeholder="🔍 Search by admission no. or name…"></div>
+    </div>
+    <div id="search-results"></div>
+    <div class="toolbar">
       <select id="f-class" class="grow"><option value="">All classes</option>${options(classes, 'id', 'name', filters.class_id)}</select>
       <select id="f-stream" ${filters.class_id ? '' : 'disabled'}><option value="">All streams</option>${options(streams, 'id', 'name', filters.stream_id)}</select>
+      ${!isArchived ? `<button class="btn secondary" id="print-class-list">🖨️ Print</button>
+      <button class="btn secondary" id="download-class-list">⬇️ Download Excel</button>` : ''}
     </div>
-    <div class="card"><div id="student-list">${loader()}</div></div>
+    <div class="card" id="browse-card"><div id="student-list">${loader()}</div></div>
   `;
 
   root.querySelectorAll('[data-view]').forEach((b) => b.onclick = () => render(root, classes, { ...filters, view: b.dataset.view }));
   root.querySelector('#f-class').onchange = (e) => render(root, classes, { ...filters, class_id: e.target.value, stream_id: '' });
   root.querySelector('#f-stream').onchange = (e) => render(root, classes, { ...filters, stream_id: e.target.value });
   root.querySelector('#add-student').onclick = () => openAddChoiceModal(root, classes, filters);
+  const printBtn = root.querySelector('#print-class-list');
+  if (printBtn) printBtn.onclick = () => {
+    setNavIntent('class-list', { class_id: filters.class_id, stream_id: filters.stream_id });
+    go('class-list');
+  };
+  const downloadBtn = root.querySelector('#download-class-list');
+  if (downloadBtn) downloadBtn.onclick = () => openExportModal(filters);
+
+  const searchEl = root.querySelector('#student-search');
+  const searchResultsEl = root.querySelector('#search-results');
+  const browseCard = root.querySelector('#browse-card');
+  let searchTimer = null;
+  searchEl.oninput = () => {
+    clearTimeout(searchTimer);
+    const q = searchEl.value.trim();
+    if (!q) { searchResultsEl.innerHTML = ''; browseCard.style.display = ''; return; }
+    searchTimer = setTimeout(async () => {
+      browseCard.style.display = 'none';
+      const res = await Db.students.search(q);
+      const matches = res.ok ? res.data : [];
+      searchResultsEl.innerHTML = `<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>Search results</h3></div>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Admission No.</th><th>Name</th><th>Class</th><th>Stream</th><th></th></tr></thead>
+          <tbody>${matches.length ? matches.map((s) => `<tr class="clickable-row" data-open-profile="${s.id}">
+            <td>${esc(s.admission_no)}</td><td>${esc(s.full_name)}</td><td>${esc(s.class_name)}</td><td>${esc(s.stream_name || '—')}</td>
+            <td class="muted" style="font-size:12.5px">View profile →</td></tr>`).join('') : `<tr><td colspan="5" class="muted center">No matching students.</td></tr>`}</tbody>
+        </table></div></div>`;
+      searchResultsEl.querySelectorAll('[data-open-profile]').forEach((tr) => tr.onclick = async () => {
+        const sres = await Db.students.get(tr.dataset.openProfile);
+        if (!sres.ok) { toast(sres.message, 'err'); return; }
+        renderStudentProfile(root, classes, filters, sres.data);
+      });
+    }, 200);
+  };
 
   const listEl = root.querySelector('#student-list');
   const res = await Db.students.list({
@@ -65,9 +123,9 @@ async function render(root, classes, filters) {
 
   if (isArchived) {
     listEl.innerHTML = `<div class="table-wrap"><table class="data">
-      <thead><tr><th class="num">#</th><th>Admission No.</th><th>Name</th><th>Class</th><th>Reason</th><th>Date left</th><th></th></tr></thead>
-      <tbody>${list.map((s, i) => `<tr>
-        <td class="num">${i + 1}</td><td>${esc(s.admission_no)}</td><td>${esc(s.full_name)}</td><td>${esc(s.class_name)}</td>
+      <thead><tr><th>Admission No.</th><th>Name</th><th>Class</th><th>Reason</th><th>Date left</th><th></th></tr></thead>
+      <tbody>${list.map((s) => `<tr>
+        <td>${esc(s.admission_no)}</td><td>${esc(s.full_name)}</td><td>${esc(s.class_name)}</td>
         <td>${esc(LEAVING_REASON_LABELS[s.left_reason] || s.left_reason || '—')}</td><td>${esc(s.left_date || '—')}</td>
         <td class="row-actions">
           <button class="btn ghost sm" data-restore="${s.id}">Restore</button>
@@ -93,10 +151,10 @@ async function render(root, classes, filters) {
   }
 
   listEl.innerHTML = `<div class="table-wrap"><table class="data">
-    <thead><tr><th style="width:36px"><input type="checkbox" id="sel-all"></th><th class="num">#</th><th>Admission No.</th><th>Name</th><th>Gender</th><th>Class</th><th>Stream</th><th></th></tr></thead>
-    <tbody>${list.map((s, i) => `<tr>
-      <td><input type="checkbox" class="sel-row" data-id="${s.id}"></td>
-      <td class="num">${i + 1}</td><td>${esc(s.admission_no)}</td><td>${esc(s.full_name)}</td>
+    <thead><tr><th style="width:36px"><input type="checkbox" id="sel-all"></th><th>Admission No.</th><th>Name</th><th>Gender</th><th>Class</th><th>Stream</th><th></th></tr></thead>
+    <tbody>${list.map((s) => `<tr class="clickable-row" data-open-profile="${s.id}">
+      <td><input type="checkbox" class="sel-row" data-id="${s.id}" onclick="event.stopPropagation()"></td>
+      <td>${esc(s.admission_no)}</td><td>${esc(s.full_name)}</td>
       <td>${genderBadge(s.gender)}</td><td>${esc(s.class_name)}</td><td>${esc(s.stream_name || '—')}</td>
       <td class="row-actions">
         <button class="icon-btn" data-edit="${s.id}">✏️</button>
@@ -104,8 +162,9 @@ async function render(root, classes, filters) {
       </td></tr>`).join('')}</tbody>
   </table></div>`;
 
-  listEl.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => openStudentModal(root, classes, filters, list.find((s) => s.id === b.dataset.edit)));
-  listEl.querySelectorAll('[data-archive]').forEach((b) => b.onclick = () => openArchiveModal(root, classes, filters, b.dataset.archive));
+  listEl.querySelectorAll('[data-edit]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); openStudentModal(root, classes, filters, list.find((s) => s.id === b.dataset.edit)); });
+  listEl.querySelectorAll('[data-archive]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); openArchiveModal(root, classes, filters, b.dataset.archive); });
+  listEl.querySelectorAll('[data-open-profile]').forEach((tr) => tr.onclick = () => renderStudentProfile(root, classes, filters, list.find((s) => s.id === tr.dataset.openProfile)));
 
   const moveBtn = root.querySelector('#move-selected');
   const selAll = listEl.querySelector('#sel-all');
@@ -118,6 +177,29 @@ async function render(root, classes, filters) {
     if (!ids.length) return;
     openMoveModal(root, classes, filters, ids);
   };
+}
+
+/** Field-picker modal for "⬇️ Download Excel" (brief §5) — exports exactly
+ *  the currently filtered class/stream's active roster, with the admin
+ *  choosing which columns go in rather than every field being forced in. */
+function openExportModal(filters) {
+  modal({
+    title: 'Download Excel — choose fields',
+    body: `<div class="chk-row">${EXPORT_COLS.map((c) => `<label class="chk"><input type="checkbox" data-export-col="${c.key}" ${c.on ? 'checked' : ''}> ${esc(c.label)}</label>`).join('')}</div>`,
+    okLabel: 'Download',
+    onOk: async () => {
+      const activeCols = EXPORT_COLS.filter((c) => {
+        const cb = document.querySelector(`[data-export-col="${c.key}"]`);
+        return cb ? cb.checked : false;
+      });
+      if (!activeCols.length) { toast('Choose at least one field.', 'err'); return; }
+      const res = await Db.students.list({ class_id: filters.class_id || undefined, stream_id: filters.stream_id || undefined, status: 'active' });
+      const list = res.ok ? res.data : [];
+      if (!list.length) { toast('No students to export.', 'warn'); return; }
+      closeModal();
+      downloadCsv('students-export.csv', toCsv(list, activeCols));
+    }
+  });
 }
 
 /** "+ Add student" now asks Single vs Bulk first, instead of always opening
@@ -144,7 +226,7 @@ function openAddChoiceModal(root, classes, filters) {
   document.getElementById('choice-bulk').onclick = () => { closeModal(); go('bulk-upload'); };
 }
 
-async function openStudentModal(root, classes, filters, existing) {
+async function openStudentModal(root, classes, filters, existing, onSaved) {
   let streams = existing ? (await Db.streams.list(existing.class_id)).data || [] : [];
   renderModal(streams, existing ? existing.class_id : filters.class_id || '');
 
@@ -215,7 +297,7 @@ async function openStudentModal(root, classes, filters, existing) {
         } else {
           toast('Student saved.', 'ok');
         }
-        render(root, classes, filters);
+        if (onSaved) onSaved(res.data); else render(root, classes, filters);
       }
     });
 
@@ -285,4 +367,64 @@ function openMoveModal(root, classes, filters, studentIds) {
     streamSel.disabled = false;
     streamSel.innerHTML = '<option value="">No stream</option>' + options(sres.ok ? sres.data : [], 'id', 'name', '');
   };
+}
+
+/* ============================================================================
+ * Student profile (brief §5) — "functioning like a student portal": the
+ * full profile (view + edit-in-place via the same Add/Edit Student form)
+ * plus every exam this student has results for, with a one-click jump
+ * straight to their report form for any of them.
+ * ==========================================================================*/
+async function renderStudentProfile(root, classes, filters, student) {
+  const examsRes = await Db.results.getStudentExams(student.id);
+  const exams = examsRes.ok ? examsRes.data : [];
+
+  const examRows = exams.length ? exams.map((e) => `
+    <tr>
+      <td>${esc(e.name)}</td>
+      <td>${esc(e.academic_year_name)} — ${esc(e.term_name)}</td>
+      <td class="row-actions"><button class="btn ghost sm" data-view-report="${e.id}">🧾 View report form</button></td>
+    </tr>`).join('') : `<tr><td colspan="3" class="muted center">No results recorded for this student yet.</td></tr>`;
+
+  root.innerHTML = `
+    <div class="page-head">
+      <div><a class="back-link" id="back-to-students">← All students</a><h2>${esc(student.full_name)}</h2><p>Admission No. ${esc(student.admission_no)} · ${esc(student.class_name)}${student.stream_name ? ' — ' + esc(student.stream_name) : ''}</p></div>
+      <div class="spacer"></div><button class="btn" id="edit-profile">✏️ Edit profile</button>
+    </div>
+    <div class="grid2">
+      <div class="card">
+        <div class="card-h"><h3>Profile</h3></div>
+        <div class="card-b">
+          <div class="profile-meta">
+            <div><span>Gender</span><span>${esc(student.gender)}</span></div>
+            <div><span>Class / Stream</span><span>${esc(student.class_name)}${student.stream_name ? ' — ' + esc(student.stream_name) : ''}</span></div>
+            <div><span>Guardian</span><span>${esc(student.guardian_name || student.guardian_contact || '—')}</span></div>
+            <div><span>Date of birth</span><span>${esc(student.date_of_birth || '—')}</span></div>
+            <div><span>Admission date</span><span>${esc(student.admission_date || '—')}</span></div>
+            <div><span>UPI number (NEMIS)</span><span>${esc(student.upi_number || '—')}</span></div>
+            <div><span>Assessment number (KNEC)</span><span>${esc(student.assessment_number || '—')}</span></div>
+            <div><span>Previous school</span><span>${esc(student.previous_school || '—')}</span></div>
+            <div><span>Medical notes</span><span>${esc(student.medical_notes || '—')}</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h3>Results</h3></div>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Exam</th><th>Year / Term</th><th></th></tr></thead>
+          <tbody>${examRows}</tbody>
+        </table></div>
+      </div>
+    </div>
+  `;
+
+  root.querySelector('#back-to-students').onclick = () => render(root, classes, filters);
+  root.querySelector('#edit-profile').onclick = () => openStudentModal(root, classes, filters, student, async (saved) => {
+    const fresh = await Db.students.get(saved.id);
+    renderStudentProfile(root, classes, filters, fresh.ok ? fresh.data : student);
+  });
+  root.querySelectorAll('[data-view-report]').forEach((b) => b.onclick = () => {
+    setNavIntent('report-forms', { exam_id: b.dataset.viewReport, class_id: student.class_id, student_id: student.id });
+    go('reports');
+  });
 }

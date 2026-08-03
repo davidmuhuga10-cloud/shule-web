@@ -93,8 +93,11 @@ function render(root, exams, classes, intent) {
   wireStudentSelect();
 
   // Prefill straight from a "Go to Report Forms" handoff (see navIntent.mjs
-  // at the top of this file) — defaults to batch-printing the whole class.
+  // at the top of this file) — defaults to batch-printing the whole class,
+  // unless a specific student_id was handed off too (e.g. from a student's
+  // profile page — brief §5's "view results" action), in which case that
+  // one student is preselected instead.
   if (intent.class_id && intent.exam_id) {
-    refreshStudents(intent.class_id, BATCH_VALUE).then(() => { wireStudentSelect(); tryLoad(); });
+    refreshStudents(intent.class_id, intent.student_id || BATCH_VALUE).then(() => { wireStudentSelect(); tryLoad(); });
   }
 }

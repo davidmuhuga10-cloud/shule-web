@@ -34,6 +34,22 @@ h1,h2,h3,h4{margin:0;font-weight:650;color:var(--ink)}
 .icon-btn{border:none;background:none;cursor:pointer;color:var(--muted);padding:6px;border-radius:6px;font-size:15px;line-height:1}
 .icon-btn:hover{background:#eef1f5;color:var(--ink)}
 .icon-btn.danger:hover{background:var(--danger-bg);color:var(--danger)}
+.back-link{cursor:pointer;color:var(--primary);font-size:12.5px;font-weight:650;display:inline-block;margin-bottom:6px}
+.back-link:hover{text-decoration:underline}
+.clickable-row{cursor:pointer}
+
+/* ---------- Teachers module (card grid, Phase 2g / brief §6) ---------- */
+.teacher-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px}
+.avatar-circle{width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,var(--brand),var(--brand-2));
+  color:#fff;display:grid;place-items:center;font-weight:750;font-size:16px;flex-shrink:0}
+.teacher-card .btn.sm{padding:6px 8px;font-size:12px}
+
+/* ---------- Student profile (brief §5) ---------- */
+.profile-meta{display:grid;gap:2px;font-size:13.5px}
+.profile-meta>div{display:flex;justify-content:space-between;gap:14px;border-bottom:1px dotted var(--line);padding:7px 0}
+.profile-meta>div:last-child{border-bottom:none}
+.profile-meta>div span:first-child{color:var(--muted)}
+.profile-meta>div span:last-child{font-weight:600;text-align:right}
 
 /* ---------- Forms ---------- */
 label{display:block;font-weight:600;font-size:12.5px;color:var(--ink);margin-bottom:6px}
@@ -111,6 +127,21 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .t-blue{background:#e7f0fe;color:#2563eb}.t-green{background:var(--ok-bg);color:var(--ok)}
 .t-amber{background:var(--warn-bg);color:var(--warn)}.t-purple{background:#f0e9fd;color:#7c3aed}
 .t-teal{background:#e2f5f2;color:var(--primary)}.t-rose{background:#fde8ee;color:#db2777}
+
+/* ---------- Dashboard tile groups (Phase 2f: separate mobile/desktop layouts,
+   toggled purely by the existing 960px breakpoint — no JS matchMedia needed) ---------- */
+.stats-desktop{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:22px;max-width:640px}
+.stats-mobile{display:none}
+.stats-desktop .stat,.stats-mobile .stat{max-width:none;flex:none;width:100%}
+.gender-panel{display:flex;align-items:center;justify-content:space-between;padding:24px 30px}
+.gender-panel .g-side{text-align:center}
+.gender-panel .g-num{font-size:38px;font-weight:800;line-height:1}
+.gender-panel .g-lab{font-size:12.5px;color:var(--muted);margin-top:6px;font-weight:650;text-transform:uppercase;letter-spacing:.04em}
+.gender-panel .g-div{width:1px;align-self:stretch;background:var(--line)}
+.stat.gender-tile .s-body{display:flex;align-items:center;justify-content:space-between;flex:1;gap:8px;min-width:0}
+.stat.gender-tile .g-side{text-align:center}
+.stat.gender-tile .g-num{font-size:21px;font-weight:800;line-height:1}
+.stat.gender-tile .g-lab{font-size:10.5px;color:var(--muted);margin-top:3px}
 
 /* ---------- Tables ---------- */
 .table-wrap{overflow-x:auto}
@@ -236,14 +267,31 @@ table.data td.num,table.data th.num{text-align:center}
 /* Logo (School Settings + printouts) */
 .logo-thumb{width:64px;height:64px;border-radius:10px;object-fit:cover;border:1px solid var(--line);background:#fff}
 .logo-placeholder{width:64px;height:64px;border-radius:10px;border:1.5px dashed var(--line);display:grid;place-items:center;color:var(--muted);font-size:22px;background:#fafbfc}
+/* Brief §8/§9: printed reports should have sane margins/page sizing and
+   never require scrolling on paper. @page sets a consistent margin on every
+   printed page; .print-landscape (opt-in per view, e.g. the Mark List /
+   broadsheet, which can have a dozen-plus subject columns) switches that
+   page to landscape so wide tables actually fit instead of being cut off at
+   the right edge — portrait remains the default for report cards and
+   other narrower printouts. */
+@page{size:A4;margin:12mm}
+@page landscape{size:A4 landscape;margin:10mm}
 @media print{
   .sidebar,.topbar,.no-print{display:none!important}
-  .main{margin-left:0}.content{padding:0}
+  .main{margin-left:0}.content{padding:0;max-width:none}
   .report{border:none;box-shadow:none;max-width:none}
   body{background:#fff}
+  .card{box-shadow:none;border:none}
   .col.print-hide{display:none!important}
   .batch-page{page-break-after:always}
   .batch-page:last-child{page-break-after:auto}
+  /* Wide printable tables (broadsheet, class list, transcript) — shrink to
+     fit the page width instead of being clipped or forcing a scrollbar
+     that paper obviously can't have. */
+  .table-wrap{overflow:visible}
+  table.data{font-size:10.5px}
+  table.data th,table.data td{padding:5px 7px}
+  .print-landscape{page:landscape}
 }
 
 /* ---------- Loader ---------- */
@@ -263,6 +311,10 @@ table.data td.num,table.data th.num{text-align:center}
   .auth{grid-template-columns:1fr}.auth .promo{display:none}
   .grid2,.grid3{grid-template-columns:1fr}
   .report .r-summary{grid-template-columns:1fr 1fr}
+  .stats-desktop{display:none}
+  .stats-mobile{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:22px}
+  .gender-panel{padding:18px 16px}
+  .gender-panel .g-num{font-size:28px}
 }
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:35;display:none}
 .scrim.show{display:block}

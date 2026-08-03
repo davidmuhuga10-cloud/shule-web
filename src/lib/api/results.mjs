@@ -21,6 +21,7 @@
  *                      everything in their own school regardless of status.
  */
 import { ok, err, byAdmissionNo, admissionNumberValue, indexById } from './_util.mjs';
+import { getEffectiveClassSubjectIds } from './assignments.mjs';
 
 const EXAM_TYPES = ['summative', 'formative', 'cat', 'mock'];
 export const EXAM_TYPE_LABELS = {
@@ -82,14 +83,42 @@ export function createResultsApi(supabase, gradingApi) {
         status: payload.status || 'open',
         exam_type: examType
       };
+      let saved;
       if (payload.id) {
         const { data, error } = await supabase.from('exams').update(rec).eq('id', payload.id).select().single();
         if (error) return err(error.message);
-        return ok(data);
+        saved = data;
+      } else {
+        const { data, error } = await supabase.from('exams').insert(rec).select().single();
+        if (error) return err(error.message);
+        saved = data;
       }
-      const { data, error } = await supabase.from('exams').insert(rec).select().single();
-      if (error) return err(error.message);
-      return ok(data);
+
+      // Phase 2h (brief §7.1): sync which classes sit this exam — a full
+      // replace-the-set like every other assignment-style save() in this
+      // app, EXCEPT a class already carrying recorded marks is never
+      // silently dropped from the board just because it got unticked here
+      // (that would hide results an admin already has, which the class
+      // picker isn't meant to do — remove the marks first if that's really
+      // the intent).
+      if (Array.isArray(payload.class_ids)) {
+        const wanted = payload.class_ids.map(String);
+        const { data: existing } = await supabase.from('exam_classes').select('id, class_id').eq('exam_id', saved.id);
+        const existingIds = (existing || []).map((a) => String(a.class_id));
+        const toAdd = wanted.filter((cid) => existingIds.indexOf(cid) === -1);
+        const toRemove = (existing || []).filter((a) => wanted.indexOf(String(a.class_id)) === -1);
+
+        if (toAdd.length) {
+          const { error } = await supabase.from('exam_classes').insert(toAdd.map((class_id) => ({ exam_id: saved.id, class_id })));
+          if (error) return err(error.message);
+        }
+        for (const a of toRemove) {
+          const { count } = await supabase.from('results').select('id', { count: 'exact', head: true }).eq('exam_id', saved.id).eq('class_id', a.class_id);
+          if (count > 0) continue;
+          await supabase.from('exam_classes').delete().eq('id', a.id);
+        }
+      }
+      return ok(saved);
     },
 
     async deleteExam(id) {
@@ -145,54 +174,57 @@ export function createResultsApi(supabase, gradingApi) {
      *  entered by). paper_id is optional — see getResultsEntry above.
      *  Per-paper rows are NOT graded individually (grade_label/points/remark
      *  stay blank on them); the meaningful grade is the combined, weighted
-     *  subject score, computed at read time by get_report_card()/getBroadsheet(). */
+     *  subject score, computed at read time by get_report_card()/getBroadsheet().
+     *
+     *  Phase 2f: this used to loop client-side, awaiting one select-then-
+     *  insert-or-update round trip PER STUDENT — fine for a handful of
+     *  scores, but a full class (or the Bulk Upload Marks flow calling this
+     *  once per subject/paper column) turned into hundreds of sequential
+     *  network round trips, which is what made marks import take minutes
+     *  instead of seconds. The per-row logic (exists-check, range
+     *  validation, default-scale grading, blank-clears-the-row) is now done
+     *  in ONE round trip via the save_results_batch() RPC (see
+     *  migrations/0008_bulk_marks_rpc.sql) — same behaviour, just one
+     *  request regardless of how many students are in the grid. */
     async saveResultsEntry(payload) {
       payload = payload || {};
-      const { data: exam } = await supabase.from('exams').select('*').eq('id', payload.exam_id).maybeSingle();
-      if (!exam) return err('Exam not found.');
+      if (!payload.exam_id) return err('Missing exam.');
       if (!payload.subject_id) return err('Missing subject.');
       if (!payload.class_id) return err('Missing class.');
-      const paperId = payload.paper_id || null;
 
-      let outOf = Number(exam.out_of) || 100;
-      let paper = null;
-      if (paperId) {
-        const { data } = await supabase.from('subject_papers').select('*').eq('id', paperId).maybeSingle();
-        if (!data) return err('Paper not found.');
-        paper = data;
-        outOf = Number(paper.out_of) || 100;
+      const scores = (payload.scores || []).map((s) => ({
+        student_id: s.student_id,
+        score: s.score === null || s.score === undefined ? '' : String(s.score)
+      }));
+
+      const { data, error } = await supabase.rpc('save_results_batch', {
+        p_exam_id: payload.exam_id, p_class_id: payload.class_id, p_subject_id: payload.subject_id,
+        p_paper_id: payload.paper_id || null, p_scores: scores
+      });
+      if (error) return err(error.message || 'Could not save marks.');
+      const row = Array.isArray(data) ? data[0] : data;
+      return ok(null, { saved: (row && row.saved) || 0, cleared: (row && row.cleared) || 0 });
+    },
+
+    /** Wipe every recorded mark for one (exam, class, subject) in one click —
+     *  brief §7.2's "Delete All Results" (the real gap left after Add/Edit,
+     *  which the existing shared entry grid already covers by just typing
+     *  over or blanking a cell). Only sensible for a subject that hasn't
+     *  been published yet — deleting marks a parent can already see would
+     *  need its own "unpublish" story, not this. */
+    async deleteAllResults(examId, classId, subjectId) {
+      if (!examId) return err('Missing exam.');
+      if (!classId) return err('Missing class.');
+      if (!subjectId) return err('Missing subject.');
+      const { data: submission } = await supabase.from('result_submissions').select('status')
+        .eq('exam_id', examId).eq('class_id', classId).eq('subject_id', subjectId).maybeSingle();
+      if (submission && submission.status === 'published') {
+        return err('These results are already published — reopen the subject first (in Publish Results) before deleting.');
       }
-      const bands = await gradingApi.defaultScaleBands();
-
-      let existingQuery = supabase.from('results').select('*').eq('exam_id', payload.exam_id).eq('subject_id', payload.subject_id);
-      existingQuery = paperId ? existingQuery.eq('paper_id', paperId) : existingQuery.is('paper_id', null);
-      const { data: existing } = await existingQuery;
-      const byStudent = {};
-      (existing || []).forEach((r) => { byStudent[r.student_id] = r; });
-
-      let saved = 0, cleared = 0;
-      for (const entry of (payload.scores || [])) {
-        const raw = String(entry.score).trim();
-        const current = byStudent[entry.student_id];
-
-        if (raw === '') {
-          if (current) { await supabase.from('results').delete().eq('id', current.id); cleared++; }
-          continue;
-        }
-        const score = Number(raw);
-        if (isNaN(score) || score < 0 || score > outOf) continue; // skip invalid silently; UI validates too
-        const g = paperId ? { grade_label: null, points: null, remark: null } : gradingApi.gradeScore(score, bands);
-        const rec = {
-          exam_id: payload.exam_id, student_id: entry.student_id, subject_id: payload.subject_id,
-          academic_year_id: exam.academic_year_id, term_id: exam.term_id,
-          class_id: payload.class_id, paper_id: paperId,
-          score, grade_label: g.grade_label, points: g.points, remark: g.remark
-        };
-        if (current) await supabase.from('results').update(rec).eq('id', current.id);
-        else await supabase.from('results').insert(rec);
-        saved++;
-      }
-      return ok(null, { saved, cleared });
+      const { error, count } = await supabase.from('results').delete({ count: 'exact' })
+        .eq('exam_id', examId).eq('class_id', classId).eq('subject_id', subjectId);
+      if (error) return err(error.message);
+      return ok(null, { deleted: count || 0 });
     },
 
     /** Broadsheet for an exam within a class (optionally a single stream).
@@ -212,8 +244,7 @@ export function createResultsApi(supabase, gradingApi) {
       if (!exam) return err('Exam not found.');
       const examOutOf = Number(exam.out_of) || 100;
 
-      const { data: assigned } = await supabase.from('subject_class_assignments').select('subject_id').eq('class_id', q.class_id);
-      let subjectIds = (assigned || []).map((a) => a.subject_id);
+      let subjectIds = await getEffectiveClassSubjectIds(supabase, q.class_id);
       if (!subjectIds.length) {
         const { data: examResults } = await supabase.from('results').select('subject_id').eq('exam_id', q.exam_id).eq('class_id', q.class_id);
         subjectIds = [...new Set((examResults || []).map((r) => r.subject_id))];
@@ -309,19 +340,29 @@ export function createResultsApi(supabase, gradingApi) {
       return ok(data || { status: 'draft' });
     },
 
-    /** Every subject that has marks entered for this exam+class, with its
+    /** Every subject ASSIGNED to this class (brief §7.3: a subject with
+     *  literally zero marks entered still needs to show up here as an
+     *  obvious gap — "missing marks or incomplete subject entries" — not be
+     *  silently absent just because nothing's been typed yet), with its
      *  current publishing status — the list the "Publish Results" screen
      *  works from (Subject Teacher -> Class Teacher -> Supervisor -> Admin;
      *  "Supervisor" here is any teacher granted the publish_results
      *  capability, or an admin). Also reports who's assigned to teach it and
      *  how many of the class's active students actually have a mark yet, so
      *  an admin reviewing before publish can see at a glance who has and
-     *  hasn't submitted, and whether any student is still missing a score. */
+     *  hasn't submitted, and whether any student is still missing a score.
+     *  A subject that has results but is no longer in the assigned set
+     *  (e.g. unassigned after marks were entered) is still included, so
+     *  recorded marks are never silently dropped from the review. */
     async listSubmissions(examId, classId) {
       if (!examId) return err('Please choose an exam.');
       if (!classId) return err('Please choose a class.');
-      const { data: examResults } = await supabase.from('results').select('subject_id, student_id').eq('exam_id', examId).eq('class_id', classId);
-      const subjectIds = [...new Set((examResults || []).map((r) => r.subject_id))];
+      const [assignedIds, { data: examResults }] = await Promise.all([
+        getEffectiveClassSubjectIds(supabase, classId),
+        supabase.from('results').select('subject_id, student_id').eq('exam_id', examId).eq('class_id', classId)
+      ]);
+      const resultSubjectIds = [...new Set((examResults || []).map((r) => r.subject_id))];
+      const subjectIds = [...new Set([...assignedIds, ...resultSubjectIds])];
       if (!subjectIds.length) return ok([]);
       const { data: subjects } = await supabase.from('subjects').select('id, name, code').in('id', subjectIds);
       const subjectMap = indexById(subjects || []);
@@ -362,60 +403,89 @@ export function createResultsApi(supabase, gradingApi) {
       return ok(rows);
     },
 
-    /** The "Manage Exams" board's data source: for ONE exam, every class that
-     *  has any marks entered at all, each with an overall status derived from
-     *  how many of the class's assigned subjects have marks vs how many of
-     *  those have been published — so the UI can show a single, obvious
-     *  next action ("Continue marks entry" / "Review & publish" / "Published")
-     *  per class instead of making an admin dig into each subject one by one.
-     *  Classes with zero activity for this exam are NOT included — the
-     *  caller offers a separate "start marks entry for a class" picker for
-     *  those (any class is always eligible; there's no per-exam class
-     *  whitelist in this schema). */
+    /** The "Manage Exams" board's data source (brief §7.1) — every class
+     *  EXPLICITLY selected to sit this exam (exam_classes, set via
+     *  saveExam's class_ids), regardless of whether any marks exist for it
+     *  yet — so a brand-new exam shows every one of its classes up front
+     *  (Zeraki-style "Results Not Uploaded") instead of only appearing once
+     *  someone starts entering marks. Each row's status is derived from how
+     *  many of the class's actually-ASSIGNED subjects (per-stream union —
+     *  see getEffectiveClassSubjectIds) have marks vs have been published,
+     *  plus who last published and when, so the UI can show one obvious
+     *  next action per class instead of making an admin dig into each
+     *  subject one by one. */
     async listExamClasses(examId) {
       if (!examId) return err('Please choose an exam.');
-      const { data: examResults } = await supabase.from('results').select('class_id, subject_id').eq('exam_id', examId);
-      const classIds = [...new Set((examResults || []).map((r) => r.class_id).filter(Boolean))];
+      const { data: examClassRows } = await supabase.from('exam_classes').select('class_id').eq('exam_id', examId);
+      const classIds = [...new Set((examClassRows || []).map((r) => r.class_id).filter(Boolean))];
       if (!classIds.length) return ok([]);
 
       const { data: classes } = await supabase.from('classes').select('id, name').in('id', classIds);
       const classMap = indexById(classes || []);
 
-      const { data: assignments } = await supabase.from('subject_class_assignments').select('class_id, subject_id').in('class_id', classIds);
-      const assignedByClass = {};
-      (assignments || []).forEach((a) => {
-        (assignedByClass[a.class_id] = assignedByClass[a.class_id] || new Set()).add(a.subject_id);
-      });
-
-      const { data: submissions } = await supabase.from('result_submissions').select('class_id, subject_id, status').eq('exam_id', examId).in('class_id', classIds);
-      const publishedByClass = {};
-      (submissions || []).forEach((s) => {
-        if (s.status === 'published') (publishedByClass[s.class_id] = publishedByClass[s.class_id] || new Set()).add(s.subject_id);
-      });
-
+      const { data: examResults } = await supabase.from('results').select('class_id, subject_id').eq('exam_id', examId).in('class_id', classIds);
       const withMarksByClass = {};
       (examResults || []).forEach((r) => {
         (withMarksByClass[r.class_id] = withMarksByClass[r.class_id] || new Set()).add(r.subject_id);
       });
 
-      const rows = classIds.map((cid) => {
+      const { data: submissions } = await supabase.from('result_submissions')
+        .select('class_id, subject_id, status, published_at, published_by').eq('exam_id', examId).in('class_id', classIds);
+      const publishedByClass = {};
+      const lastPublishByClass = {};
+      (submissions || []).forEach((s) => {
+        if (s.status !== 'published') return;
+        (publishedByClass[s.class_id] = publishedByClass[s.class_id] || new Set()).add(s.subject_id);
+        const cur = lastPublishByClass[s.class_id];
+        if (!cur || String(s.published_at || '') > String(cur.published_at || '')) {
+          lastPublishByClass[s.class_id] = { published_at: s.published_at, published_by: s.published_by };
+        }
+      });
+      const publisherIds = [...new Set(Object.values(lastPublishByClass).map((v) => v.published_by).filter(Boolean))];
+      const { data: publisherRows } = publisherIds.length
+        ? await supabase.from('staff').select('id, full_name').in('id', publisherIds) : { data: [] };
+      const publisherMap = indexById(publisherRows || []);
+
+      const rows = [];
+      for (const cid of classIds) {
+        const assignedIds = await getEffectiveClassSubjectIds(supabase, cid);
         const withMarks = withMarksByClass[cid] || new Set();
-        const assigned = assignedByClass[cid] && assignedByClass[cid].size ? assignedByClass[cid] : withMarks;
         const published = publishedByClass[cid] || new Set();
-        const subjectsTotal = assigned.size;
-        const subjectsWithMarks = withMarks.size;
-        const subjectsPublished = [...withMarks].filter((sid) => published.has(sid)).length;
+        const subjectsTotal = assignedIds.length;
+        const subjectsWithMarks = assignedIds.filter((sid) => withMarks.has(sid)).length;
+        const subjectsPublished = assignedIds.filter((sid) => published.has(sid)).length;
+
         let status;
-        if (subjectsWithMarks < subjectsTotal) status = 'in_progress';
-        else if (subjectsPublished >= subjectsTotal && subjectsTotal > 0) status = 'published';
-        else status = 'ready_to_publish';
-        return {
+        if (subjectsTotal === 0) status = 'no_subjects';
+        else if (subjectsPublished >= subjectsTotal) status = 'published';
+        else if (subjectsWithMarks >= subjectsTotal) status = 'ready_to_publish';
+        else if (subjectsWithMarks > 0) status = 'in_progress';
+        else status = 'not_started';
+
+        const lastPub = lastPublishByClass[cid];
+        rows.push({
           class_id: cid, class_name: (classMap[cid] || {}).name || '(deleted class)',
           subjects_total: subjectsTotal, subjects_with_marks: subjectsWithMarks, subjects_published: subjectsPublished,
-          status
-        };
-      });
+          status,
+          last_published_at: lastPub ? lastPub.published_at : null,
+          last_published_by: lastPub && lastPub.published_by ? ((publisherMap[lastPub.published_by] || {}).full_name || '') : ''
+        });
+      }
       rows.sort((a, b) => String(a.class_name).localeCompare(String(b.class_name)));
+      return ok(rows);
+    },
+
+    /** Every class NOT yet added to this exam — the exam-edit modal's "add
+     *  more classes later" picker (brief §7.1 also implies classes can be
+     *  added to an exam after the fact, e.g. a late-enrolling stream). */
+    async listExamClassChoices(examId) {
+      const [{ data: allClasses }, { data: examClassRows }] = await Promise.all([
+        supabase.from('classes').select('id, name'),
+        examId ? supabase.from('exam_classes').select('class_id').eq('exam_id', examId) : Promise.resolve({ data: [] })
+      ]);
+      const already = new Set((examClassRows || []).map((r) => r.class_id));
+      const rows = (allClasses || []).filter((c) => !already.has(c.id))
+        .slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
       return ok(rows);
     },
 

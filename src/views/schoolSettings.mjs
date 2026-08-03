@@ -27,6 +27,11 @@ function render(root, settings) {
         </div>
         <div class="field"><label>Email</label><input id="set-email" type="email" value="${esc(settings.email || '')}" placeholder="e.g. info@yourschool.ac.ke"></div>
         <div class="field">
+          <label>Bulk SMS balance</label>
+          <input id="set-sms-balance" value="${esc(settings.sms_credit_balance || '')}" placeholder="e.g. 4,500 credits">
+          <p class="hint">Shown on the mobile dashboard. There is no live billing integration yet — update this manually whenever you top up with your SMS provider.</p>
+        </div>
+        <div class="field">
           <label>Logo</label>
           <div style="display:flex;align-items:center;gap:14px">
             ${logoPreview}
@@ -69,6 +74,7 @@ function render(root, settings) {
       po_box: root.querySelector('#set-pobox').value,
       phone: root.querySelector('#set-phone').value,
       email: root.querySelector('#set-email').value,
+      sms_credit_balance: root.querySelector('#set-sms-balance').value,
       logo: pendingLogo
     };
     const res = await Db.settings.save(payload);

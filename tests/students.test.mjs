@@ -23,6 +23,26 @@ async function run() {
     check('list() joins class_name', res.data[0].class_name === 'Grade 7');
   }
 
+  // ---- search (brief §5) -------------------------------------------------------
+  {
+    const sb = createMockSupabase({
+      classes: [{ id: 'c1', name: 'Grade 7' }, { id: 'c2', name: 'Grade 8' }],
+      students: [
+        { id: 's1', admission_no: '2023', full_name: 'Jane Wanjiru', gender: 'Female', class_id: 'c1', status: 'active' },
+        { id: 's2', admission_no: '2045', full_name: 'Amos Otieno', gender: 'Male', class_id: 'c2', status: 'active' },
+        { id: 's3', admission_no: '9999', full_name: 'Left Student', gender: 'Male', class_id: 'c1', status: 'left' }
+      ]
+    });
+    const api = createStudentsApi(sb);
+    const byName = await api.search('jane');
+    check('search matches by name, case-insensitively', byName.data.length === 1 && byName.data[0].id === 's1');
+    const byAdm = await api.search('2045');
+    check('search matches by admission number', byAdm.data.length === 1 && byAdm.data[0].id === 's2');
+    check('search only considers active students', (await api.search('left student')).data.length === 0);
+    check('search returns nothing for a blank query', (await api.search('   ')).data.length === 0);
+    check('search joins class_name like list() does', byAdm.data[0].class_name === 'Grade 8');
+  }
+
   // ---- save validation --------------------------------------------------------
   {
     const sb = createMockSupabase({ classes: [{ id: 'c1', name: 'Grade 7' }] });
