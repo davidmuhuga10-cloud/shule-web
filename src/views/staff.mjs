@@ -8,8 +8,14 @@ export async function viewStaff(root) {
 }
 
 async function render(root) {
-  const res = await Db.staff.list();
+  const [res, usersRes] = await Promise.all([Db.staff.list(), Db.users.list()]);
   const staff = res.ok ? res.data : [];
+  // Login account per staff member, for the reset-password/enable-disable
+  // actions below — those moved here from the old, now-admin-only "User
+  // Accounts" screen (see userAccounts.mjs), so managing a staff member's
+  // login lives right next to everything else about that person.
+  const profileByStaffId = {};
+  (usersRes.ok ? usersRes.data : []).forEach((u) => { if (u.staff_id) profileByStaffId[u.staff_id] = u; });
 
   root.innerHTML = `
     <div class="page-head"><div><h2>Staff</h2><p>Teachers and other staff members, and who has admin access.</p></div>
@@ -17,13 +23,18 @@ async function render(root) {
     <div class="card">
       ${staff.length ? `<div class="table-wrap"><table class="data">
         <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Phone</th><th>Status</th><th></th></tr></thead>
-        <tbody>${staff.map((s) => `<tr>
+        <tbody>${staff.map((s) => {
+          const profile = profileByStaffId[s.id];
+          return `<tr>
           <td>${esc(s.full_name)}</td><td>${esc(s.email)}</td><td>${esc(s.role)}</td><td>${esc(s.phone || '—')}</td>
           <td><span class="badge ${s.status === 'active' ? 'green' : 'grey'}">${esc(s.status)}</span></td>
           <td class="row-actions">
-            <button class="icon-btn" data-edit="${s.id}">✏️</button>
-            <button class="icon-btn danger" data-del="${s.id}">🗑️</button>
-          </td></tr>`).join('')}</tbody>
+            ${profile ? `<button class="icon-btn" data-reset="${profile.id}" title="Reset password">🔑</button>
+            <button class="icon-btn" data-toggle="${profile.id}" data-status="${profile.status}" title="${profile.status === 'active' ? 'Disable login' : 'Enable login'}">${profile.status === 'active' ? '🚫' : '✅'}</button>` : ''}
+            <button class="icon-btn" data-edit="${s.id}" title="Edit">✏️</button>
+            <button class="icon-btn danger" data-del="${s.id}" title="Remove">🗑️</button>
+          </td></tr>`;
+        }).join('')}</tbody>
       </table></div>` : `<div class="card-b"><div class="empty">
         <div class="e-ico">👨‍🏫</div><h3>No staff yet</h3><p>Add your first teacher or staff member.</p>
         <button class="btn" id="empty-add-staff">+ Add staff</button>
@@ -38,6 +49,21 @@ async function render(root) {
     const r = await Db.staff.remove(b.dataset.del);
     if (r.ok) { toast('Staff member removed.', 'ok'); render(root); } else toast(r.message, 'err');
   }, true));
+  root.querySelectorAll('[data-reset]').forEach((b) => b.onclick = () => confirmAction(
+    'Reset this person\'s password to the default (they can change it after signing in)?',
+    async () => {
+      const r = await Db.users.resetPassword(b.dataset.reset);
+      if (r.ok) toast(r.defaultPassword ? `Password reset — new default: ${r.defaultPassword}` : 'Password reset.', 'ok');
+      else toast(r.message, 'err');
+    }
+  ));
+  root.querySelectorAll('[data-toggle]').forEach((b) => b.onclick = () => {
+    const nextStatus = b.dataset.status === 'active' ? 'inactive' : 'active';
+    confirmAction(`${nextStatus === 'inactive' ? 'Disable' : 'Enable'} this person's login?`, async () => {
+      const r = await Db.users.setLoginStatus(b.dataset.toggle, nextStatus);
+      if (r.ok) { toast('Login updated.', 'ok'); render(root); } else toast(r.message, 'err');
+    }, nextStatus === 'inactive');
+  });
 }
 
 /** onSaved: optional callback run after a successful save instead of this

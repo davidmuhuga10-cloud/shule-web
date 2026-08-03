@@ -1,5 +1,18 @@
-import { esc, go } from '../app.js';
+import { esc, go, state } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
+import { setNavIntent } from '../lib/navIntent.mjs';
+
+/** First name + a time-of-day greeting (feature brief: "On login... pick
+ *  the first name of user and greet him/her eg Good morning David"). */
+function greetingWord() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+function firstName() {
+  return ((state.profile && state.profile.name) || '').trim().split(/\s+/)[0] || '';
+}
 
 // Phase 2f (brief §2/§3): the mobile and desktop dashboards intentionally show
 // DIFFERENT tile sets — desktop is a clean 2×2 of the four core setup metrics,
@@ -60,27 +73,30 @@ export async function viewDashboard(root) {
     ? perClass.map((c) => `<tr><td>${esc(c.name)}</td><td class="num">${c.count}</td></tr>`).join('')
     : `<tr><td colspan="2" class="muted center">No classes yet.</td></tr>`;
 
+  // Academic year/term now live inside Settings' "Academic Years & Terms"
+  // tab rather than their own route — data-tab tells the click handler
+  // below which tab to open once there.
   const checklistHtml = checklist.map((c) => `
-    <li class="${c.done ? 'done' : ''}" data-route="${c.route.replace('#/', '')}">
+    <li class="${c.done ? 'done' : ''}" data-route="${c.route.replace('#/', '')}" ${c.key === 'academic_year' || c.key === 'term' ? 'data-tab="calendar"' : ''}>
       <div class="ck ${c.done ? 'done' : 'todo'}">${c.done ? '✓' : ''}</div>
       <div class="lab">${esc(c.label)}</div>
     </li>`).join('');
 
   root.innerHTML = `
-    <div class="page-head"><div><h2>Dashboard</h2><p>An overview of your school's setup.</p></div></div>
-    <div class="stats-desktop">${desktopTiles}</div>
+    <div class="page-head"><div><h2>${greetingWord()}, ${esc(firstName())}</h2><p>Here is what's happening at ${esc((state.settings && state.settings.school_name) || 'your school')}.</p></div></div>
     <div class="stats-mobile">${mobileTiles}</div>
-    <div class="grid2">
-      <div class="card">
+    <div class="dash-top-row">
+      <div class="stats-desktop">${desktopTiles}</div>
+      <div class="card dash-gender-desktop">
         <div class="card-h"><h3>Students by gender</h3></div>
         ${genderBlock}
       </div>
-      <div class="card">
-        <div class="card-h"><h3>Students per class</h3></div>
-        <div class="card-b table-wrap">
-          <table class="data"><thead><tr><th>Class</th><th class="num">Students</th></tr></thead>
-          <tbody>${perClassRows}</tbody></table>
-        </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>Students per class</h3></div>
+      <div class="card-b table-wrap">
+        <table class="data"><thead><tr><th>Class</th><th class="num">Students</th></tr></thead>
+        <tbody>${perClassRows}</tbody></table>
       </div>
     </div>
     ${!setupComplete ? `<div class="card" style="margin-top:20px">
@@ -91,6 +107,10 @@ export async function viewDashboard(root) {
 
   const list = root.querySelector('#setup-checklist');
   if (list) list.querySelectorAll('li[data-route]').forEach((li) => {
-    li.onclick = () => go(li.getAttribute('data-route'));
+    li.onclick = () => {
+      const route = li.getAttribute('data-route');
+      if (li.dataset.tab) setNavIntent(route, { tab: li.dataset.tab });
+      go(route);
+    };
   });
 }

@@ -25,23 +25,27 @@ async function render(root, query) {
   const q = String(query || '').trim().toLowerCase();
   const filtered = q ? teachers.filter((t) => String(t.full_name || '').toLowerCase().indexOf(q) !== -1) : teachers;
 
+  // Card layout: name + status badge share one header row (instead of the
+  // badge dangling below everything else), email/phone collapse onto one
+  // line, and the three actions are compact icon buttons instead of three
+  // full-width text buttons stacked under the contact details — same fields,
+  // just not "getting out of hand" the way three stretched rows did.
   const cards = filtered.map((t) => `
     <div class="card teacher-card">
       <div class="card-b">
-        <div style="display:flex;gap:14px;align-items:center">
+        <div class="teacher-card-head">
           <div class="avatar-circle">${esc(initials(t.full_name))}</div>
-          <div style="min-width:0">
-            <div style="font-weight:700;font-size:15px">${esc(t.full_name)}</div>
-            <div class="muted" style="font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.email || 'No email')}</div>
-            <div class="muted" style="font-size:12.5px">${esc(t.phone || 'No phone')}</div>
+          <div class="teacher-card-name">
+            <div class="t-name">${esc(t.full_name)}</div>
+            <div class="t-contact">${esc(t.email || 'No email')}${t.phone ? ' · ' + esc(t.phone) : ''}</div>
           </div>
+          <span class="badge ${t.status === 'active' ? 'green' : 'grey'}">${esc(t.status || 'active')}</span>
         </div>
-        <div style="display:flex;gap:6px;margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
-          <button class="btn ghost sm" data-edit="${t.id}" style="flex:1">✏️ Edit</button>
-          <button class="btn ghost sm" data-assign="${t.id}" style="flex:1">🔗 Assignments</button>
-          <button class="btn ghost sm" data-msg="${t.id}" style="flex:1">💬 Message</button>
+        <div class="teacher-card-actions">
+          <button class="icon-btn" data-edit="${t.id}" title="Edit">✏️</button>
+          <button class="icon-btn" data-assign="${t.id}" title="Subject assignments (in Classes &amp; Streams)">🔗</button>
+          <button class="icon-btn" data-msg="${t.id}" title="Message">💬</button>
         </div>
-        <span class="badge ${t.status === 'active' ? 'green' : 'grey'}" style="margin-top:10px;display:inline-block">${esc(t.status || 'active')}</span>
       </div>
     </div>`).join('');
 
@@ -52,7 +56,7 @@ async function render(root, query) {
       <div class="field grow"><input id="teacher-search" placeholder="Search teachers by name…" value="${esc(query || '')}"></div>
     </div>
     ${filtered.length ? `<div class="teacher-grid">${cards}</div>` : `<div class="card"><div class="card-b"><div class="empty">
-      <div class="e-ico">🍎</div><h3>${teachers.length ? 'No teachers match your search' : 'No teachers yet'}</h3>
+      <div class="e-ico">🧑‍🏫</div><h3>${teachers.length ? 'No teachers match your search' : 'No teachers yet'}</h3>
       <p>${teachers.length ? 'Try a different name.' : 'Add your first teacher to get started.'}</p>
       ${teachers.length ? '' : '<button class="btn" id="empty-add-teacher">+ Add New Teacher</button>'}
     </div></div></div>`}
@@ -63,6 +67,11 @@ async function render(root, query) {
   if (emptyBtn) emptyBtn.onclick = () => openStaffModal(root, undefined, () => render(root, query));
   root.querySelector('#teacher-search').oninput = (e) => render(root, e.target.value);
   root.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => openStaffModal(root, all.find((s) => s.id === b.dataset.edit), () => render(root, query)));
-  root.querySelectorAll('[data-assign]').forEach((b) => b.onclick = () => go('teacher-assignments'));
+  // Teacher-to-subject assignment now happens inside Classes & Streams (per
+  // stream, right next to that stream's subjects) — the standalone "Teacher
+  // Assignments" module was removed as a duplicate of that (feature brief:
+  // "TEACHING and Assignments... should be done under subject (we already
+  // build that) so it's just deleting the module").
+  root.querySelectorAll('[data-assign]').forEach((b) => b.onclick = () => go('classes'));
   root.querySelectorAll('[data-msg]').forEach((b) => b.onclick = () => go('messaging'));
 }

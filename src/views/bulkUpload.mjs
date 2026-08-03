@@ -1,9 +1,47 @@
+/**
+ * bulkUpload.mjs — Bulk Upload Students, redesigned per direct feedback:
+ *   - No more "paste rows into a textarea" option — download the template,
+ *     fill it in, upload the same file back. That's it.
+ *   - Real .xlsx spreadsheets throughout (via src/lib/xlsxUtil.mjs), not CSV.
+ *   - The template now covers every optional profile field too, so a whole
+ *     class's full details can be imported in one go without a follow-up
+ *     edit per student.
+ *   - If ANY row fails validation (e.g. gender not filled in), the import is
+ *     blocked entirely — fix it in the spreadsheet and re-upload, rather than
+ *     silently skipping the bad rows.
+ *   - Stream is required whenever the chosen class has streams set up (same
+ *     rule as Add Student), enforced before you can even preview.
+ */
 import { esc, toast, options, renderPrereq } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
+import { downloadXlsx, readXlsxFile } from '../lib/xlsxUtil.mjs';
 
 const VALID_GENDERS = ['Male', 'Female'];
-const TEMPLATE_HEADER = 'Admission Number,Student Name,Gender,Guardian Name,Guardian Contact';
-const TEMPLATE_SAMPLE = '101,Amina Otieno,Female,Jane Otieno,0712345678';
+
+/** Column order is the contract between the template and the parser — kept
+ *  simple/positional (no header-name matching) so re-arranging columns in
+ *  the spreadsheet isn't silently "supported" in a half-working way. */
+const TEMPLATE_COLUMNS = [
+  { key: 'admission_no', label: 'Admission Number' },
+  { key: 'full_name', label: 'Student Name' },
+  { key: 'gender', label: 'Gender (Male/Female)' },
+  { key: 'guardian_name', label: 'Guardian Name' },
+  { key: 'guardian_contact', label: 'Guardian Contact' },
+  { key: 'guardian_relationship', label: 'Guardian Relationship' },
+  { key: 'guardian_id_number', label: 'Guardian ID Number' },
+  { key: 'date_of_birth', label: 'Date of Birth (YYYY-MM-DD)' },
+  { key: 'admission_date', label: 'Admission Date (YYYY-MM-DD)' },
+  { key: 'upi_number', label: 'UPI Number (NEMIS)' },
+  { key: 'assessment_number', label: 'Assessment Number (KNEC)' },
+  { key: 'previous_school', label: 'Previous School' },
+  { key: 'medical_notes', label: 'Medical Notes' }
+];
+const SAMPLE_ROW = {
+  admission_no: '101', full_name: 'Amina Otieno', gender: 'Female',
+  guardian_name: 'Jane Otieno', guardian_contact: '0712345678', guardian_relationship: 'Mother',
+  guardian_id_number: '', date_of_birth: '', admission_date: '', upi_number: '', assessment_number: '',
+  previous_school: '', medical_notes: ''
+};
 
 export async function viewBulkUpload(root) {
   const classesRes = await Db.classes.list();
@@ -15,23 +53,25 @@ export async function viewBulkUpload(root) {
   render(root, classes);
 }
 
-function stripCsvHeader(lines) {
-  if (!lines.length) return lines;
-  const first = lines[0].toLowerCase();
-  if (first.indexOf('admission') !== -1 && first.indexOf('name') !== -1) return lines.slice(1);
-  return lines;
+function downloadTemplate() {
+  downloadXlsx('shule-student-upload-template.xlsx', [SAMPLE_ROW], TEMPLATE_COLUMNS, 'Students');
 }
 
-function parseRows(text) {
-  const lines = String(text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  const rows = stripCsvHeader(lines);
-  return rows.map((line) => {
-    const parts = line.split(',').map((p) => p.trim());
-    return {
-      admission_no: parts[0] || '', full_name: parts[1] || '', gender: parts[2] || '',
-      guardian_name: parts[3] || '', guardian_contact: parts[4] || ''
-    };
-  });
+function looksLikeHeaderRow(row) {
+  const first = String(row[0] || '').toLowerCase();
+  const second = String(row[1] || '').toLowerCase();
+  return first.indexOf('admission') !== -1 && second.indexOf('name') !== -1;
+}
+
+function rowsFromSheet(sheetRows) {
+  const dataRows = sheetRows.length && looksLikeHeaderRow(sheetRows[0]) ? sheetRows.slice(1) : sheetRows;
+  return dataRows
+    .filter((r) => r.some((cell) => String(cell || '').trim() !== ''))
+    .map((r) => {
+      const row = {};
+      TEMPLATE_COLUMNS.forEach((c, i) => { row[c.key] = String(r[i] || '').trim(); });
+      return row;
+    });
 }
 
 function validateRow(row) {
@@ -40,35 +80,28 @@ function validateRow(row) {
   return null;
 }
 
-function downloadTemplate() {
-  const blob = new Blob([TEMPLATE_HEADER + '\n' + TEMPLATE_SAMPLE + '\n'], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'shule-student-upload-template.csv'; a.click();
-  URL.revokeObjectURL(url);
-}
-
 function render(root, classes, state) {
-  state = state || { class_id: '', stream_id: '', rows: null, streams: [] };
+  state = state || { class_id: '', stream_id: '', streams: [] };
+  const hasStreams = state.streams.length > 0;
 
   root.innerHTML = `
-    <div class="page-head"><div><h2>Bulk Upload</h2><p>Import many students at once from a spreadsheet/CSV.</p></div></div>
+    <div class="page-head"><div><h2>Bulk Upload</h2><p>Import many students at once from a spreadsheet — download the template, fill it in, then upload the same file back.</p></div></div>
     <div class="card" style="margin-bottom:16px">
       <div class="card-h"><h3>1. Choose class &amp; stream</h3></div>
       <div class="card-b grid2">
         <div class="field"><label>Class</label><select id="bu-class">${options(classes, 'id', 'name', state.class_id, 'Choose a class')}</select></div>
-        <div class="field"><label>Stream (optional)</label><select id="bu-stream" ${state.class_id ? '' : 'disabled'}><option value="">No stream</option>${options(state.streams, 'id', 'name', state.stream_id)}</select></div>
+        <div class="field"><label>Stream ${hasStreams ? '<span style="color:var(--danger,#c0392b)">*</span>' : '<span class="muted">(none for this class)</span>'}</label><select id="bu-stream" ${hasStreams ? '' : 'disabled'}><option value="">${hasStreams ? 'Choose a stream' : 'No streams on this class'}</option>${options(state.streams, 'id', 'name', state.stream_id)}</select></div>
       </div>
-      <div class="card-b" style="padding-top:0"><p class="hint">Every row you import will be enrolled into this class/stream — the file itself never sets the class.</p></div>
+      <div class="card-b" style="padding-top:0"><p class="hint">Every row you import will be enrolled into this class/stream — the spreadsheet itself never sets the class. A stream must be chosen whenever the class has streams set up, same as adding one student at a time.</p></div>
     </div>
 
     <div class="card" style="margin-bottom:16px">
-      <div class="card-h"><h3>2. Paste or load rows</h3><div class="spacer"></div><button class="btn secondary sm" id="bu-template">⬇ Download template</button></div>
+      <div class="card-h"><h3>2. Download template, fill it in, upload it back</h3></div>
       <div class="card-b">
-        <p class="hint" style="margin-top:0">Columns: ${esc(TEMPLATE_HEADER)}. Gender must be exactly "Male" or "Female".</p>
-        <textarea id="bu-text" rows="8" placeholder="${esc(TEMPLATE_SAMPLE)}"></textarea>
-        <div class="field" style="margin-top:10px"><label>...or load a .csv file</label><input id="bu-file" type="file" accept=".csv,text/csv"></div>
-        <button class="btn" id="bu-preview" style="margin-top:10px">Preview</button>
+        <p class="hint" style="margin-top:0">Only Admission Number, Student Name and Gender are required — every other column is optional, but filling them in now means you won't need to go back and edit each student afterward.</p>
+        <button class="btn secondary" id="bu-template">⬇ Download template (.xlsx)</button>
+        <div class="field" style="margin-top:14px"><label>Upload the filled-in spreadsheet</label><input id="bu-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></div>
+        <button class="btn" id="bu-preview" style="margin-top:6px" disabled>Preview</button>
       </div>
     </div>
 
@@ -78,25 +111,37 @@ function render(root, classes, state) {
   root.querySelector('#bu-class').onchange = async (e) => {
     const cid = e.target.value;
     const sres = cid ? await Db.streams.list(cid) : { ok: true, data: [] };
-    render(root, classes, { ...state, class_id: cid, stream_id: '', streams: sres.ok ? sres.data : [] });
+    render(root, classes, { class_id: cid, stream_id: '', streams: sres.ok ? sres.data : [] });
   };
   root.querySelector('#bu-stream').onchange = (e) => { state.stream_id = e.target.value; };
   root.querySelector('#bu-template').onclick = downloadTemplate;
+
+  let pendingRows = null;
+  const previewBtn = root.querySelector('#bu-preview');
   root.querySelector('#bu-file').onchange = async (e) => {
     const file = e.target.files[0];
+    pendingRows = null;
+    previewBtn.disabled = true;
     if (!file) return;
-    const text = await file.text();
-    root.querySelector('#bu-text').value = text;
+    try {
+      const sheetRows = await readXlsxFile(file);
+      pendingRows = rowsFromSheet(sheetRows);
+      previewBtn.disabled = pendingRows.length === 0;
+      if (!pendingRows.length) toast('No rows found in that spreadsheet.', 'err');
+    } catch (err) {
+      toast('Could not read that file — please upload the .xlsx template.', 'err');
+    }
   };
-  root.querySelector('#bu-preview').onclick = () => {
+
+  previewBtn.onclick = () => {
     if (!root.querySelector('#bu-class').value) { toast('Please choose a class first.', 'err'); return; }
-    const rows = parseRows(root.querySelector('#bu-text').value);
-    if (!rows.length) { toast('No rows found — paste some data or load a file first.', 'err'); return; }
+    if (hasStreams && !root.querySelector('#bu-stream').value) { toast('Please choose a stream — this class has streams set up.', 'err'); return; }
+    if (!pendingRows || !pendingRows.length) { toast('Upload a filled-in template first.', 'err'); return; }
     renderPreview(root, classes, {
       class_id: root.querySelector('#bu-class').value,
       stream_id: root.querySelector('#bu-stream').value,
       streams: state.streams,
-      rows
+      rows: pendingRows
     });
   };
 }
@@ -105,14 +150,18 @@ function renderPreview(root, classes, state) {
   const withStatus = state.rows.map((r) => ({ ...r, error: validateRow(r) }));
   const validCount = withStatus.filter((r) => !r.error).length;
   const invalidCount = withStatus.length - validCount;
+  const blocked = invalidCount > 0;
 
   const area = root.querySelector('#bu-preview-area');
   area.innerHTML = `
     <div class="card">
-      <div class="card-h"><h3>3. Preview (${validCount} ready, ${invalidCount} flagged)</h3>
+      <div class="card-h"><h3>3. Preview (${state.rows.length} row(s))</h3>
         <div class="spacer"></div>
-        <button class="btn" id="bu-import" ${validCount ? '' : 'disabled'}>Import ${validCount} student(s)</button>
+        <button class="btn" id="bu-import" ${blocked ? 'disabled' : ''}>Import ${validCount} student(s)</button>
       </div>
+      ${blocked ? `<div class="card-b" style="padding-bottom:0"><p class="hint" style="color:var(--danger,#c0392b)">
+        ${invalidCount} row(s) have an error — fix them in the spreadsheet and re-upload. Nothing will be imported until every row is valid.</p></div>`
+        : `<div class="card-b" style="padding-bottom:0"><p class="hint" style="color:var(--ok,#1a7f4b)">All ${validCount} row(s) look good — ready to import.</p></div>`}
       <div class="card-b table-wrap"><table class="data">
         <thead><tr><th class="num">Row</th><th>Admission No.</th><th>Name</th><th>Gender</th><th>Guardian</th><th>Status</th></tr></thead>
         <tbody>${withStatus.map((r, i) => `<tr style="${r.error ? 'background:var(--danger-bg)' : ''}">
@@ -124,12 +173,14 @@ function renderPreview(root, classes, state) {
     </div>
   `;
 
-  area.querySelector('#bu-import').onclick = async () => {
-    const btn = area.querySelector('#bu-import');
-    btn.disabled = true; btn.textContent = 'Importing…';
+  const importBtn = area.querySelector('#bu-import');
+  if (blocked) return;
+
+  importBtn.onclick = async () => {
+    importBtn.disabled = true; importBtn.textContent = 'Importing…';
     const validRows = withStatus.filter((r) => !r.error).map(({ error, ...r }) => r);
     const res = await Db.students.bulkCreate({ class_id: state.class_id, stream_id: state.stream_id || null, rows: validRows });
-    if (!res.ok) { toast(res.message, 'err'); btn.disabled = false; btn.textContent = `Import ${validCount} student(s)`; return; }
+    if (!res.ok) { toast(res.message, 'err'); importBtn.disabled = false; importBtn.textContent = `Import ${validCount} student(s)`; return; }
 
     let provisioned = 0;
     for (const row of res.createdRows || []) {
@@ -141,7 +192,7 @@ function renderPreview(root, classes, state) {
       <div class="empty">
         <div class="e-ico">✅</div><h3>Import complete</h3>
         <p>${res.created} student(s) created${res.createdRows && res.createdRows.length ? ` and ${provisioned} login(s) provisioned (default password: <b>student-&lt;admission number&gt;</b>)` : ''}.
-        ${res.skipped.length ? `${res.skipped.length} row(s) were skipped.` : ''}</p>
+        ${res.skipped.length ? `${res.skipped.length} row(s) were skipped (duplicate admission numbers).` : ''}</p>
       </div>
       ${res.skipped.length ? `<div class="table-wrap"><table class="data">
         <thead><tr><th class="num">Row</th><th>Admission No.</th><th>Name</th><th>Reason</th></tr></thead>

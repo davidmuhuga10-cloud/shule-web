@@ -2,7 +2,7 @@
  * settings.mjs — Supabase equivalent of Dashboard.gs's getSettings/saveSettings.
  * Key/value pairs: school_name, school_motto, po_box, phone, email, logo.
  */
-import { ok, err } from './_util.mjs';
+import { ok, err, titleCase } from './_util.mjs';
 
 export function createSettingsApi(supabase) {
   return {
@@ -11,6 +11,11 @@ export function createSettingsApi(supabase) {
       if (error) return err(error.message);
       const map = {};
       (data || []).forEach((r) => { map[r.key] = r.value; });
+      // Brief: "Capitalize school name to always even when entered in small
+      // letter" — normalized here (read time, not save time) so it's
+      // corrected everywhere the name is shown, including names that were
+      // already saved in lowercase before this existed.
+      if (map.school_name) map.school_name = titleCase(map.school_name);
       return ok(map);
     },
 

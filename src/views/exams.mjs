@@ -18,7 +18,7 @@ export async function viewExams(root) {
   const years = yearsRes.ok ? yearsRes.data : [];
   const terms = termsRes.ok ? termsRes.data : [];
   if (!years.length || !terms.length) {
-    renderPrereq(root, 'Academic calendar not set up', 'Please create an academic year and a term before adding exams.', 'academic-calendar', 'Go to Academic Calendar');
+    renderPrereq(root, 'Academic calendar not set up', 'Please create an academic year and a term before adding exams.', 'settings', 'Go to Settings');
     return;
   }
   await render(root, years, terms);

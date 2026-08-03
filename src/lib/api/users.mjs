@@ -42,6 +42,26 @@ export function createUsersApi(supabase, callAdminFunction) {
     async setLoginStatus(profileId, status) {
       if (!profileId || (status !== 'active' && status !== 'inactive')) return err('Missing profile or invalid status.');
       return callAdminFunction('set_login_status', { profile_id: profileId, status });
+    },
+
+    /** Grant or revoke admin (full) access for an existing staff login —
+     *  feature brief "User accounts... one can add or revoke admin rights
+     *  here". This is a plain `profiles` row update (not a Netlify/service-role
+     *  call): `profiles_admin_update` RLS already lets an admin update any
+     *  profile in their own school, and role is just a column, not something
+     *  requiring Supabase Auth admin access. Guards against ever revoking the
+     *  LAST admin in a school — that would lock every admin out for good with
+     *  no one left who could re-grant it. */
+    async setRole(profileId, role) {
+      if (!profileId || (role !== 'admin' && role !== 'teacher')) return err('Missing profile or invalid role.');
+      if (role === 'teacher') {
+        const { count, error: countErr } = await supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'admin');
+        if (countErr) return err(countErr.message);
+        if ((count || 0) <= 1) return err('You cannot revoke the last remaining admin — grant another admin first.');
+      }
+      const { error } = await supabase.from('profiles').update({ role }).eq('id', profileId);
+      if (error) return err(error.message);
+      return ok(true);
     }
   };
 }

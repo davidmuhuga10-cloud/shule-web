@@ -90,8 +90,8 @@ async function loadExamPicker(root, studentId) {
   pickerEl.querySelector('#mc-exam').onchange = async (e) => {
     if (!e.target.value) { cardEl.innerHTML = ''; return; }
     cardEl.innerHTML = loader();
-    const cardRes = await Db.results.getReportCard(e.target.value, studentId);
+    const [cardRes, settingsRes, bands] = await Promise.all([Db.results.getReportCard(e.target.value, studentId), Db.settings.get(), Db.grading.defaultScaleBands()]);
     if (!cardRes.ok) { cardEl.innerHTML = `<div class="card pad">⚠️ ${esc(cardRes.message)}</div>`; return; }
-    renderReportCard(cardEl, cardRes.data);
+    renderReportCard(cardEl, cardRes.data, { settings: settingsRes.ok ? settingsRes.data : {}, bands: bands || [] });
   };
 }

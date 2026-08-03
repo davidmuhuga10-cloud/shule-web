@@ -14,29 +14,26 @@ import { supabase } from './lib/supabaseClient.js';
 import { Db } from './lib/api/index.mjs';
 
 import { viewDashboard } from './views/dashboard.mjs';
-import { viewAcademicCalendar } from './views/academicCalendar.mjs';
 import { viewClasses } from './views/classes.mjs';
 import { viewStudents } from './views/students.mjs';
 import { viewBulkUpload } from './views/bulkUpload.mjs';
 import { viewStaff } from './views/staff.mjs';
 import { viewTeachers } from './views/teachers.mjs';
-import { viewTeacherAssignments } from './views/teacherAssignments.mjs';
 import { viewGrading } from './views/gradingScales.mjs';
+import { viewExamsHub } from './views/examsHub.mjs';
 import { viewExams } from './views/exams.mjs';
 import { viewMarks } from './views/marksEntry.mjs';
 import { viewPublishing } from './views/publishing.mjs';
+import { viewReportsHub } from './views/reportsHub.mjs';
 import { viewBroadsheet } from './views/broadsheet.mjs';
 import { viewReports } from './views/reportForms.mjs';
 import { viewClassList } from './views/classList.mjs';
-import { viewMeritList } from './views/meritList.mjs';
 import { viewTranscript } from './views/transcript.mjs';
 import { viewCertificates } from './views/certificates.mjs';
 import { viewMyResults } from './views/myResults.mjs';
-import { viewSettings } from './views/schoolSettings.mjs';
-import { viewUsers } from './views/userAccounts.mjs';
+import { viewSettingsHub } from './views/settings.mjs';
 import { viewAttendance } from './views/attendance.mjs';
 import { viewMessaging } from './views/messaging.mjs';
-import { viewParentAccounts } from './views/parentAccounts.mjs';
 import { viewMyChildren } from './views/myChildren.mjs';
 import { renderComingSoon } from './views/_comingSoon.mjs';
 
@@ -57,6 +54,26 @@ export function toast(msg, type) {
   setTimeout(() => { t.style.opacity = '0'; t.style.transition = '.3s'; setTimeout(() => t.remove(), 300); }, 3200);
 }
 export function loader() { return '<div class="loader"><div class="spin"></div></div>'; }
+/** Print a wide table (Mark List/broadsheet) in landscape. Relying on the
+ *  CSS "page" property + a named @page rule to switch orientation turned out
+ *  to be unreliable in practice (reported bug: printing the Mark List
+ *  produced a blank page) — browser support for per-element named pages is
+ *  spotty. This does the same job the boring, well-supported way: swap in a
+ *  plain @page{size:landscape} override right before printing, then remove
+ *  it again once the print dialog closes. */
+export function printLandscape() {
+  const style = document.createElement('style');
+  style.id = 'print-landscape-override';
+  style.textContent = '@page{size:A4 landscape;margin:10mm}';
+  document.head.appendChild(style);
+  const cleanup = () => { style.remove(); window.removeEventListener('afterprint', cleanup); };
+  window.addEventListener('afterprint', cleanup);
+  window.print();
+  // Safety net: afterprint doesn't fire in every browser/print-preview flow
+  // (e.g. cancelling before the dialog fully engages) — make sure the
+  // override never lingers and affects the next, unrelated print.
+  setTimeout(cleanup, 5000);
+}
 export function initials(name) {
   return String(name || '?').trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 }
@@ -138,7 +155,7 @@ export function renderAuth(errorMsg) {
   const name = (state.settings && state.settings.school_name) || (window.SHULE_CONFIG && window.SHULE_CONFIG.SCHOOL_BRAND_NAME) || 'Shule';
   const features = [
     ['🎒', 'Students', 'Classes, streams & enrollment'],
-    ['🍎', 'Teachers', 'Subjects & teacher assignment'],
+    ['🧑‍🏫', 'Teachers', 'Subjects & teacher assignment'],
     ['📝', 'Exams', 'Marks with automatic grading'],
     ['🧾', 'Reports', 'Mark lists & report forms']
   ].map(([ico, title, sub]) => `<div class="feat-tile"><div class="ft-ico">${ico}</div>
@@ -337,62 +354,28 @@ const NAV = {
     { section: 'Academics' },
     { route: 'classes', label: 'Classes & Streams', ico: '🏫' },
     { section: 'People' },
-    { parent: 'Students', ico: '🎒', children: [
-      { route: 'students', label: 'All Students' },
-      { route: 'bulk-upload', label: 'Bulk Upload' }
-    ] },
+    { route: 'students', label: 'Students', ico: '🎒' },
     { route: 'staff', label: 'Staff', ico: '👨‍🏫' },
-    { route: 'teachers', label: 'Teachers', ico: '🍎' },
-    { section: 'Teaching' },
-    { route: 'teacher-assignments', label: 'Teacher Assignments', ico: '🔗' },
+    { route: 'teachers', label: 'Teachers', ico: '🧑‍🏫' },
     { section: 'Assessment' },
-    { parent: 'Exams', ico: '📝', children: [
-      { route: 'exams', label: 'Manage Exams' },
-      { route: 'marks', label: 'Enter Marks' },
-      { route: 'publishing', label: 'Publish Results' },
-      { route: 'grading', label: 'Grading Scales' }
-    ] },
-    { parent: 'Reports', ico: '🧾', children: [
-      { route: 'class-list', label: 'Class List' },
-      { route: 'broadsheet', label: 'Mark List' },
-      { route: 'reports', label: 'Report Forms' },
-      { route: 'merit-list', label: 'Merit List' },
-      { route: 'transcript', label: 'Transcript' },
-      { route: 'certificates', label: 'Leaving Certificate' }
-    ] },
+    { route: 'exams-hub', label: 'Exams', ico: '📝' },
+    { route: 'reports-hub', label: 'Reports', ico: '🧾' },
     { section: 'Daily' },
     { route: 'attendance', label: 'Attendance', ico: '🗓️' },
     { route: 'messaging', label: 'Messaging', ico: '💬' },
     { section: 'Configuration' },
-    { route: 'academic-calendar', label: 'Academic Calendar', ico: '📅' },
-    { route: 'settings', label: 'School Settings', ico: '⚙️' },
-    { route: 'users', label: 'User Accounts', ico: '🔐' },
-    { route: 'parent-accounts', label: 'Parent Accounts', ico: '👨‍👩‍👧' }
+    { route: 'settings', label: 'Settings', ico: '⚙️' }
   ],
   teacher: [
     { route: 'dashboard', label: 'Dashboard', ico: '🏠' },
     { section: 'People' },
-    { parent: 'Students', ico: '🎒', children: [
-      { route: 'students', label: 'All Students' },
-      { route: 'bulk-upload', label: 'Bulk Upload' }
-    ] },
+    { route: 'students', label: 'Students', ico: '🎒' },
     { section: 'Daily' },
     { route: 'attendance', label: 'Attendance', ico: '🗓️' },
     { route: 'messaging', label: 'Messaging', ico: '💬' },
     { section: 'Assessment' },
-    { parent: 'Exams', ico: '📝', children: [
-      { route: 'exams', label: 'Manage Exams' },
-      { route: 'marks', label: 'Enter Marks' },
-      { route: 'publishing', label: 'Publish Results' }
-    ] },
-    { parent: 'Reports', ico: '🧾', children: [
-      { route: 'class-list', label: 'Class List' },
-      { route: 'broadsheet', label: 'Mark List' },
-      { route: 'reports', label: 'Report Forms' },
-      { route: 'merit-list', label: 'Merit List' },
-      { route: 'transcript', label: 'Transcript' },
-      { route: 'certificates', label: 'Leaving Certificate' }
-    ] }
+    { route: 'exams-hub', label: 'Exams', ico: '📝' },
+    { route: 'reports-hub', label: 'Reports', ico: '🧾' }
   ],
   student: [
     { route: 'my-results', label: 'My Results', ico: '🧾' }
@@ -402,12 +385,26 @@ const NAV = {
   ]
 };
 
+// Routes reachable via a normal in-app action (e.g. "+ Add student" ->
+// Bulk) but deliberately left off the sidebar — brief §5: "let's just have
+// one submodule called All Students" (Bulk Upload is already one click away
+// from there, so it doesn't need its own nav entry too).
+// Routes reachable only via a `go()` from inside a hub/handoff screen, not
+// directly listed in the sidebar (feature brief: "avoid so many submodules
+// just have them as icons" — exams-hub/reports-hub/settings are the actual
+// sidebar entries now; these are what their icon tiles/tabs link to).
+const HIDDEN_ALLOWED_ROUTES = {
+  admin: ['bulk-upload', 'exams', 'marks', 'publishing', 'grading', 'class-list', 'broadsheet', 'reports', 'transcript', 'certificates'],
+  teacher: ['bulk-upload', 'exams', 'marks', 'publishing', 'class-list', 'broadsheet', 'reports', 'transcript', 'certificates']
+};
+
 function allowedRoutes(role) {
   const set = {};
   (NAV[role] || []).forEach((it) => {
     if (it.route) set[it.route] = true;
     if (it.children) it.children.forEach((c) => { set[c.route] = true; });
   });
+  (HIDDEN_ALLOWED_ROUTES[role] || []).forEach((r) => { set[r] = true; });
   return set;
 }
 
@@ -448,29 +445,26 @@ export function go(route) {
 // the migration fills these in one by one.
 const ROUTES = {
   'dashboard': viewDashboard,
-  'academic-calendar': viewAcademicCalendar,
   'classes': viewClasses,
   'students': viewStudents,
   'bulk-upload': viewBulkUpload,
   'staff': viewStaff,
   'teachers': viewTeachers,
-  'teacher-assignments': viewTeacherAssignments,
   'grading': viewGrading,
+  'exams-hub': viewExamsHub,
   'exams': viewExams,
   'marks': viewMarks,
   'publishing': viewPublishing,
+  'reports-hub': viewReportsHub,
   'broadsheet': viewBroadsheet,
   'reports': viewReports,
   'class-list': viewClassList,
-  'merit-list': viewMeritList,
   'transcript': viewTranscript,
   'certificates': viewCertificates,
   'my-results': viewMyResults,
-  'settings': viewSettings,
-  'users': viewUsers,
+  'settings': viewSettingsHub,
   'attendance': viewAttendance,
   'messaging': viewMessaging,
-  'parent-accounts': viewParentAccounts,
   'my-children': viewMyChildren
 };
 

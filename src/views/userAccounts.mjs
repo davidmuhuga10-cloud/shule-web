@@ -1,55 +1,77 @@
-import { esc, toast, confirmAction, modal, closeModal } from '../app.js';
+/**
+ * userAccounts.mjs — "User Accounts" tab inside Settings (feature brief:
+ * "User accounts – here just include only admins... one can add or revoke
+ * admin rights here", modelled on Zeraki's "User Roles" screen). Deliberately
+ * narrow: this is ONLY about who has full admin access, not a general
+ * account-management screen for every login in the school (that's what used
+ * to live here) — resetting a teacher's password or disabling their account
+ * now happens from the Staff module instead, right next to everything else
+ * about that person.
+ */
+import { esc, toast, confirmAction, options, modal, closeModal } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 
 export async function viewUsers(root) {
   await render(root);
 }
 
-/** What this person actually types to sign in — a username or phone number
- *  for staff, a phone number for parents, an admission number for students —
- *  rather than the raw internal synthetic email, which is meaningless to a
- *  human reading this list. Falls back to the stored email if none of the
- *  friendlier fields are on file (e.g. very old, not-yet-migrated accounts). */
-function loginHandleFor(u) {
-  if ((u.role === 'admin' || u.role === 'teacher') && u.username) return u.username;
-  if (u.role === 'parent' && u.phone) return u.phone;
-  return u.email || '—';
-}
-
 async function render(root) {
-  const res = await Db.users.list();
-  const users = res.ok ? res.data : [];
+  const [usersRes, staffRes] = await Promise.all([Db.users.list(), Db.staff.list()]);
+  const users = usersRes.ok ? usersRes.data : [];
+  const staffById = {}; (staffRes.ok ? staffRes.data : []).forEach((s) => { staffById[s.id] = s; });
+
+  const admins = users.filter((u) => u.role === 'admin');
+  // Anyone with a staff login who ISN'T already an admin — the pool "+ Grant
+  // admin" can promote from. A brand-new staff member without a login yet
+  // isn't in this list; they get the "Grant admin access" checkbox at
+  // creation time instead (Staff module), same as before.
+  const promotable = users.filter((u) => u.role === 'teacher' && u.staff_id);
 
   root.innerHTML = `
-    <div class="page-head"><div><h2>User Accounts</h2><p>Everyone with a login — reset passwords or disable access.</p></div></div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <p class="muted" style="margin:0;flex:1">School heads, directors, deputies and system admins — anyone with full admin access. Teachers and other staff are managed from the Staff module.</p>
+      <button class="btn" id="add-admin" ${promotable.length ? '' : 'disabled title="No staff logins available to promote yet"'}>+ Grant admin</button>
+    </div>
     <div class="card">
-      ${users.length ? `<div class="table-wrap"><table class="data">
-        <thead><tr><th>Name</th><th>Login</th><th>Role</th><th>Status</th><th></th></tr></thead>
-        <tbody>${users.map((u) => `<tr>
-          <td>${esc(u.name)}</td><td>${esc(loginHandleFor(u))}</td>
-          <td><span class="badge blue">${esc(u.role)}</span></td>
+      ${admins.length ? `<div class="table-wrap"><table class="data">
+        <thead><tr><th>Name</th><th>Title</th><th>Login</th><th>Status</th><th></th></tr></thead>
+        <tbody>${admins.map((u) => `<tr>
+          <td>${esc(u.name)}</td>
+          <td>${esc((staffById[u.staff_id] || {}).role || '—')}</td>
+          <td>${esc(u.username || u.email || '—')}</td>
           <td><span class="badge ${u.status === 'active' ? 'green' : 'grey'}">${esc(u.status)}</span></td>
-          <td class="row-actions">
-            <button class="btn ghost sm" data-reset="${u.id}">Reset password</button>
-            <button class="btn ghost sm" data-toggle="${u.id}" data-status="${u.status}">${u.status === 'active' ? 'Disable' : 'Enable'}</button>
-          </td></tr>`).join('')}</tbody>
-      </table></div>` : `<div class="card-b"><p class="muted center" style="margin:20px 0">No user accounts yet — they're created automatically when you add students or staff.</p></div>`}
-    </div>`;
+          <td class="row-actions"><button class="btn ghost sm danger" data-revoke="${u.id}">Revoke</button></td>
+        </tr>`).join('')}</tbody>
+      </table></div>` : `<div class="card-b"><p class="muted center" style="margin:20px 0">No admins found — this shouldn't normally happen since you're signed in as one.</p></div>`}
+    </div>
+  `;
 
-  root.querySelectorAll('[data-reset]').forEach((b) => b.onclick = () => confirmAction(
-    'Reset this user\'s password to the default (they can change it after signing in)?',
+  root.querySelector('#add-admin').onclick = () => openGrantModal(root, promotable);
+  root.querySelectorAll('[data-revoke]').forEach((b) => b.onclick = () => confirmAction(
+    'Revoke admin access for this person? They\'ll keep their teacher/staff login, just without full admin rights.',
     async () => {
-      const r = await Db.users.resetPassword(b.dataset.reset);
-      if (r.ok) toast(r.defaultPassword ? `Password reset — new default: ${r.defaultPassword}` : 'Password reset.', 'ok');
-      else toast(r.message, 'err');
-    }
+      const r = await Db.users.setRole(b.dataset.revoke, 'teacher');
+      if (r.ok) { toast('Admin access revoked.', 'ok'); render(root); } else toast(r.message, 'err');
+    }, true
   ));
+}
 
-  root.querySelectorAll('[data-toggle]').forEach((b) => b.onclick = () => {
-    const nextStatus = b.dataset.status === 'active' ? 'inactive' : 'active';
-    confirmAction(`${nextStatus === 'inactive' ? 'Disable' : 'Enable'} this account?`, async () => {
-      const r = await Db.users.setLoginStatus(b.dataset.toggle, nextStatus);
-      if (r.ok) { toast('Account updated.', 'ok'); render(root); } else toast(r.message, 'err');
-    }, nextStatus === 'inactive');
+function openGrantModal(root, promotable) {
+  modal({
+    title: 'Grant admin access',
+    body: `
+      <div class="field"><label>Staff member</label><select id="ga-staff">${options(promotable, 'id', 'name', '', 'Choose a staff member')}</select></div>
+      <p class="hint" style="margin-top:0">They'll keep signing in the same way — this just gives their account full admin access instead of teacher-level access.</p>
+    `,
+    okLabel: 'Grant admin access',
+    onOk: async () => {
+      const profileId = document.getElementById('ga-staff').value;
+      if (!profileId) { toast('Choose a staff member.', 'err'); return; }
+      const res = await Db.users.setRole(profileId, 'admin');
+      if (!res.ok) { toast(res.message, 'err'); return; }
+      closeModal();
+      toast('Admin access granted.', 'ok');
+      render(root);
+    }
   });
 }

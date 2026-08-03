@@ -28,6 +28,21 @@ export function byAdmissionNo(a, b) {
   return String(a.admission_no).localeCompare(String(b.admission_no));
 }
 
+/** Title-cases a name (school name, etc.) — "green hill academy" ->
+ *  "Green Hill Academy" — regardless of how it was typed/originally saved.
+ *  Small words that read oddly capitalized on their own ("of", "the", "and")
+ *  stay lowercase unless they're the first word, matching normal title-case
+ *  convention. */
+const TITLECASE_MINOR_WORDS = new Set(['of', 'the', 'and', 'for', 'a', 'an', 'in', 'on']);
+export function titleCase(str) {
+  const s = String(str || '').trim();
+  if (!s) return s;
+  return s.toLowerCase().split(/\s+/).map((word, i) => {
+    if (i > 0 && TITLECASE_MINOR_WORDS.has(word)) return word;
+    return word.replace(/[a-z]/i, (c) => c.toUpperCase());
+  }).join(' ');
+}
+
 export function indexById(rows) {
   const map = {};
   (rows || []).forEach((r) => { map[r.id] = r; });

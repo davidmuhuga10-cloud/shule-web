@@ -296,37 +296,74 @@ export function createResultsApi(supabase, gradingApi) {
       const { data: minSetting } = await supabase.from('settings').select('value').eq('key', 'min_subjects_for_ranking').maybeSingle();
       const minSubjects = Number((minSetting || {}).value) || 0;
 
+      // Zeraki-style Mark List (Phase 2i / feature-brief "Merit List Design"):
+      // each cell also carries a grade label + points (same default grading
+      // scale get_report_card() uses), and each student gets a total/mean
+      // points, an overall performance-level grade, a stream position
+      // alongside the class-wide one, and a deviation from the class mean —
+      // all computed here in JS since getBroadsheet has always been a plain
+      // aggregation over already-fetched rows, not a database RPC.
+      const bands = gradingApi && gradingApi.defaultScaleBands ? await gradingApi.defaultScaleBands() : [];
+      const grade = (score) => (gradingApi && gradingApi.gradeScore ? gradingApi.gradeScore(score, bands) : { grade_label: '', points: '' });
+
       const rows = (students || []).map((s) => {
         const scores = {};
-        let total = 0, counted = 0;
+        const grades = {};
+        let total = 0, counted = 0, pointsTotal = 0, pointsCounted = 0;
         subjects.forEach((sub) => {
           const map = bySubjectStudent[sub.id];
           const v = map && map[s.id] !== undefined ? Math.round(map[s.id] * 100) / 100 : null;
           scores[sub.id] = v;
-          if (v !== null && !isNaN(v)) { total += v; counted++; }
+          if (v !== null && !isNaN(v)) {
+            total += v; counted++;
+            const g = grade(v);
+            grades[sub.id] = { grade_label: g.grade_label || '', points: g.points === '' || g.points === null || g.points === undefined ? null : Number(g.points) };
+            if (grades[sub.id].points !== null) { pointsTotal += grades[sub.id].points; pointsCounted++; }
+          } else {
+            grades[sub.id] = { grade_label: '', points: null };
+          }
         });
+        const average = counted ? Math.round((total / counted) * 100) / 100 : 0;
+        const overallGrade = counted ? grade(average) : { grade_label: '', points: '' };
         return {
           student_id: s.id, admission_no: s.admission_no, full_name: s.full_name,
-          stream_name: streamMap[s.stream_id] || '',
-          scores, total: Math.round(total * 100) / 100, counted,
-          average: counted ? Math.round((total / counted) * 100) / 100 : 0
+          stream_id: s.stream_id || '', stream_name: streamMap[s.stream_id] || '',
+          scores, grades, total: Math.round(total * 100) / 100, counted, subject_count: counted,
+          average,
+          total_points: pointsCounted ? Math.round(pointsTotal * 100) / 100 : null,
+          mean_points: pointsCounted ? Math.round((pointsTotal / pointsCounted) * 100) / 100 : null,
+          overall_grade: overallGrade.grade_label || ''
         };
       });
 
-      const ranked = rows.slice().sort((a, b) => b.total - a.total);
-      let lastTotal = null, lastPos = 0;
-      ranked.forEach((r, i) => {
-        if (r.counted === 0 || r.counted < minSubjects) { r.position = ''; return; }
-        if (r.total === lastTotal) { r.position = lastPos; }
-        else { r.position = i + 1; lastPos = i + 1; lastTotal = r.total; }
-      });
+      /** Ranks `list` by total desc, sharing a rank across ties, and leaving
+       *  a student unranked ('') once they fall short of counted/minSubjects
+       *  — same rule for both the class-wide and the per-stream ranking. */
+      function rankByTotal(list, field) {
+        const ranked = list.slice().sort((a, b) => b.total - a.total);
+        let lastTotal = null, lastPos = 0;
+        ranked.forEach((r, i) => {
+          if (r.counted === 0 || r.counted < minSubjects) { r[field] = ''; return; }
+          if (r.total === lastTotal) { r[field] = lastPos; }
+          else { r[field] = i + 1; lastPos = i + 1; lastTotal = r.total; }
+        });
+      }
+
+      rankByTotal(rows, 'position');
+      const byStream = {};
+      rows.forEach((r) => { (byStream[r.stream_id] = byStream[r.stream_id] || []).push(r); });
+      Object.values(byStream).forEach((group) => rankByTotal(group, 'stream_position'));
+
+      const classAverage = rows.length ? Math.round((rows.reduce((a, r) => a + r.average, 0) / rows.length) * 100) / 100 : 0;
+      rows.forEach((r) => { r.deviation = Math.round((r.average - classAverage) * 100) / 100; });
+
       rows.sort((a, b) => b.total - a.total);
 
       return ok(null, {
         exam: { id: exam.id, name: exam.name, out_of: exam.out_of, exam_type: exam.exam_type },
         subjects: subjects.map((s) => ({ id: s.id, name: s.name, code: s.code, submission_status: statusBySubject[s.id] || 'draft' })),
         students: rows,
-        class_average: rows.length ? Math.round((rows.reduce((a, r) => a + r.average, 0) / rows.length) * 100) / 100 : 0
+        class_average: classAverage
       });
     },
 

@@ -45,18 +45,48 @@ function render(root, exams, classes, intent) {
     studentSel.innerHTML = options(choices, 'id', 'name', preselect || '', 'Choose a student');
   };
 
+  // Report-form extras (feature brief "Report Forms and Merit List
+  // Design"): school header, per-subject teacher name and class average are
+  // all staff-only, cheap lookups — fetched ONCE per class/exam (not per
+  // student) and reused across the whole batch. Neither requires a new RPC:
+  // teacher names already come back from listSubmissions(), and per-subject
+  // class averages are derived client-side from getBroadsheet()'s
+  // already-computed per-student per-subject scores.
+  const loadExtra = async (examId, classId) => {
+    const [settingsRes, subsRes, bsRes, bands] = await Promise.all([
+      Db.settings.get(), Db.results.listSubmissions(examId, classId), Db.results.getBroadsheet({ exam_id: examId, class_id: classId }), Db.grading.defaultScaleBands()
+    ]);
+    const teacherBySubject = {};
+    (subsRes.ok ? subsRes.data : []).forEach((r) => { if (r.teacher_name) teacherBySubject[r.subject_id] = r.teacher_name; });
+    const classAvgBySubject = {};
+    if (bsRes.ok) {
+      bsRes.subjects.forEach((sub) => {
+        const scored = bsRes.students.map((s) => s.scores[sub.id]).filter((v) => v !== null && v !== undefined);
+        classAvgBySubject[sub.id] = scored.length ? Math.round((scored.reduce((a, v) => a + v, 0) / scored.length) * 100) / 100 : null;
+      });
+    }
+    return { settings: settingsRes.ok ? settingsRes.data : {}, teacherBySubject, classAvgBySubject, bands: bands || [] };
+  };
+
   const tryLoad = async () => {
     const examId = root.querySelector('#rf-exam').value, studentId = root.querySelector('#rf-student').value;
     const classId = root.querySelector('#rf-class').value;
     if (!examId || !studentId) return;
     const cardEl = root.querySelector('#rf-card');
     cardEl.innerHTML = loader();
+    const extra = await loadExtra(examId, classId);
 
     if (studentId === BATCH_VALUE) {
       const sres = await Db.students.list({ class_id: classId });
       const students = sres.ok ? sres.data : [];
       if (!students.length) { cardEl.innerHTML = `<div class="card pad">No students found in this class.</div>`; return; }
       cardEl.innerHTML = '';
+      // Print bar goes at the TOP, above every report form — not appended
+      // after the fact, which is what put it below the content before.
+      const printBar = document.createElement('div');
+      printBar.className = 'no-print center'; printBar.style.marginBottom = '16px';
+      printBar.innerHTML = `<button class="btn secondary" id="rf-print">🖨️ Print all report form(s)</button>`;
+      cardEl.appendChild(printBar);
       let printed = 0;
       for (const s of students) {
         const res = await Db.results.getReportCard(examId, s.id);
@@ -64,24 +94,27 @@ function render(root, exams, classes, intent) {
         const page = document.createElement('div');
         page.className = 'batch-page';
         cardEl.appendChild(page);
-        renderReportCard(page, res.data);
+        renderReportCard(page, res.data, extra);
         printed++;
       }
       if (!printed) { cardEl.innerHTML = `<div class="card pad">⚠️ No accessible report cards for this class/exam yet.</div>`; return; }
-      const printBtn = document.createElement('div');
-      printBtn.className = 'no-print center'; printBtn.style.marginTop = '16px';
-      printBtn.innerHTML = `<button class="btn secondary" onclick="window.print()">🖨️ Print all ${printed} report form(s)</button>`;
-      cardEl.appendChild(printBtn);
+      printBar.querySelector('#rf-print').textContent = `🖨️ Print all ${printed} report form(s)`;
+      printBar.querySelector('#rf-print').onclick = () => window.print();
       return;
     }
 
     const res = await Db.results.getReportCard(examId, studentId);
     if (!res.ok) { cardEl.innerHTML = `<div class="card pad">⚠️ ${esc(res.message)}</div>`; return; }
-    renderReportCard(cardEl, res.data);
-    const printBtn = document.createElement('div');
-    printBtn.className = 'no-print center'; printBtn.style.marginTop = '16px';
-    printBtn.innerHTML = '<button class="btn secondary" onclick="window.print()">🖨️ Print</button>';
-    cardEl.appendChild(printBtn);
+    cardEl.innerHTML = '';
+    // Same top-of-page placement for the single-student case.
+    const printBar = document.createElement('div');
+    printBar.className = 'no-print center'; printBar.style.marginBottom = '16px';
+    printBar.innerHTML = '<button class="btn secondary" id="rf-print">🖨️ Print</button>';
+    cardEl.appendChild(printBar);
+    const cardBody = document.createElement('div');
+    cardEl.appendChild(cardBody);
+    renderReportCard(cardBody, res.data, extra);
+    printBar.querySelector('#rf-print').onclick = () => window.print();
   };
 
   root.querySelector('#rf-class').onchange = async (e) => { await refreshStudents(e.target.value); wireStudentSelect(); };

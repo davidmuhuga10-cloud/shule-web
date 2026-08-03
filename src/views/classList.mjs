@@ -1,6 +1,6 @@
 import { esc, options, renderPrereq, loader, toast } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
-import { toCsv, downloadCsv } from '../lib/csvExport.mjs';
+import { downloadXlsx } from '../lib/xlsxUtil.mjs';
 import { takeNavIntent } from '../lib/navIntent.mjs';
 
 const CL_COLS = [
@@ -121,7 +121,6 @@ async function load(root, classes, sel) {
       const cb = root.querySelector(`[data-col="${c.key}"]`);
       return cb ? cb.checked : true;
     });
-    const csv = toCsv(students, activeCols);
-    downloadCsv(`class-list-${(cls ? cls.name : 'export').replace(/\s+/g, '-').toLowerCase()}.csv`, csv);
+    downloadXlsx(`class-list-${(cls ? cls.name : 'export').replace(/\s+/g, '-').toLowerCase()}.xlsx`, students, activeCols, 'Class List');
   };
 }

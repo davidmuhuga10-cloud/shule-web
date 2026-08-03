@@ -166,6 +166,39 @@ async function run() {
     check('getBroadsheet ranks second place #2', byId.s2.position === 2);
     check('tied students share the same rank (both #3)', byId.s3.position === 3 && byId.s4.position === 3);
     check('rows are sorted by total descending', sheet.students[0].student_id === 's1');
+
+    // ---- Zeraki-style Mark List additions: per-subject grade/points, totals, PL, stream position, deviation ----
+    check('getBroadsheet grades each subject score against the default scale', byId.s1.grades.su1.grade_label === 'A' && byId.s1.grades.su1.points === 12);
+    check('getBroadsheet leaves grade/points blank for a subject with no score', byId.s1.grades.su2.grade_label === '' && byId.s1.grades.su2.points === null);
+    check('getBroadsheet computes total/mean points from graded subjects only', byId.s1.total_points === 12 && byId.s1.mean_points === 12);
+    check('getBroadsheet grades the overall average as the performance level (PL)', byId.s1.overall_grade === 'A' && byId.s2.overall_grade === 'B');
+    check('getBroadsheet computes a stream position alongside the class-wide one (all 4 share one stream, so they match)',
+      byId.s1.stream_position === byId.s1.position && byId.s3.stream_position === byId.s3.position && byId.s4.stream_position === byId.s4.position);
+    check('getBroadsheet computes each student\'s deviation from the class average', typeof byId.s1.deviation === 'number' && byId.s1.deviation > 0 && byId.s2.deviation < byId.s1.deviation);
+  }
+
+  // ---- broadsheet: stream position is scoped per-stream, not just a copy of the class-wide rank ----
+  {
+    const { sb, results } = freshApis({
+      streams: [{ id: 'str1', class_id: 'c1', name: 'North' }, { id: 'str2', class_id: 'c1', name: 'South' }],
+      students: [
+        { id: 's1', admission_no: '1', full_name: 'North Best', gender: 'Female', class_id: 'c1', stream_id: 'str1', status: 'active' },
+        { id: 's2', admission_no: '2', full_name: 'North Worst', gender: 'Male', class_id: 'c1', stream_id: 'str1', status: 'active' },
+        { id: 's3', admission_no: '3', full_name: 'South Only', gender: 'Male', class_id: 'c1', stream_id: 'str2', status: 'active' }
+      ]
+    });
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100 })).data;
+    // Class-wide order: South Only (95) > North Best (85) > North Worst (40).
+    // Within North alone, North Best is #1 even though they're #2 class-wide.
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [
+      { student_id: 's1', score: '85' }, { student_id: 's2', score: '40' }, { student_id: 's3', score: '95' }
+    ] });
+    const sheet = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1' });
+    const byId = {}; sheet.students.forEach((s) => { byId[s.student_id] = s; });
+    check('class-wide position ranks South Only first', byId.s3.position === 1);
+    check('North Best is #2 class-wide but #1 within their own stream', byId.s1.position === 2 && byId.s1.stream_position === 1);
+    check('North Worst is #3 class-wide and #2 within their own stream', byId.s2.position === 3 && byId.s2.stream_position === 2);
+    check('South Only is #1 in both scopes (only student in their stream)', byId.s3.position === 1 && byId.s3.stream_position === 1);
   }
 
   // ---- broadsheet honours min-subjects-for-ranking --------------------------------

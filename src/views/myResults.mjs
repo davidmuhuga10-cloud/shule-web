@@ -32,9 +32,9 @@ export async function viewMyResults(root) {
     const cardEl = root.querySelector('#mr-card');
     if (!e.target.value) { cardEl.innerHTML = ''; return; }
     cardEl.innerHTML = loader();
-    const cardRes = await Db.results.getReportCard(e.target.value, studentId);
+    const [cardRes, settingsRes, bands] = await Promise.all([Db.results.getReportCard(e.target.value, studentId), Db.settings.get(), Db.grading.defaultScaleBands()]);
     if (!cardRes.ok) { cardEl.innerHTML = `<div class="card pad">⚠️ ${esc(cardRes.message)}</div>`; return; }
-    renderReportCard(cardEl, cardRes.data);
+    renderReportCard(cardEl, cardRes.data, { settings: settingsRes.ok ? settingsRes.data : {}, bands: bands || [] });
     const printBtn = document.createElement('div');
     printBtn.className = 'no-print center'; printBtn.style.marginTop = '16px';
     printBtn.innerHTML = '<button class="btn secondary" onclick="window.print()">🖨️ Print</button>';

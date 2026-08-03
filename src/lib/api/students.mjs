@@ -14,6 +14,17 @@ function todayIso() {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
+/** Feature brief: admission number, gender, name, class and stream are all
+ *  compulsory when adding a student — UNLESS the chosen class has no
+ *  streams set up at all, in which case there's nothing to pick. Shared by
+ *  save() and bulkCreate() so a single student and a whole spreadsheet of
+ *  them are held to exactly the same rule. */
+async function classHasStreams(supabase, classId) {
+  if (!classId) return false;
+  const { data } = await supabase.from('streams').select('id').eq('class_id', classId);
+  return !!(data && data.length);
+}
+
 export function createStudentsApi(supabase) {
   async function withNames(rows) {
     const classIds = [...new Set(rows.map((r) => r.class_id).filter(Boolean))];
@@ -78,6 +89,9 @@ export function createStudentsApi(supabase) {
       if (!fullName) return err('Student name is required.');
       if (VALID_GENDERS.indexOf(gender) === -1) return err('Please choose a gender (Male or Female).');
       if (!payload.class_id) return err('Please choose a class.');
+      if (!payload.stream_id && await classHasStreams(supabase, payload.class_id)) {
+        return err('Please choose a stream — this class has streams set up.');
+      }
 
       const rec = {
         admission_no: admissionNo,
@@ -178,6 +192,9 @@ export function createStudentsApi(supabase) {
     async bulkCreate(payload) {
       payload = payload || {};
       if (!payload.class_id) return err('Please choose a class before importing.');
+      if (!payload.stream_id && await classHasStreams(supabase, payload.class_id)) {
+        return err('Please choose a stream before importing — this class has streams set up.');
+      }
       const rows = Array.isArray(payload.rows) ? payload.rows : [];
       if (!rows.length) return err('No rows to import.');
 
@@ -209,7 +226,14 @@ export function createStudentsApi(supabase) {
         toInsert.push({
           admission_no: admissionNo, full_name: fullName, gender,
           class_id: payload.class_id, stream_id: payload.stream_id || null,
-          guardian_name: row.guardian_name || '', guardian_contact: row.guardian_contact || '', status: 'active'
+          guardian_name: row.guardian_name || '', guardian_contact: row.guardian_contact || '', status: 'active',
+          // Richer bio-data — all optional, same field set as the single
+          // Add Student form's "More details" section, so a bulk import can
+          // fill in a full profile without a follow-up edit per student.
+          date_of_birth: row.date_of_birth || null, admission_date: row.admission_date || null,
+          upi_number: row.upi_number || '', assessment_number: row.assessment_number || '',
+          previous_school: row.previous_school || '', guardian_relationship: row.guardian_relationship || '',
+          guardian_id_number: row.guardian_id_number || '', medical_notes: row.medical_notes || ''
         });
       });
 

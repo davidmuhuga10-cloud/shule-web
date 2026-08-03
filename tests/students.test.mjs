@@ -84,6 +84,21 @@ async function run() {
       && minimal.data.date_of_birth === null && minimal.data.upi_number === '');
   }
 
+  // ---- stream required unless the class has no streams (feature brief) --------
+  {
+    const sb = createMockSupabase({
+      classes: [{ id: 'c1', name: 'Grade 7' }, { id: 'c2', name: 'Grade 8' }],
+      streams: [{ id: 'str1', class_id: 'c1', name: 'North' }]
+    });
+    const api = createStudentsApi(sb);
+    const noStream = await api.save({ admission_no: '1', full_name: 'Amos', gender: 'Male', class_id: 'c1' });
+    check('save rejects a missing stream when the class has streams', noStream.ok === false);
+    const withStream = await api.save({ admission_no: '1', full_name: 'Amos', gender: 'Male', class_id: 'c1', stream_id: 'str1' });
+    check('save accepts a stream when the class has streams', withStream.ok === true);
+    const noStreamNeeded = await api.save({ admission_no: '2', full_name: 'Bee', gender: 'Female', class_id: 'c2' });
+    check('save does not require a stream when the class has none', noStreamNeeded.ok === true);
+  }
+
   // ---- bulkCreate --------------------------------------------------------------
   {
     const sb = createMockSupabase({ students: [{ id: 's1', admission_no: '10', full_name: 'Existing Kid' }] });
@@ -113,6 +128,38 @@ async function run() {
     const api = createStudentsApi(sb);
     const res = await api.bulkCreate({ rows: [{ admission_no: '1', full_name: 'X', gender: 'Male' }] });
     check('bulkCreate requires a class to be chosen', res.ok === false);
+  }
+  {
+    const sb = createMockSupabase({
+      classes: [{ id: 'c1', name: 'Grade 7' }],
+      streams: [{ id: 'str1', class_id: 'c1', name: 'North' }]
+    });
+    const api = createStudentsApi(sb);
+    const noStream = await api.bulkCreate({ class_id: 'c1', rows: [{ admission_no: '1', full_name: 'X', gender: 'Male' }] });
+    check('bulkCreate requires a stream when the class has streams', noStream.ok === false);
+    const withStream = await api.bulkCreate({ class_id: 'c1', stream_id: 'str1', rows: [{ admission_no: '1', full_name: 'X', gender: 'Male' }] });
+    check('bulkCreate accepts a stream when the class has streams', withStream.ok === true);
+  }
+  {
+    // Richer bio-data fields flow through bulkCreate exactly like the single
+    // Add Student form's "More details" section (brief: "one can upload a
+    // lot of information via the sheet without having to go back and edit").
+    const sb = createMockSupabase({ classes: [{ id: 'c1', name: 'Grade 7' }] });
+    const api = createStudentsApi(sb);
+    const res = await api.bulkCreate({
+      class_id: 'c1',
+      rows: [{
+        admission_no: '1', full_name: 'Amos', gender: 'Male',
+        date_of_birth: '2015-03-14', admission_date: '2022-01-10',
+        upi_number: 'UPI123', assessment_number: 'KNEC456', previous_school: 'Green Hills Academy',
+        guardian_relationship: 'Mother', guardian_id_number: '12345678', medical_notes: 'Asthma'
+      }]
+    });
+    check('bulkCreate succeeds with richer bio-data columns', res.ok === true && res.created === 1);
+    const saved = res.createdRows[0];
+    check('bulkCreate persists richer bio-data fields', saved.date_of_birth === '2015-03-14' && saved.upi_number === 'UPI123'
+      && saved.assessment_number === 'KNEC456' && saved.previous_school === 'Green Hills Academy'
+      && saved.guardian_relationship === 'Mother' && saved.guardian_id_number === '12345678' && saved.medical_notes === 'Asthma');
   }
 
   // ---- archive / restore (Phase 2b: soft-remove instead of hard delete) --------

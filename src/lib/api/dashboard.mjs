@@ -62,8 +62,8 @@ export function createDashboardApi(supabase) {
       const active = await getActiveContext();
 
       const checklist = [
-        { key: 'academic_year', label: 'Create an academic year', done: (await supabase.from('academic_years').select('id', { count: 'exact', head: true })).count > 0, route: '#/academic-calendar' },
-        { key: 'term', label: 'Add terms to the academic year', done: (await supabase.from('terms').select('id', { count: 'exact', head: true })).count > 0, route: '#/academic-calendar' },
+        { key: 'academic_year', label: 'Create an academic year', done: (await supabase.from('academic_years').select('id', { count: 'exact', head: true })).count > 0, route: '#/settings' },
+        { key: 'term', label: 'Add terms to the academic year', done: (await supabase.from('terms').select('id', { count: 'exact', head: true })).count > 0, route: '#/settings' },
         { key: 'classes', label: 'Set up classes', done: classCount > 0, route: '#/classes' },
         { key: 'streams', label: 'Add streams to classes', done: streamCount > 0, route: '#/classes' },
         { key: 'subjects', label: 'Assign subjects to a stream', done: subjectCount > 0, route: '#/classes' },
