@@ -157,8 +157,13 @@ function mockAdmin(opts) {
     check('an admin profile row was created and linked to the new school', profile && profile.role === 'admin' && profile.school_id);
     check('the profile carries the admin\'s phone number', profile.phone === '0712345678');
     check('the profile\'s login email is the synthetic username@schoolcode address, not a real email', profile.email === 'jane@greenhill.staff.shule.internal');
-    check('seed_school_defaults was called for the new school', admin._rpcCalls.some(c => c.name === 'seed_school_defaults'));
-    check('reports seeded:true on success', res.seeded === true);
+    // Brief C1: seeding (seed_school_defaults) is no longer called from
+    // school-signup itself — it moved to school-seed.js, invoked by the
+    // client separately AFTER this response, so the admin isn't stuck
+    // waiting on it. This endpoint's response just needs to hand back the
+    // school_id so the client can make that follow-up call.
+    check('seed_school_defaults is NOT called during signup itself (moved to school-seed.js)', !admin._rpcCalls.some(c => c.name === 'seed_school_defaults'));
+    check('reports the new school_id for the follow-up school-seed call', res.school_id === 'school-1');
   }
 
   // ---- duplicate code --------------------------------------------------------
@@ -191,17 +196,6 @@ function mockAdmin(opts) {
     check('reports failure when the profile insert fails', res.ok === false);
     check('the orphaned auth user was deleted', admin._deletedUserIds.length === 1);
     check('the orphaned school row was rolled back too', admin._deletedSchoolIds.includes('school-1'));
-  }
-
-  // ---- non-fatal seed failure ------------------------------------------------
-  {
-    const admin = mockAdmin({ forceSeedError: true });
-    const res = await createSchoolAndAdmin(admin, {
-      school_name: 'Seed Fail School', school_code: 'seedfail', admin_name: 'A', admin_phone: '0712345678', password: 'abcdef'
-    });
-    check('signup still succeeds even if default-data seeding fails', res.ok === true);
-    check('reports seeded:false when seeding failed', res.seeded === false);
-    check('the admin account still exists despite the seed failure', admin._tables.profiles.length === 1);
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

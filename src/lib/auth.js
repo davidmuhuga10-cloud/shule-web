@@ -54,6 +54,22 @@ export async function resolveSchoolByCode(code) {
 }
 
 /**
+ * Smart login (landing redesign brief B1): given ONLY a phone number, find
+ * every active admin/teacher/parent account it belongs to, across every
+ * school — no School Code required up front. See find_login_accounts_by_phone
+ * in schema.sql for exactly what this does and doesn't expose (never a
+ * password, just enough to build a picker and then sign in normally).
+ * Returns `accounts: [{school_code, school_name, role, display_name}, ...]`.
+ */
+export async function findLoginAccountsByPhone(phone) {
+  const trimmed = String(phone || '').trim();
+  if (!trimmed) return { ok: false, message: 'Enter your phone number.' };
+  const { data, error } = await supabase.rpc('find_login_accounts_by_phone', { p_phone: trimmed });
+  if (error) return { ok: false, message: error.message };
+  return { ok: true, accounts: data || [] };
+}
+
+/**
  * identifier is a username ("mercy") OR a phone number ("0712345678") — the
  * caller doesn't need to know which, since both are resolved the same way.
  * Unlike students/parents, the actual Supabase Auth email can't be derived

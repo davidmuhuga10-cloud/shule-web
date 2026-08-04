@@ -9,7 +9,7 @@
  * function is imported directly — no more string-name ROUTES table working
  * around load order.
  */
-import { loginStaff, loginStaffByUsername, loginStudent, loginParent, splitLoginUsername, logout as authLogout, getCurrentProfile, changePassword, resolveSchoolByCode } from './lib/auth.js';
+import { loginStaff, loginStaffByUsername, loginParent, logout as authLogout, getCurrentProfile, changePassword, findLoginAccountsByPhone } from './lib/auth.js';
 import { supabase } from './lib/supabaseClient.js';
 import { Db } from './lib/api/index.mjs';
 
@@ -17,8 +17,7 @@ import { viewDashboard } from './views/dashboard.mjs';
 import { viewClasses } from './views/classes.mjs';
 import { viewStudents } from './views/students.mjs';
 import { viewBulkUpload } from './views/bulkUpload.mjs';
-import { viewStaff } from './views/staff.mjs';
-import { viewTeachers } from './views/teachers.mjs';
+import { viewStaffHub } from './views/staffTeachers.mjs';
 import { viewGrading } from './views/gradingScales.mjs';
 import { viewExamsHub } from './views/examsHub.mjs';
 import { viewExams } from './views/exams.mjs';
@@ -140,17 +139,17 @@ export function confirmAction(msg, onYes, danger) {
 /* ============================================================================
  * AUTH
  * ==========================================================================*/
-let loginTab = 'staff';
-let lastSchoolCode = ''; // persisted across tab switches / re-renders, same session only
-let lastCombinedLogin = ''; // persisted "identifier@schoolcode" value across re-renders (staff/parent tabs)
+let lastPhone = ''; // persisted across re-renders/errors, same session only
 
-// Staff/Admin and Parent both sign in with ONE combined field — "mercy@tumaini"
-// or "0712345678@tumaini" — instead of a separate School Code box most people
-// don't remember to fill in (Zeraki-style). The Student tab is deliberately
-// left alone (frozen) with the original two-field School Code + Admission
-// Number layout — see PRODUCT_ROADMAP.md's login-UX notes.
-const COMBINED_TABS = { staff: true, parent: true };
+const ROLE_LABEL = { admin: 'Administrator', teacher: 'Teacher', parent: 'Parent' };
 
+// Landing redesign brief A1/B1: the old 3-tab (Staff/Admin, Student, Parent)
+// picker is gone — one phone-number field now covers admin, teacher AND
+// parent sign-in, and the system figures out which (and which school, if the
+// same number is registered at more than one) from the phone number alone.
+// Students are frozen/unchanged but no longer reachable from this screen
+// (brief: "Remove the Student Login tab — not needed at this stage") —
+// loginStudent() itself is untouched for whenever that's revisited.
 export function renderAuth(errorMsg) {
   const name = (state.settings && state.settings.school_name) || (window.SHULE_CONFIG && window.SHULE_CONFIG.SCHOOL_BRAND_NAME) || 'Shule';
   const features = [
@@ -161,25 +160,7 @@ export function renderAuth(errorMsg) {
   ].map(([ico, title, sub]) => `<div class="feat-tile"><div class="ft-ico">${ico}</div>
     <div><div class="ft-title">${title}</div><div class="ft-sub">${sub}</div></div></div>`).join('');
 
-  const combined = COMBINED_TABS[loginTab];
-  const fieldsHtml = combined
-    ? `<div class="field">
-        <label>Username</label>
-        <input id="login-username" autocomplete="username" value="${esc(lastCombinedLogin)}"
-          placeholder="${loginTab === 'parent' ? 'e.g. 0712345678@tumaini' : 'e.g. mercy@tumaini'}" required>
-        <div class="hint">Your ${loginTab === 'parent' ? 'phone number' : 'username or phone number'}, then @ and your school's code.</div>
-      </div>`
-    : `<div class="field">
-        <label>School Code</label>
-        <input id="login-code" autocomplete="off" placeholder="e.g. greenhill" value="${esc(lastSchoolCode)}" required>
-        <div class="hint" id="school-preview" style="min-height:1.2em"></div>
-      </div>
-      <div class="field">
-        <label>Admission Number</label>
-        <input id="login-id" autocomplete="off" placeholder="e.g. 23" required>
-      </div>`;
-
-  $('#auth-screen').innerHTML = `<div class="auth">
+  $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
       <h1>${esc(name)}</h1>
@@ -187,96 +168,199 @@ export function renderAuth(errorMsg) {
       <div class="feat-grid">${features}</div>
     </div></div>
     <div class="formside"><div class="formcard">
-      <h2>Welcome back 👋</h2>
-      <div class="sub">Sign in to continue to ${esc(name)}</div>
-      <div class="tabs">
-        <button id="tab-staff" class="${loginTab === 'staff' ? 'active' : ''}">Staff / Admin</button>
-        <button id="tab-student" class="${loginTab === 'student' ? 'active' : ''}">Student</button>
-        <button id="tab-parent" class="${loginTab === 'parent' ? 'active' : ''}">Parent</button>
-      </div>
+      <h2 class="auth-center">Welcome back 👋</h2>
+      <div class="sub auth-center">Sign in to continue to ${esc(name)}</div>
       ${errorMsg ? `<div class="auth-err">${esc(errorMsg)}</div>` : ''}
       <form id="login-form">
-        ${fieldsHtml}
+        <div class="field">
+          <label>Phone number</label>
+          <input id="login-phone" type="tel" autocomplete="username" inputmode="tel"
+            value="${esc(lastPhone)}" placeholder="e.g. 0712345678" required>
+          <div class="hint">Your username is your phone number.</div>
+        </div>
         <div class="field">
           <label>Password</label>
           <input id="login-pw" type="password" autocomplete="current-password" required>
         </div>
         <button class="btn block" type="submit" id="login-btn">Sign in</button>
       </form>
-      <p class="hint" id="login-hint">${loginTab === 'student'
-        ? 'Ask your school admin for your password if you don\'t have one yet.'
-        : loginTab === 'parent'
-        ? 'Ask your child\'s school admin for your password if you don\'t have one yet.'
-        : 'First time here? Ask your admin to set up your account.'}</p>
+      <p class="hint"><a href="#" id="go-forgot">Forgot password?</a></p>
+      <p class="hint">First time here? Ask your admin to set up your account.</p>
       <p class="hint">New school? <a href="#" id="go-signup">Create your school's account</a></p>
     </div></div>
-  </div>`;
+  </div></div>`;
   $('#auth-screen').classList.remove('hidden');
   $('#app').classList.add('hidden');
 
-  $('#tab-staff').onclick = () => { loginTab = 'staff'; renderAuth(); };
-  $('#tab-student').onclick = () => { loginTab = 'student'; renderAuth(); };
-  $('#tab-parent').onclick = () => { loginTab = 'parent'; renderAuth(); };
+  $('#login-phone').oninput = (e) => { lastPhone = e.target.value; };
   $('#login-form').onsubmit = doLogin;
   $('#go-signup').onclick = (e) => { e.preventDefault(); renderSignup(); };
-
-  if (combined) {
-    $('#login-username').oninput = (e) => { lastCombinedLogin = e.target.value; };
-  } else {
-    const codeInput = $('#login-code');
-    codeInput.oninput = () => { lastSchoolCode = codeInput.value; };
-    codeInput.onblur = async () => {
-      const preview = $('#school-preview');
-      if (!preview || !codeInput.value.trim()) { if (preview) preview.textContent = ''; return; }
-      const res = await resolveSchoolByCode(codeInput.value);
-      if (preview) preview.textContent = res.ok ? `✓ ${res.school.school_name}` : '';
-    };
-  }
+  $('#go-forgot').onclick = (e) => { e.preventDefault(); renderForgotPassword(); };
 }
 
 async function doLogin(e) {
   e.preventDefault();
   const btn = $('#login-btn'); btn.disabled = true; btn.textContent = 'Signing in…';
+  const phone = $('#login-phone').value;
   const pw = $('#login-pw').value;
+  lastPhone = phone;
 
-  let res;
-  if (loginTab === 'student') {
-    const code = $('#login-code').value;
-    const id = $('#login-id').value;
-    res = await loginStudent(id, pw, code);
-    if (!res.ok) lastSchoolCode = code;
-  } else {
-    const combinedValue = $('#login-username').value;
-    lastCombinedLogin = combinedValue;
-    const { identifier, schoolCode } = splitLoginUsername(combinedValue);
-    if (!schoolCode) {
-      btn.disabled = false; btn.textContent = 'Sign in';
-      renderAuth(`Include your school code after @ — e.g. "${identifier || 'yourname'}@yourschoolcode".`);
-      return false;
-    }
-    res = loginTab === 'parent' ? await loginParent(identifier, pw, schoolCode) : await loginStaff(identifier, pw, schoolCode);
+  const lookup = await findLoginAccountsByPhone(phone);
+  if (!lookup.ok || !lookup.accounts.length) {
+    renderAuth('We could not find an account with that phone number.');
+    return false;
   }
-
-  if (!res.ok) { renderAuth(res.message || 'Sign in failed.'); return; }
-  await bootApp();
+  if (lookup.accounts.length === 1) {
+    await finishLogin(lookup.accounts[0], phone, pw, btn);
+  } else {
+    // Brief B1: "If the phone number exists in TWO OR MORE schools... prompt
+    // the user to select the correct account." Password was already typed
+    // once — no need to ask again after they pick.
+    renderAccountPicker(lookup.accounts, phone, pw, { onBack: () => renderAuth() });
+  }
   return false;
+}
+
+async function finishLogin(account, phone, pw, btn) {
+  const res = account.role === 'parent'
+    ? await loginParent(phone, pw, account.school_code)
+    : await loginStaff(phone, pw, account.school_code);
+  if (!res.ok) {
+    renderAuth(res.message || 'Sign in failed.');
+    return;
+  }
+  await bootApp();
+}
+
+/** Shared by both the sign-in flow and the forgot-password flow — same
+ *  "which of these accounts?" picker, just a different continuation once
+ *  one is chosen (opts.onChoose). */
+function renderAccountPicker(accounts, phone, pw, opts) {
+  const rows = accounts.map((a, i) => `<label class="acct-pick">
+      <input type="radio" name="acct-pick" value="${i}" ${i === 0 ? 'checked' : ''}>
+      <div><div class="acct-school">${esc(a.school_name)}</div><div class="acct-role">${esc(ROLE_LABEL[a.role] || a.role)}</div></div>
+    </label>`).join('');
+
+  $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
+    <div class="promo"><div class="promo-inner">
+      <div class="logo">🎓</div>
+      <h1>${esc((state.settings && state.settings.school_name) || 'Shule')}</h1>
+      <p>A clean, modern way to run your school — from enrollment to report forms.</p>
+    </div></div>
+    <div class="formside"><div class="formcard">
+      <h2 class="auth-center">Which account?</h2>
+      <div class="sub auth-center">This phone number is linked to more than one account.</div>
+      <div class="acct-list">${rows}</div>
+      <button class="btn block" id="acct-continue">Continue</button>
+      <p class="hint"><a href="#" id="acct-back">Back</a></p>
+    </div></div>
+  </div></div>`;
+  $('#auth-screen').classList.remove('hidden');
+  $('#app').classList.add('hidden');
+
+  $('#acct-back').onclick = (e) => { e.preventDefault(); opts.onBack(); };
+  $('#acct-continue').onclick = async () => {
+    const checked = document.querySelector('input[name="acct-pick"]:checked');
+    const idx = checked ? Number(checked.value) : 0;
+    const btn = $('#acct-continue'); btn.disabled = true; btn.textContent = 'Please wait…';
+    (opts.onChoose || finishLogin)(accounts[idx], phone, pw, btn);
+  };
+}
+
+/* ----------------------------------------------------------------------
+ * FORGOT PASSWORD (brief B2) — deliberately no OTP/email verification for
+ * now (explicit ask: "Authentication required: NO... simple reset flow...
+ * for now", with an upgrade to a verified reset noted as a later sprint).
+ * Concretely: knowing an account's phone number is enough to set a new
+ * password for it. That's a real, acknowledged tradeoff, not an oversight —
+ * flagged again in the delivery notes, not just here.
+ * -------------------------------------------------------------------- */
+function renderForgotPassword(errorMsg) {
+  $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
+    <div class="promo"><div class="promo-inner">
+      <div class="logo">🎓</div>
+      <h1>${esc((state.settings && state.settings.school_name) || 'Shule')}</h1>
+      <p>A clean, modern way to run your school — from enrollment to report forms.</p>
+    </div></div>
+    <div class="formside"><div class="formcard">
+      <h2 class="auth-center">Reset your password</h2>
+      <div class="sub auth-center">Enter your phone number and choose a new password.</div>
+      ${errorMsg ? `<div class="auth-err">${esc(errorMsg)}</div>` : ''}
+      <form id="forgot-form">
+        <div class="field"><label>Phone number</label><input id="fp-phone" type="tel" placeholder="e.g. 0712345678" value="${esc(lastPhone)}" required></div>
+        <div class="field"><label>New password</label><input id="fp-pw" type="password" autocomplete="new-password" required></div>
+        <div class="field"><label>Confirm new password</label><input id="fp-pw2" type="password" autocomplete="new-password" required></div>
+        <button class="btn block" type="submit" id="forgot-btn">Reset password</button>
+      </form>
+      <p class="hint">⚠️ This doesn't verify it's really you yet — anyone who knows this phone number could reset this password. A verified (OTP) reset is planned for a later update.</p>
+      <p class="hint"><a href="#" id="forgot-back">Back to sign in</a></p>
+    </div></div>
+  </div></div>`;
+  $('#auth-screen').classList.remove('hidden');
+  $('#app').classList.add('hidden');
+
+  $('#forgot-back').onclick = (e) => { e.preventDefault(); renderAuth(); };
+  $('#forgot-form').onsubmit = doForgotPassword;
+}
+
+async function doForgotPassword(e) {
+  e.preventDefault();
+  const btn = $('#forgot-btn'); btn.disabled = true; btn.textContent = 'Checking…';
+  const phone = $('#fp-phone').value;
+  const pw = $('#fp-pw').value, pw2 = $('#fp-pw2').value;
+  lastPhone = phone;
+
+  if (pw.length < 6) { renderForgotPassword('New password must be at least 6 characters.'); return false; }
+  if (pw !== pw2) { renderForgotPassword('Passwords do not match.'); return false; }
+
+  const lookup = await findLoginAccountsByPhone(phone);
+  if (!lookup.ok || !lookup.accounts.length) {
+    renderForgotPassword('We could not find an account with that phone number.');
+    return false;
+  }
+  if (lookup.accounts.length === 1) {
+    await submitPasswordReset(lookup.accounts[0], phone, pw);
+  } else {
+    renderAccountPicker(lookup.accounts, phone, pw, {
+      onBack: () => renderForgotPassword(),
+      onChoose: (account, ph, newPw) => submitPasswordReset(account, ph, newPw)
+    });
+  }
+  return false;
+}
+
+async function submitPasswordReset(account, phone, newPassword) {
+  try {
+    const res = await fetch('/.netlify/functions/forgot-password', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ phone, school_code: account.school_code, role: account.role, new_password: newPassword })
+    });
+    const result = await res.json();
+    if (!result.ok) { renderForgotPassword(result.message || 'Could not reset that password.'); return; }
+    renderAuth('Password reset — sign in with your new password.');
+  } catch (err) {
+    renderForgotPassword('Something went wrong: ' + (err.message || err));
+  }
 }
 
 /* ----------------------------------------------------------------------
  * SCHOOL SIGNUP (self-serve) — a new school creates its tenant + first
  * admin login here, then is signed straight in. Same visual language as
  * renderAuth (identical CSS classes) so the look/theme stays consistent.
+ * Redesign brief A2/C1: cleaner flow, and creation is now optimistic — the
+ * admin is in their dashboard before the slower "seed the school with
+ * defaults" step even finishes (see showSetupToast below).
  * -------------------------------------------------------------------- */
 function renderSignup() {
-  $('#auth-screen').innerHTML = `<div class="auth">
+  $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
       <h1>Bring your school onto Shule</h1>
-      <p>Set up your school's own space in a minute — classes, subjects, exams and report forms, ready to go.</p>
+      <p>Set up your school's own space in under a minute — classes, subjects, exams and report forms, ready to go.</p>
     </div></div>
     <div class="formside"><div class="formcard">
-      <h2>Create your school's account</h2>
-      <div class="sub">You'll be the first administrator.</div>
+      <h2 class="auth-center">Create your school's account</h2>
+      <div class="sub auth-center">You'll be the first administrator.</div>
       <div id="signup-err"></div>
       <form id="signup-form">
         <div class="field"><label>School name</label><input id="su-name" placeholder="e.g. Greenhill Academy" required></div>
@@ -291,7 +375,9 @@ function renderSignup() {
       </form>
       <p class="hint">Already have an account? <a href="#" id="go-login">Sign in instead</a></p>
     </div></div>
-  </div>`;
+  </div></div>`;
+  $('#auth-screen').classList.remove('hidden');
+  $('#app').classList.add('hidden');
 
   const nameInput = $('#su-name'), codeInput = $('#su-code');
   let codeTouched = false;
@@ -327,16 +413,46 @@ async function doSignup(e) {
     }
     // Straight in — no need to make a brand-new admin re-type their own
     // credentials a second time.
-    lastSchoolCode = result.school_code;
-    loginTab = 'staff';
+    lastPhone = body.admin_phone;
     const loginRes = await loginStaffByUsername(result.username, body.password, result.school_code);
-    if (loginRes.ok) { await bootApp(); return false; }
-    renderAuth(`School created! Sign in with School Code "${result.school_code}" to continue.`);
+    if (loginRes.ok) {
+      await bootApp();
+      // Brief C1: the admin is already looking at their dashboard now —
+      // seeding (subjects, grading scale, academic year/terms) finishes in
+      // the background instead of making them wait on a progress screen.
+      showSetupToast(result.school_id);
+      return false;
+    }
+    renderAuth(`School created! Sign in with your phone number to continue.`);
   } catch (err) {
     $('#signup-err').innerHTML = `<div class="auth-err">Something went wrong: ${esc(err.message || err)}</div>`;
     btn.disabled = false; btn.textContent = 'Create school account';
   }
   return false;
+}
+
+/** Dismissible, non-blocking "still setting up" notice — separate from the
+ *  regular toast() helper above because that one always auto-hides after a
+ *  fixed 3.2s; this one has to stay up for however long the background
+ *  seeding fetch actually takes, and disappears the moment it resolves. */
+function showSetupToast(schoolId) {
+  const t = document.createElement('div');
+  t.className = 'toast setup-toast';
+  t.innerHTML = '<span>Hold tight — your school is being set up…</span><button type="button" class="toast-close" aria-label="Dismiss">&times;</button>';
+  $('#toasts').appendChild(t);
+  let removed = false;
+  const remove = () => {
+    if (removed) return;
+    removed = true;
+    t.style.opacity = '0'; t.style.transition = '.3s';
+    setTimeout(() => t.remove(), 300);
+  };
+  t.querySelector('.toast-close').onclick = remove;
+
+  if (!schoolId) { remove(); return; }
+  fetch('/.netlify/functions/school-seed', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ school_id: schoolId })
+  }).catch(() => {}).finally(remove);
 }
 
 async function forceLogout(msg) {
@@ -355,8 +471,7 @@ const NAV = {
     { route: 'classes', label: 'Classes & Streams', ico: '🏫' },
     { section: 'People' },
     { route: 'students', label: 'Students', ico: '🎒' },
-    { route: 'staff', label: 'Staff', ico: '👨‍🏫' },
-    { route: 'teachers', label: 'Teachers', ico: '🧑‍🏫' },
+    { route: 'staff-teachers', label: 'Staff', ico: '👨‍🏫' },
     { section: 'Assessment' },
     { route: 'exams-hub', label: 'Exams', ico: '📝' },
     { route: 'reports-hub', label: 'Reports', ico: '🧾' },
@@ -448,8 +563,7 @@ const ROUTES = {
   'classes': viewClasses,
   'students': viewStudents,
   'bulk-upload': viewBulkUpload,
-  'staff': viewStaff,
-  'teachers': viewTeachers,
+  'staff-teachers': viewStaffHub,
   'grading': viewGrading,
   'exams-hub': viewExamsHub,
   'exams': viewExams,

@@ -21,8 +21,10 @@ function firstName() {
 // than a laptop has to spare above the fold. Both groups are rendered up
 // front and toggled purely by CSS (@media max-width:960px in main.css) so
 // there's no JS matchMedia/resize logic to keep in sync.
-function statTile(ico, val, lab, cls) {
-  return `<div class="stat">
+// route: brief D1 — "the first 4 dashboard tiles (Students, Classes,
+// Streams, Teachers) must be clickable" and jump straight to that module.
+function statTile(ico, val, lab, cls, route) {
+  return `<div class="stat${route ? ' clickable' : ''}"${route ? ` data-route="${esc(route)}"` : ''}>
     <div class="s-ico ${cls}">${ico}</div>
     <div><div class="s-val">${val}</div><div class="s-lab">${lab}</div></div>
   </div>`;
@@ -44,18 +46,18 @@ export async function viewDashboard(root) {
   const { counts, smsBalance, gender, perClass, checklist, setupComplete } = res;
 
   const desktopTiles = [
-    statTile('🎒', counts.students, 'Students', 't-blue'),
-    statTile('🏫', counts.classes, 'Classes', 't-amber'),
-    statTile('🔀', counts.streams, 'Streams', 't-purple'),
-    statTile('👨‍🏫', counts.teachers, 'Teachers', 't-green')
+    statTile('🎒', counts.students, 'Students', 't-blue', 'students'),
+    statTile('🏫', counts.classes, 'Classes', 't-amber', 'classes'),
+    statTile('🔀', counts.streams, 'Streams', 't-purple', 'classes'),
+    statTile('👨‍🏫', counts.teachers, 'Teachers', 't-green', 'staff-teachers')
   ].join('');
 
   const smsLabel = smsBalance === null || smsBalance === undefined || smsBalance === '' ? '—' : esc(String(smsBalance));
   const mobileTiles = [
-    statTile('🎒', counts.students, 'Students', 't-blue'),
-    statTile('🏫', counts.classes, 'Classes', 't-amber'),
-    statTile('🔀', counts.streams, 'Streams', 't-purple'),
-    statTile('👨‍🏫', counts.teachers, 'Teachers', 't-green'),
+    statTile('🎒', counts.students, 'Students', 't-blue', 'students'),
+    statTile('🏫', counts.classes, 'Classes', 't-amber', 'classes'),
+    statTile('🔀', counts.streams, 'Streams', 't-purple', 'classes'),
+    statTile('👨‍🏫', counts.teachers, 'Teachers', 't-green', 'staff-teachers'),
     statTile('💬', smsLabel, 'Bulk SMS Balance', 't-teal'),
     genderTile(gender)
   ].join('');
@@ -112,5 +114,9 @@ export async function viewDashboard(root) {
       if (li.dataset.tab) setNavIntent(route, { tab: li.dataset.tab });
       go(route);
     };
+  });
+
+  root.querySelectorAll('.stat.clickable[data-route]').forEach((tile) => {
+    tile.onclick = () => go(tile.getAttribute('data-route'));
   });
 }

@@ -2,10 +2,15 @@
  * school-signup.js
  * ----------------------------------------------------------------------------
  * The ONE public, unauthenticated endpoint that creates a brand-new tenant:
- * a `schools` row, a first admin login (Supabase Auth + `profiles`), and the
- * new school's default reference data (CBC subjects, default grading scale,
- * default settings — via the `seed_school_defaults` SQL function), so a new
- * school can start using Shule within a minute of signing up.
+ * a `schools` row and a first admin login (Supabase Auth + `profiles`) —
+ * just enough for the admin to actually sign in. Seeding the new school's
+ * default reference data (CBC subjects, default grading scale, default
+ * settings, default academic year/terms) is a SEPARATE, slower step that
+ * used to run here too, but landing-redesign brief C1 ("Background School
+ * Creation / Optimistic Login") moved it out to school-seed.js, called by
+ * the frontend AFTER it's already logged the admin into their dashboard —
+ * so creating a school no longer feels like it takes a full minute of
+ * waiting on this one request.
  *
  * This is deliberately the ONLY place besides admin-provision.js that uses
  * the service_role key — and unlike admin-provision.js, it does NOT require
@@ -127,21 +132,17 @@ async function createSchoolAndAdmin(admin, payload) {
     return { ok: false, message: 'Could not link the admin profile: ' + profileErr.message };
   }
 
-  // Seed sensible defaults (CBC subjects, default grading scale, default
-  // settings rows) so the new school isn't staring at an empty app. Not
-  // fatal if this fails — the admin can still sign in and add these by hand
-  // — so we report it but don't roll back the account that already works.
-  const { error: seedErr } = await admin.rpc('seed_school_defaults', { p_school_id: school.id });
-  if (seedErr) {
-    console.error('seed_school_defaults failed for new school', school.id, seedErr.message);
-  }
-
+  // Seeding sensible defaults (CBC subjects, default grading scale, default
+  // settings, default academic year/terms) happens in a separate call to
+  // school-seed.js, kicked off by the client AFTER this response — see the
+  // file header above. This endpoint's job ends the moment the admin has a
+  // working login.
   return {
     ok: true,
+    school_id: school.id,
     school_code: school.code,
     school_name: school.name,
-    username,
-    seeded: !seedErr
+    username
   };
 }
 

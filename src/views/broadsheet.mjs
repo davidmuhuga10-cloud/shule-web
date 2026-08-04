@@ -100,19 +100,19 @@ async function load(root, classes, sel) {
         <button class="btn secondary no-print" id="bs-print">🖨️ Print</button>
       </div>
       <div class="card-b table-wrap"><table class="data mark-list-grid">
-        <thead><tr><th>Adm. No.</th><th>Name</th><th>Str</th>
-          ${res.subjects.map((s) => `<th class="num">${esc(s.code || s.name)}<br><span class="badge ${STATUS_BADGE_CLASS[s.submission_status] || 'grey'}" style="font-size:9.5px">${esc(STATUS_SHORT[s.submission_status] || s.submission_status)}</span></th>`).join('')}
-          <th class="num">SBJ</th><th class="num">TT MKS</th><th class="num">MN MKS</th><th class="num">PL</th>
-          <th class="num">TT PTS</th><th class="num">MN PTS</th><th class="num">DEV</th><th class="num">STR POS</th><th class="num">OVR POS</th></tr></thead>
+        <thead><tr><th class="id-col">Adm. No.</th><th class="name-col">Name</th><th class="str-col">Str</th>
+          ${res.subjects.map((s) => `<th class="num subj-col">${esc(s.code || s.name)}<br><span class="badge ${STATUS_BADGE_CLASS[s.submission_status] || 'grey'}" style="font-size:9.5px">${esc(STATUS_SHORT[s.submission_status] || s.submission_status)}</span></th>`).join('')}
+          <th class="num sum-col">SBJ</th><th class="num sum-col">TT MKS</th><th class="num sum-col">MN MKS</th><th class="num sum-col">PL</th>
+          <th class="num sum-col">TT PTS</th><th class="num sum-col">MN PTS</th><th class="num sum-col">DEV</th><th class="num sum-col">STR POS</th><th class="num sum-col">OVR POS</th></tr></thead>
         <tbody>${res.students.map((s) => `<tr>
-          <td>${esc(s.admission_no)}</td><td>${esc(s.full_name)}</td><td>${esc(s.stream_name || '—')}</td>
+          <td class="id-col">${esc(s.admission_no)}</td><td class="name-col">${esc(s.full_name)}</td><td class="str-col">${esc(s.stream_name || '—')}</td>
           ${res.subjects.map((sub) => cell(s.scores[sub.id], s.grades[sub.id])).join('')}
-          <td class="num">${s.subject_count}</td>
-          <td class="num"><b>${s.total}</b></td><td class="num">${s.average}</td>
-          <td class="num"><span class="badge blue">${esc(s.overall_grade || '—')}</span></td>
-          <td class="num">${s.total_points === null ? '—' : s.total_points}</td><td class="num">${s.mean_points === null ? '—' : s.mean_points}</td>
-          <td class="num">${s.deviation > 0 ? '+' : ''}${s.deviation}</td>
-          <td class="num">${s.stream_position || '—'}</td><td class="num"><b>${s.position || '—'}</b></td>
+          <td class="num sum-col">${s.subject_count}</td>
+          <td class="num sum-col"><b>${s.total}</b></td><td class="num sum-col">${s.average}</td>
+          <td class="num sum-col"><span class="badge blue">${esc(s.overall_grade || '—')}</span></td>
+          <td class="num sum-col">${s.total_points === null ? '—' : s.total_points}</td><td class="num sum-col">${s.mean_points === null ? '—' : s.mean_points}</td>
+          <td class="num sum-col">${s.deviation > 0 ? '+' : ''}${s.deviation}</td>
+          <td class="num sum-col">${s.stream_position || '—'}</td><td class="num sum-col"><b>${s.position || '—'}</b></td>
         </tr>`).join('')}</tbody>
       </table></div>
       <div class="card-b" style="border-top:1px solid var(--line)">Class average: <b>${res.class_average}</b></div>

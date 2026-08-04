@@ -68,7 +68,7 @@ export function createDashboardApi(supabase) {
         { key: 'streams', label: 'Add streams to classes', done: streamCount > 0, route: '#/classes' },
         { key: 'subjects', label: 'Assign subjects to a stream', done: subjectCount > 0, route: '#/classes' },
         { key: 'students', label: 'Enroll students', done: studentCount > 0, route: '#/students' },
-        { key: 'staff', label: 'Add teachers / staff', done: staffActive > 0, route: '#/staff' }
+        { key: 'staff', label: 'Add teachers / staff', done: staffActive > 0, route: '#/staff-teachers' }
       ];
 
       return ok(null, {
