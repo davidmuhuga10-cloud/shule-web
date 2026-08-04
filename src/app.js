@@ -160,7 +160,7 @@ export function renderAuth(errorMsg) {
   ].map(([ico, title, sub]) => `<div class="feat-tile"><div class="ft-ico">${ico}</div>
     <div><div class="ft-title">${title}</div><div class="ft-sub">${sub}</div></div></div>`).join('');
 
-  $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
+  $('#auth-screen').innerHTML = `<div class="auth">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
       <h1>${esc(name)}</h1>
@@ -188,7 +188,7 @@ export function renderAuth(errorMsg) {
       <p class="hint">First time here? Ask your admin to set up your account.</p>
       <p class="hint">New school? <a href="#" id="go-signup">Create your school's account</a></p>
     </div></div>
-  </div></div>`;
+  </div>`;
   $('#auth-screen').classList.remove('hidden');
   $('#app').classList.add('hidden');
 
@@ -241,7 +241,7 @@ function renderAccountPicker(accounts, phone, pw, opts) {
       <div><div class="acct-school">${esc(a.school_name)}</div><div class="acct-role">${esc(ROLE_LABEL[a.role] || a.role)}</div></div>
     </label>`).join('');
 
-  $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
+  $('#auth-screen').innerHTML = `<div class="auth">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
       <h1>${esc((state.settings && state.settings.school_name) || 'Shule')}</h1>
@@ -254,7 +254,7 @@ function renderAccountPicker(accounts, phone, pw, opts) {
       <button class="btn block" id="acct-continue">Continue</button>
       <p class="hint"><a href="#" id="acct-back">Back</a></p>
     </div></div>
-  </div></div>`;
+  </div>`;
   $('#auth-screen').classList.remove('hidden');
   $('#app').classList.add('hidden');
 
@@ -276,7 +276,7 @@ function renderAccountPicker(accounts, phone, pw, opts) {
  * flagged again in the delivery notes, not just here.
  * -------------------------------------------------------------------- */
 function renderForgotPassword(errorMsg) {
-  $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
+  $('#auth-screen').innerHTML = `<div class="auth">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
       <h1>${esc((state.settings && state.settings.school_name) || 'Shule')}</h1>
@@ -295,7 +295,7 @@ function renderForgotPassword(errorMsg) {
       <p class="hint">⚠️ This doesn't verify it's really you yet — anyone who knows this phone number could reset this password. A verified (OTP) reset is planned for a later update.</p>
       <p class="hint"><a href="#" id="forgot-back">Back to sign in</a></p>
     </div></div>
-  </div></div>`;
+  </div>`;
   $('#auth-screen').classList.remove('hidden');
   $('#app').classList.add('hidden');
 
@@ -352,7 +352,7 @@ async function submitPasswordReset(account, phone, newPassword) {
  * defaults" step even finishes (see showSetupToast below).
  * -------------------------------------------------------------------- */
 function renderSignup() {
-  $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
+  $('#auth-screen').innerHTML = `<div class="auth">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
       <h1>Bring your school onto Shule</h1>
@@ -375,7 +375,7 @@ function renderSignup() {
       </form>
       <p class="hint">Already have an account? <a href="#" id="go-login">Sign in instead</a></p>
     </div></div>
-  </div></div>`;
+  </div>`;
   $('#auth-screen').classList.remove('hidden');
   $('#app').classList.add('hidden');
 

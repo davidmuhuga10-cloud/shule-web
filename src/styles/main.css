@@ -279,43 +279,30 @@ table.data td.num,table.data th.num{text-align:center}
   color:var(--muted);padding:0 2px;font-family:inherit}
 
 /* ---------- Login ---------- */
-/* Landing redesign, final pass: the two full-height columns fill edge-to-
-   edge exactly as before (teal gradient / light page background — colors
-   unchanged, positions unchanged). What's now wrapped in its own rounded,
-   shadowed TILE is just the CONTENT on each side (the logo/heading/feature
-   grid on the left, the "Welcome back"+form on the right) — a card sized to
-   its content, floating with visible margin inside its column, not a tile
-   stretched to fill the whole column. .auth is the full-height grid;
-   .auth-card is a non-rendering wrapper (display:contents) so .promo and
-   .formside sit directly as the two grid columns. */
-.auth{min-height:100vh;display:grid;grid-template-columns:.82fr 1.18fr}
-.auth-card{display:contents}
+.auth{min-height:100vh;display:grid;grid-template-columns:1.05fr .95fr;background:var(--bg)}
 .auth .promo{position:relative;background:linear-gradient(150deg,var(--brand),var(--brand-2));color:#fff;
-  padding:48px 64px;display:flex;flex-direction:column;justify-content:center;overflow:hidden}
+  padding:60px;display:flex;flex-direction:column;justify-content:center;overflow:hidden}
 .auth .promo::after{content:'';position:absolute;right:-80px;top:-80px;width:260px;height:260px;border-radius:50%;
   background:rgba(255,255,255,.05)}
 .auth .promo::before{content:'';position:absolute;left:-60px;bottom:-60px;width:200px;height:200px;border-radius:50%;
   background:rgba(255,255,255,.04)}
-.auth .promo-inner{position:relative;z-index:1;max-width:400px;background:rgba(255,255,255,.15);
-  border:1px solid rgba(255,255,255,.25);border-radius:20px;box-shadow:0 20px 50px rgba(0,0,0,.2);
-  padding:30px 28px;backdrop-filter:blur(4px)}
-.auth .promo .logo{width:54px;height:54px;border-radius:14px;background:linear-gradient(135deg,var(--accent),#e8890b);
-  display:grid;place-items:center;font-size:27px;font-weight:800;margin-bottom:22px;box-shadow:0 8px 20px rgba(0,0,0,.2)}
-.auth .promo h1{color:#fff;font-size:28px;line-height:1.15;margin-bottom:12px}
-.auth .promo p{color:#c8e0de;font-size:14px;max-width:380px;margin:0 0 26px}
-.feat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.auth .promo-inner{position:relative;z-index:1;max-width:440px}
+.auth .promo .logo{width:60px;height:60px;border-radius:16px;background:linear-gradient(135deg,var(--accent),#e8890b);
+  display:grid;place-items:center;font-size:30px;font-weight:800;margin-bottom:26px;box-shadow:0 8px 20px rgba(0,0,0,.2)}
+.auth .promo h1{color:#fff;font-size:32px;line-height:1.15;margin-bottom:14px}
+.auth .promo p{color:#c8e0de;font-size:15px;max-width:400px;margin:0 0 30px}
+.feat-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .feat-tile{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);border-radius:12px;
-  padding:12px;display:flex;gap:10px;align-items:center;backdrop-filter:blur(4px)}
-.feat-tile .ft-ico{font-size:20px;flex-shrink:0}
-.feat-tile .ft-title{font-weight:650;font-size:13.5px;color:#fff}
-.feat-tile .ft-sub{font-size:11px;color:#a9cfcd;margin-top:1px}
-.auth .formside{display:flex;align-items:center;justify-content:center;padding:44px 40px;
-  background:var(--bg)}
-.auth .formcard{width:100%;max-width:520px;background:var(--surface);border:1px solid var(--line);
-  border-radius:20px;box-shadow:var(--shadow-lg);padding:30px 52px}
+  padding:14px;display:flex;gap:11px;align-items:center;backdrop-filter:blur(4px)}
+.feat-tile .ft-ico{font-size:22px;flex-shrink:0}
+.feat-tile .ft-title{font-weight:650;font-size:14px;color:#fff}
+.feat-tile .ft-sub{font-size:11.5px;color:#a9cfcd;margin-top:1px}
+.auth .formside{display:grid;place-items:center;padding:40px 24px}
+.auth .formcard{width:100%;max-width:390px;background:var(--surface);border:1px solid var(--line);
+  border-radius:18px;box-shadow:var(--shadow-lg);padding:38px 34px}
 .auth .formcard h2{font-size:24px;margin-bottom:6px}
-.auth .formcard .sub{color:var(--muted);margin-bottom:18px;font-size:14px}
-.auth .formcard .hint{margin-top:12px}
+.auth .formcard .sub{color:var(--muted);margin-bottom:24px;font-size:14px}
+.auth .formcard .hint{margin-top:16px}
 /* Landing redesign brief A1: "'Welcome back' text must be centered within
    the tile/banner". */
 .auth .formcard h2.auth-center,.auth .formcard .sub.auth-center{text-align:center}
@@ -437,8 +424,6 @@ table.data td.num,table.data th.num{text-align:center}
   .main{margin-left:0}
   .topbar .menu-toggle{display:inline-flex}
   .auth{grid-template-columns:1fr}.auth .promo{display:none}
-  .auth .formside{min-height:100vh}
-  .auth .formcard{border-radius:0;box-shadow:none;border:none;max-width:none;padding:0}
   .grid2,.grid3{grid-template-columns:1fr}
   .report .r-summary{grid-template-columns:1fr 1fr}
   .report .r-student-row{flex-wrap:wrap}
