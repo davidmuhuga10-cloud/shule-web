@@ -29,6 +29,16 @@ export function createUsersApi(supabase, callAdminFunction) {
       return callAdminFunction('create_student', { student_id, admission_no, full_name });
     },
 
+    /** Provisions a whole batch of student logins in ONE Netlify function
+     *  call (bulk-upload's follow-up step) instead of one round trip per
+     *  student — see admin-provision.js's createStudentsBulk for why. Caller
+     *  is expected to chunk `rows` itself if it wants incremental progress
+     *  feedback between chunks (see bulkUpload.mjs). */
+    async provisionStudentLogins(rows) {
+      if (!Array.isArray(rows) || !rows.length) return err('No students to provision.');
+      return callAdminFunction('create_students_bulk', { rows });
+    },
+
     async provisionStaffLogin({ staff_id, full_name, role, phone }) {
       if (!staff_id || !full_name) return err('Missing staff details for login provisioning.');
       return callAdminFunction('create_staff', { staff_id, full_name, role, phone });

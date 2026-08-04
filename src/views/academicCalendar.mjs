@@ -44,8 +44,8 @@ async function render(root) {
     ? years.map((y) => `<tr>
         <td>${esc(y.name)}</td><td>${statusBadge(y.status)}</td>
         <td class="row-actions">
-          <button class="icon-btn" data-edit-year="${y.id}">✏️</button>
-          <button class="icon-btn danger" data-del-year="${y.id}">🗑️</button>
+          <button class="btn sm secondary" data-edit-year="${y.id}">Edit</button>
+          <button class="btn sm danger" data-del-year="${y.id}">Delete</button>
         </td></tr>`).join('')
     : `<tr><td colspan="3" class="muted center">No academic years yet.</td></tr>`;
 
@@ -53,8 +53,8 @@ async function render(root) {
     ? terms.map((t) => `<tr>
         <td>${esc(t.academic_year_name)}</td><td>${esc(t.name)}</td><td>${statusBadge(t.status)}</td>
         <td class="row-actions">
-          <button class="icon-btn" data-edit-term="${t.id}">✏️</button>
-          <button class="icon-btn danger" data-del-term="${t.id}">🗑️</button>
+          <button class="btn sm secondary" data-edit-term="${t.id}">Edit</button>
+          <button class="btn sm danger" data-del-term="${t.id}">Delete</button>
         </td></tr>`).join('')
     : `<tr><td colspan="4" class="muted center">No terms yet.</td></tr>`;
 

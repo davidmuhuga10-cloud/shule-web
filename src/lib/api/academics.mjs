@@ -111,6 +111,14 @@ export function createAcademicsApi(supabase) {
     },
 
     classes: {
+      // Perf fix: this used to fetch every class first, then loop over them
+      // ONE AT A TIME awaiting a 2-query Promise.all per class — a school
+      // with 10-15 classes meant 10-15 sequential network round trips just
+      // to open the Classes & Streams page (a real contributor to slow page
+      // loads, same root-cause shape as the dashboard's old waterfall — see
+      // dashboard.mjs). Streams and students for EVERY class are now fetched
+      // in the same single Promise.all as the classes themselves, and counts
+      // are derived client-side — one round trip regardless of class count.
       async list() {
         const { data, error } = await supabase.from('classes').select('*');
         if (error) return err(error.message);
@@ -119,14 +127,20 @@ export function createAcademicsApi(supabase) {
           if (ao !== bo) return ao - bo;
           return String(a.name).localeCompare(String(b.name));
         });
-        for (const c of rows) {
-          const [{ count: streamCount }, { count: studentCount }] = await Promise.all([
-            supabase.from('streams').select('id', { count: 'exact', head: true }).eq('class_id', c.id),
-            supabase.from('students').select('id', { count: 'exact', head: true }).eq('class_id', c.id)
-          ]);
-          c.stream_count = streamCount || 0;
-          c.student_count = studentCount || 0;
-        }
+        if (!rows.length) return ok(rows);
+        const classIds = rows.map((c) => c.id);
+        const [{ data: streams }, { data: students }] = await Promise.all([
+          supabase.from('streams').select('id, class_id').in('class_id', classIds),
+          supabase.from('students').select('id, class_id').in('class_id', classIds)
+        ]);
+        const streamCountByClass = {};
+        (streams || []).forEach((s) => { streamCountByClass[s.class_id] = (streamCountByClass[s.class_id] || 0) + 1; });
+        const studentCountByClass = {};
+        (students || []).forEach((s) => { studentCountByClass[s.class_id] = (studentCountByClass[s.class_id] || 0) + 1; });
+        rows.forEach((c) => {
+          c.stream_count = streamCountByClass[c.id] || 0;
+          c.student_count = studentCountByClass[c.id] || 0;
+        });
         return ok(rows);
       },
       /** payload.streams: optional array of stream names to ensure exist for this class.

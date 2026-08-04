@@ -155,7 +155,7 @@ async function loadArchived(root, classes) {
       <td>${esc(LEAVING_REASON_LABELS[s.left_reason] || s.left_reason || '—')}</td><td>${esc(s.left_date || '—')}</td>
       <td class="row-actions">
         <button class="btn ghost sm" data-restore="${s.id}">Restore</button>
-        <button class="icon-btn danger" data-purge="${s.id}">🗑️</button>
+        <button class="btn sm danger" data-purge="${s.id}">Delete</button>
       </td></tr>`).join('')}</tbody>
   </table></div>`;
 
@@ -228,8 +228,8 @@ async function renderClassStudents(root, classes, cls) {
         <td>${esc(s.admission_no)}</td><td>${esc(s.full_name)}</td>
         <td>${genderBadge(s.gender)}</td><td>${esc(s.stream_name || '—')}</td>
         <td class="row-actions">
-          <button class="icon-btn" data-edit="${s.id}">✏️</button>
-          <button class="icon-btn danger" data-archive="${s.id}">📤</button>
+          <button class="btn sm secondary" data-edit="${s.id}">Edit</button>
+          <button class="btn sm danger" data-archive="${s.id}">Archive</button>
         </td></tr>`).join('')}</tbody>
     </table></div>`;
 

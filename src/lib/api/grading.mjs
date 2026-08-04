@@ -24,14 +24,24 @@ export const CBC_COMPETENCY_BANDS = [
 
 export function createGradingApi(supabase) {
   const api = {
+    // Perf fix: this used to fetch each scale's bands with its own round
+    // trip, one scale at a time (a school with several scales meant that
+    // many sequential waits just to open the Grading Scales page). All
+    // bands for every scale are now fetched together in one query and
+    // grouped client-side by grading_scale_id.
     async listScales() {
       const { data: scales, error } = await supabase.from('grading_scales').select('*');
       if (error) return err(error.message);
-      for (const sc of scales || []) {
-        const { data: bands } = await supabase.from('grade_ranges').select('*').eq('grading_scale_id', sc.id);
-        sc.bands = (bands || []).slice().sort((a, b) => Number(b.min_score) - Number(a.min_score));
+      const rows = scales || [];
+      if (rows.length) {
+        const { data: allBands } = await supabase.from('grade_ranges').select('*').in('grading_scale_id', rows.map((sc) => sc.id));
+        const bandsByScale = {};
+        (allBands || []).forEach((b) => { (bandsByScale[b.grading_scale_id] = bandsByScale[b.grading_scale_id] || []).push(b); });
+        rows.forEach((sc) => {
+          sc.bands = (bandsByScale[sc.id] || []).slice().sort((a, b) => Number(b.min_score) - Number(a.min_score));
+        });
       }
-      return ok(scales || []);
+      return ok(rows);
     },
 
     async saveScale(payload) {

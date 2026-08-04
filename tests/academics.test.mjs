@@ -103,6 +103,36 @@ async function run() {
     const listed = await api.classes.list();
     check('classes.list sorts by level_order', listed.data[0].id === 'c2' && listed.data[1].id === 'c1');
   }
+  {
+    // Perf fix: stream_count/student_count used to be computed with one
+    // sequential round trip PER class; now it's a single batched fetch —
+    // this checks the per-class counts still land on the right class.
+    const sb = createMockSupabase({
+      classes: [{ id: 'c1', name: 'Grade 7', level_order: 7 }, { id: 'c2', name: 'Grade 1', level_order: 1 }],
+      streams: [{ id: 'st1', class_id: 'c1' }, { id: 'st2', class_id: 'c1' }, { id: 'st3', class_id: 'c2' }],
+      students: [{ id: 's1', class_id: 'c1' }, { id: 's2', class_id: 'c1' }, { id: 's3', class_id: 'c1' }, { id: 's4', class_id: 'c2' }]
+    });
+    const api = createAcademicsApi(sb);
+    const listed = await api.classes.list();
+    const c1 = listed.data.find((c) => c.id === 'c1');
+    const c2 = listed.data.find((c) => c.id === 'c2');
+    check('classes.list batches stream_count correctly per class', c1.stream_count === 2 && c2.stream_count === 1);
+    check('classes.list batches student_count correctly per class', c1.student_count === 3 && c2.student_count === 1);
+  }
+  {
+    // A class with zero streams/students must not error and must show 0, not undefined.
+    const sb = createMockSupabase({ classes: [{ id: 'c1', name: 'Grade 7', level_order: 7 }] });
+    const api = createAcademicsApi(sb);
+    const listed = await api.classes.list();
+    check('classes.list defaults counts to 0 for a class with no streams/students', listed.data[0].stream_count === 0 && listed.data[0].student_count === 0);
+  }
+  {
+    // No classes at all -> empty list, no error from the batched follow-up queries.
+    const sb = createMockSupabase({});
+    const api = createAcademicsApi(sb);
+    const listed = await api.classes.list();
+    check('classes.list handles zero classes without error', listed.ok === true && listed.data.length === 0);
+  }
 
   // ---- streams ----------------------------------------------------------------
   {

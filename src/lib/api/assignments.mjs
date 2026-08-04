@@ -83,6 +83,41 @@ export async function getEffectiveClassSubjectIds(supabase, classId) {
   return [...set];
 }
 
+/** Perf fix: listExamClasses (the "Manage Exams" board) used to call
+ *  getEffectiveClassSubjectIds() once PER class, sequentially — an exam
+ *  covering 10+ classes meant 10+ sequential round trips just to open the
+ *  board. Same logic as the single-class version above, but fetches every
+ *  class's streams + assignment rows in ONE pair of batched queries and
+ *  returns a { classId: [subjectIds] } map instead of looping. */
+export async function getEffectiveClassSubjectIdsBatch(supabase, classIds) {
+  const ids = [...new Set((classIds || []).filter(Boolean))];
+  if (!ids.length) return {};
+  const [{ data: streams }, { data: allRows }] = await Promise.all([
+    supabase.from('streams').select('id, class_id').in('class_id', ids),
+    supabase.from('subject_class_assignments').select('subject_id, stream_id, class_id').in('class_id', ids)
+  ]);
+  const streamsByClass = {};
+  (streams || []).forEach((s) => { (streamsByClass[s.class_id] = streamsByClass[s.class_id] || []).push(s); });
+  const classWideByClass = {};
+  const byStream = {};
+  (allRows || []).forEach((r) => {
+    if (r.stream_id) (byStream[r.stream_id] = byStream[r.stream_id] || []).push(r.subject_id);
+    else (classWideByClass[r.class_id] = classWideByClass[r.class_id] || []).push(r.subject_id);
+  });
+  const result = {};
+  ids.forEach((cid) => {
+    const classWideIds = classWideByClass[cid] || [];
+    const set = new Set();
+    const streamList = (streamsByClass[cid] && streamsByClass[cid].length) ? streamsByClass[cid] : [{ id: null }];
+    streamList.forEach((s) => {
+      const effective = (s.id && byStream[s.id] && byStream[s.id].length) ? byStream[s.id] : classWideIds;
+      effective.forEach((id) => set.add(id));
+    });
+    result[cid] = [...set];
+  });
+  return result;
+}
+
 export function createAssignmentsApi(supabase) {
   async function effectiveSubjectIdsForStream(streamId, classId) {
     const { data: streamRows } = await supabase.from('subject_class_assignments').select('subject_id').eq('stream_id', streamId);

@@ -15,6 +15,8 @@
  */
 import { esc, options, renderPrereq, loader, printLandscape } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
+import { downloadXlsxAOA } from '../lib/xlsxUtil.mjs';
+import { buildBroadsheetAoa } from '../lib/broadsheetXlsx.mjs';
 
 const STATUS_BADGE_CLASS = { draft: 'grey', submitted: 'blue', approved: 'blue', published: 'green' };
 const STATUS_SHORT = { draft: 'Draft', submitted: 'Subm.', approved: 'Appr.', published: 'Publ.' };
@@ -97,6 +99,7 @@ async function load(root, classes, sel) {
           <div style="font-weight:650;margin-top:4px">${esc(res.exam.name)} — Mark List — ${esc(cls ? cls.name : '')}</div>
         </div>
         <div class="spacer"></div>
+        <button class="btn secondary no-print" id="bs-download">⬇️ Download Excel</button>
         <button class="btn secondary no-print" id="bs-print">🖨️ Print</button>
       </div>
       <div class="card-b table-wrap"><table class="data mark-list-grid">
@@ -119,4 +122,11 @@ async function load(root, classes, sel) {
     </div>
   `;
   sheetEl.querySelector('#bs-print').onclick = printLandscape;
+  sheetEl.querySelector('#bs-download').onclick = () => {
+    const streamSel = root.querySelector('#bs-stream');
+    const streamName = streamSel && streamSel.selectedIndex > 0 ? streamSel.options[streamSel.selectedIndex].textContent : '';
+    const aoa = buildBroadsheetAoa({ settings, exam: res.exam, cls, streamName, subjects: res.subjects, students: res.students, class_average: res.class_average });
+    const fname = `mark-list-${(cls ? cls.name : 'class')}-${res.exam.name}`.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+    downloadXlsxAOA(fname, aoa, 'Mark List');
+  };
 }

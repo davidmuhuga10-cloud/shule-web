@@ -30,6 +30,22 @@ function statTile(ico, val, lab, cls, route) {
   </div>`;
 }
 
+// Perf/UX fix: the dashboard used to await the whole (now-single-round-trip,
+// but still non-zero-latency) data fetch before rendering ANY markup — a
+// blank page under the router's generic spinner the whole time. Tiles,
+// headers and nav are static (the tile labels/icons/routes don't depend on
+// the fetch — only the numeric VALUES do), so this renders that shell with
+// skeleton placeholders FIRST, wires up tile clicks immediately (a school's
+// admin can navigate to Students/Classes/etc. before the dashboard's own
+// numbers have even loaded), then fills in real numbers once the fetch
+// resolves — instead of a blank screen, then everything at once.
+function statTileSkeleton(ico, lab, cls, route) {
+  return `<div class="stat${route ? ' clickable' : ''}"${route ? ` data-route="${esc(route)}"` : ''}>
+    <div class="s-ico ${cls}">${ico}</div>
+    <div><div class="skeleton" style="width:38px;margin-bottom:6px"></div><div class="s-lab">${lab}</div></div>
+  </div>`;
+}
+
 function genderTile(gender) {
   return `<div class="stat gender-tile">
     <div class="s-ico t-blue">🚻</div>
@@ -41,6 +57,45 @@ function genderTile(gender) {
 }
 
 export async function viewDashboard(root) {
+  // Phase 1: paint the shell immediately — header, tile skeletons (still
+  // clickable, since routes are static), empty gender/per-class cards. No
+  // await before this point.
+  root.innerHTML = `
+    <div class="page-head"><div><h2>${greetingWord()}, ${esc(firstName())}</h2><p>Here is what's happening at ${esc((state.settings && state.settings.school_name) || 'your school')}.</p></div></div>
+    <div class="stats-mobile">${[
+      statTileSkeleton('🎒', 'Students', 't-blue', 'students'),
+      statTileSkeleton('🏫', 'Classes', 't-amber', 'classes'),
+      statTileSkeleton('🔀', 'Streams', 't-purple', 'classes'),
+      statTileSkeleton('👨‍🏫', 'Teachers', 't-green', 'staff-teachers'),
+      statTileSkeleton('💬', 'Bulk SMS Balance', 't-teal'),
+      `<div class="stat gender-tile"><div class="s-ico t-blue">🚻</div><div class="skeleton" style="width:100%;height:32px"></div></div>`
+    ].join('')}</div>
+    <div class="dash-top-row">
+      <div class="stats-desktop">${[
+        statTileSkeleton('🎒', 'Students', 't-blue', 'students'),
+        statTileSkeleton('🏫', 'Classes', 't-amber', 'classes'),
+        statTileSkeleton('🔀', 'Streams', 't-purple', 'classes'),
+        statTileSkeleton('👨‍🏫', 'Teachers', 't-green', 'staff-teachers')
+      ].join('')}</div>
+      <div class="card dash-gender-desktop">
+        <div class="card-h"><h3>Students by gender</h3></div>
+        <div class="card-b"><div class="skeleton" style="width:100%;height:48px"></div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>Students per class</h3></div>
+      <div class="card-b table-wrap">
+        <table class="data"><thead><tr><th>Class</th><th class="num">Students</th></tr></thead>
+        <tbody><tr><td colspan="2"><div class="skeleton" style="width:100%;height:16px"></div></td></tr></tbody></table>
+      </div>
+    </div>
+  `;
+  root.querySelectorAll('.stat.clickable[data-route]').forEach((tile) => {
+    tile.onclick = () => go(tile.getAttribute('data-route'));
+  });
+
+  // Phase 2: fetch the real numbers and replace the skeleton with the full
+  // render (same markup this view has always produced) once they arrive.
   const res = await Db.dashboard.get();
   if (!res.ok) { root.innerHTML = `<div class="card pad">⚠️ ${esc(res.message)}</div>`; return; }
   const { counts, smsBalance, gender, perClass, checklist, setupComplete } = res;

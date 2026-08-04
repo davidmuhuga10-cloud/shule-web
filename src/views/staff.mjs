@@ -31,8 +31,8 @@ async function render(root) {
           <td class="row-actions">
             ${profile ? `<button class="icon-btn" data-reset="${profile.id}" title="Reset password">🔑</button>
             <button class="icon-btn" data-toggle="${profile.id}" data-status="${profile.status}" title="${profile.status === 'active' ? 'Disable login' : 'Enable login'}">${profile.status === 'active' ? '🚫' : '✅'}</button>` : ''}
-            <button class="icon-btn" data-edit="${s.id}" title="Edit">✏️</button>
-            <button class="icon-btn danger" data-del="${s.id}" title="Remove">🗑️</button>
+            <button class="btn sm secondary" data-edit="${s.id}">Edit</button>
+            <button class="btn sm danger" data-del="${s.id}">Delete</button>
           </td></tr>`;
         }).join('')}</tbody>
       </table></div>` : `<div class="card-b"><div class="empty">

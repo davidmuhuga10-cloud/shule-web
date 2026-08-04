@@ -17,7 +17,7 @@
  * gone — creating a brand-new subject now happens inline from the stream's
  * "+ Add subject" picker.
  */
-import { esc, modal, closeModal, toast, confirmAction, options } from '../app.js';
+import { esc, modal, closeModal, toast, confirmAction, options, renderLoading } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { STANDARD_CLASS_LEVELS } from '../lib/api/academics.mjs';
 
@@ -41,8 +41,8 @@ async function renderList(root) {
         <td class="num">${c.student_count}</td>
         <td>${esc(staffMap[c.class_teacher_staff_id] || '—')}</td>
         <td class="row-actions">
-          <button class="icon-btn" data-edit="${c.id}" title="Edit">✏️</button>
-          <button class="icon-btn danger" data-del="${c.id}" title="Delete">🗑️</button>
+          <button class="btn sm secondary" data-edit="${c.id}">Edit</button>
+          <button class="btn sm danger" data-del="${c.id}">Delete</button>
         </td></tr>`).join('')
     : '';
 
@@ -64,6 +64,7 @@ async function renderList(root) {
   if (emptyBtn) emptyBtn.onclick = () => openClassModal(root, undefined, staff, classes);
   root.querySelectorAll('[data-open]').forEach((tr) => tr.onclick = (e) => {
     if (e.target.closest('[data-edit],[data-del]')) return;
+    renderLoading(root, 'Loading streams, please wait…');
     renderClassDetail(root, classes.find((c) => c.id === tr.dataset.open), staff);
   });
   root.querySelectorAll('[data-edit]').forEach((b) => b.onclick = (e) => {
@@ -115,6 +116,7 @@ function openClassModal(root, existing, staff, allClasses) {
         </div>` : `<p class="hint">Manage this class's streams, subjects and teachers from its page after saving.</p>`}
       `,
       okLabel: 'Save',
+      busyLabel: existing ? 'Saving changes, please wait…' : 'Adding class, please wait…',
       onOk: async () => {
         const name = document.getElementById('cl-name').value;
         const class_teacher_staff_id = document.getElementById('cl-teacher').value || null;
@@ -170,15 +172,13 @@ async function renderClassDetail(root, cls, staff) {
   const rows = streams.length
     ? streams.map((s) => `
       <div class="card" style="margin-bottom:10px">
-        <div class="card-b clickable-row" style="display:flex;align-items:center;justify-content:space-between" data-open-stream="${s.id}">
-          <div>
+        <div class="card-b stream-row clickable-row" data-open-stream="${s.id}">
+          <div class="stream-info">
             <div style="font-weight:650">${esc(s.name)}</div>
             <div class="muted" style="font-size:12.5px">${s.student_count} student(s)</div>
           </div>
-          <div style="display:flex;align-items:center;gap:14px">
-            <span class="muted" style="font-size:13px">Manage subjects &amp; teachers →</span>
-            <button class="icon-btn danger" data-del-stream="${s.id}" title="Delete stream">🗑️</button>
-          </div>
+          <button class="btn manage-btn">Manage Subjects &amp; Teachers →</button>
+          <button class="btn sm danger stream-del" data-del-stream="${s.id}">Delete</button>
         </div>
       </div>`).join('')
     : `<div class="card"><div class="card-b"><div class="empty">
@@ -194,7 +194,7 @@ async function renderClassDetail(root, cls, staff) {
     ${rows}
   `;
 
-  root.querySelector('#back-to-classes').onclick = () => renderList(root);
+  root.querySelector('#back-to-classes').onclick = () => { renderLoading(root, 'Loading classes, please wait…'); renderList(root); };
   root.querySelector('#add-stream').onclick = () => promptAddStream(async (name) => {
     const res = await Db.streams.save({ class_id: cls.id, name });
     if (!res.ok) { toast(res.message, 'err'); return; }
@@ -203,6 +203,7 @@ async function renderClassDetail(root, cls, staff) {
   });
   root.querySelectorAll('[data-open-stream]').forEach((el) => el.onclick = (e) => {
     if (e.target.closest('[data-del-stream]')) return;
+    renderLoading(root, 'Loading subjects & teachers, please wait…');
     renderStreamSubjects(root, cls, streams.find((s) => s.id === el.dataset.openStream), staff);
   });
   root.querySelectorAll('[data-del-stream]').forEach((b) => b.onclick = (e) => {
@@ -229,7 +230,7 @@ async function renderStreamSubjects(root, cls, stream, staff) {
     <tr>
       <td>${esc(r.name)}</td>
       <td><select data-teacher-for="${r.subject_id}" style="max-width:220px">${options(activeStaff, 'id', 'full_name', r.teacher_staff_id || '', 'No teacher assigned')}</select></td>
-      <td class="row-actions"><button class="icon-btn danger" data-remove-subject="${r.subject_id}" title="Remove">🗑️</button></td>
+      <td class="row-actions"><button class="btn sm danger" data-remove-subject="${r.subject_id}">Delete</button></td>
     </tr>`).join('') : `<tr><td colspan="3" class="muted center">No subjects assigned yet — click "+ Add subject" to get started.</td></tr>`;
 
   root.innerHTML = `
@@ -244,7 +245,7 @@ async function renderStreamSubjects(root, cls, stream, staff) {
     </table></div></div>
   `;
 
-  root.querySelector('#back-to-class').onclick = () => renderClassDetail(root, cls, staff);
+  root.querySelector('#back-to-class').onclick = () => { renderLoading(root, 'Loading streams, please wait…'); renderClassDetail(root, cls, staff); };
   root.querySelector('#add-subject').onclick = () => openAddSubjectModal(root, cls, stream, staff, rows.map((r) => r.subject_id));
   root.querySelectorAll('[data-teacher-for]').forEach((sel) => sel.onchange = async () => {
     const r2 = await Db.assignments.setStreamSubjectTeacher({ stream_id: stream.id, class_id: cls.id, subject_id: sel.dataset.teacherFor, staff_id: sel.value || null });

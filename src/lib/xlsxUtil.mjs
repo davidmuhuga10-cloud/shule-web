@@ -49,6 +49,32 @@ export function downloadXlsx(filename, rows, columns, sheetName) {
   URL.revokeObjectURL(url);
 }
 
+/** Builds an .xlsx workbook (one sheet) directly from an array-of-arrays —
+ *  for exports whose layout isn't a simple one-header-row table, e.g. a
+ *  mark list that needs a few school-details rows above the data grid.
+ *  Every cell is coerced the same way buildXlsxBuffer does. Pure and
+ *  testable, no DOM/Blob use. */
+export function buildXlsxBufferAOA(aoa, sheetName) {
+  const data = (aoa || []).map((row) => (row || []).map((v) => (v === null || v === undefined ? '' : v)));
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName || 'Sheet1');
+  return XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+}
+
+/** Browser-only: triggers a save of an array-of-arrays as a real .xlsx file
+ *  via buildXlsxBufferAOA — same Blob + anchor click convention as
+ *  downloadXlsx above, for layouts with extra header rows. */
+export function downloadXlsxAOA(filename, aoa, sheetName) {
+  const buf = buildXlsxBufferAOA(aoa, sheetName);
+  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename.toLowerCase().endsWith('.xlsx') ? filename : filename + '.xlsx';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 /** Browser-only: reads a user-uploaded .xlsx File into array-of-arrays rows
  *  via parseXlsxBuffer above. */
 export async function readXlsxFile(file) {

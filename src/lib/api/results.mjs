@@ -21,7 +21,7 @@
  *                      everything in their own school regardless of status.
  */
 import { ok, err, byAdmissionNo, admissionNumberValue, indexById } from './_util.mjs';
-import { getEffectiveClassSubjectIds } from './assignments.mjs';
+import { getEffectiveClassSubjectIds, getEffectiveClassSubjectIdsBatch } from './assignments.mjs';
 
 const EXAM_TYPES = ['summative', 'formative', 'cat', 'mock'];
 export const EXAM_TYPE_LABELS = {
@@ -483,9 +483,10 @@ export function createResultsApi(supabase, gradingApi) {
         ? await supabase.from('staff').select('id, full_name').in('id', publisherIds) : { data: [] };
       const publisherMap = indexById(publisherRows || []);
 
+      const assignedIdsByClass = await getEffectiveClassSubjectIdsBatch(supabase, classIds);
       const rows = [];
       for (const cid of classIds) {
-        const assignedIds = await getEffectiveClassSubjectIds(supabase, cid);
+        const assignedIds = assignedIdsByClass[cid] || [];
         const withMarks = withMarksByClass[cid] || new Set();
         const published = publishedByClass[cid] || new Set();
         const subjectsTotal = assignedIds.length;

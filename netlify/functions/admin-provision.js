@@ -66,6 +66,8 @@ exports.handler = async (event) => {
     switch (payload.action) {
       case 'create_student':
         return json(200, await createStudentLogin(admin, payload, schoolId));
+      case 'create_students_bulk':
+        return json(200, await createStudentsBulk(admin, payload, schoolId));
       case 'create_staff':
         return json(200, await createStaffLogin(admin, payload, schoolId));
       case 'create_parent':
@@ -89,16 +91,27 @@ async function createStudentLogin(admin, payload, schoolId) {
     return { ok: false, message: 'student_id, admission_no and full_name are required.' };
   }
 
-  const existing = await findProfileBy(admin, 'student_id', student_id, schoolId);
-  if (existing) {
-    return { ok: true, alreadyProvisioned: true, profile_id: existing.id };
-  }
-
   const { data: school, error: schoolErr } = await admin
     .from('schools').select('code').eq('id', schoolId).maybeSingle();
   if (schoolErr || !school) return { ok: false, message: 'Could not resolve your school — please sign in again.' };
 
-  const email = studentEmailFor(admission_no, school.code);
+  return provisionOneStudent(admin, schoolId, school.code, { student_id, admission_no, full_name });
+}
+
+/** Shared by the single (`create_student`) and bulk (`create_students_bulk`)
+ *  paths so both provision a login exactly the same way — the bulk path just
+ *  resolves the school code ONCE up front instead of once per student. */
+async function provisionOneStudent(admin, schoolId, schoolCode, { student_id, admission_no, full_name }) {
+  if (!student_id || !admission_no || !full_name) {
+    return { ok: false, admission_no, message: 'student_id, admission_no and full_name are required.' };
+  }
+
+  const existing = await findProfileBy(admin, 'student_id', student_id, schoolId);
+  if (existing) {
+    return { ok: true, alreadyProvisioned: true, profile_id: existing.id, admission_no };
+  }
+
+  const email = studentEmailFor(admission_no, schoolCode);
   const password = studentPasswordFor(admission_no);
 
   const { data: created, error: createErr } = await admin.auth.admin.createUser({
@@ -107,17 +120,47 @@ async function createStudentLogin(admin, payload, schoolId) {
     email_confirm: true,
     user_metadata: { role: 'student', student_id, full_name, school_id: schoolId }
   });
-  if (createErr) return { ok: false, message: 'Could not create the login: ' + createErr.message };
+  if (createErr) return { ok: false, admission_no, message: 'Could not create the login: ' + createErr.message };
 
   const { error: profileErr } = await admin
     .from('profiles')
     .insert({ id: created.user.id, school_id: schoolId, name: full_name, email, role: 'student', student_id, status: 'active' });
   if (profileErr) {
     await admin.auth.admin.deleteUser(created.user.id); // don't leave an orphaned auth account behind
-    return { ok: false, message: 'Could not link the profile: ' + profileErr.message };
+    return { ok: false, admission_no, message: 'Could not link the profile: ' + profileErr.message };
   }
 
-  return { ok: true, profile_id: created.user.id, email, defaultPassword: password };
+  return { ok: true, profile_id: created.user.id, email, defaultPassword: password, admission_no };
+}
+
+/**
+ * Bulk-provision student logins in ONE request instead of one Netlify
+ * function round-trip per student (the previous frontend behavior — the
+ * direct cause of a 19-student import "freezing" the site: 19 sequential
+ * HTTP round trips, each itself doing 2-3 Supabase Admin API calls). Runs
+ * with limited concurrency server-side (not full parallel) so we don't
+ * hammer Supabase's Admin API with a burst that could get rate-limited.
+ * payload.rows: [{ student_id, admission_no, full_name }]
+ */
+async function createStudentsBulk(admin, payload, schoolId) {
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  if (!rows.length) return { ok: false, message: 'No students to provision.' };
+
+  const { data: school, error: schoolErr } = await admin
+    .from('schools').select('code').eq('id', schoolId).maybeSingle();
+  if (schoolErr || !school) return { ok: false, message: 'Could not resolve your school — please sign in again.' };
+
+  const CONCURRENCY = 5;
+  const results = [];
+  for (let i = 0; i < rows.length; i += CONCURRENCY) {
+    const batch = rows.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.all(
+      batch.map((row) => provisionOneStudent(admin, schoolId, school.code, row))
+    );
+    results.push(...batchResults);
+  }
+  const provisioned = results.filter((r) => r.ok).length;
+  return { ok: true, provisioned, total: rows.length, results };
 }
 
 /**
@@ -324,6 +367,7 @@ async function findProfileByEmail(admin, email, schoolId) {
 // Exported (in addition to `handler`) so these pure actions can be unit-tested
 // against a mock Supabase client without needing a live project or env vars.
 module.exports.createStudentLogin = createStudentLogin;
+module.exports.createStudentsBulk = createStudentsBulk;
 module.exports.createStaffLogin = createStaffLogin;
 module.exports.createParentLogin = createParentLogin;
 module.exports.resetPassword = resetPassword;

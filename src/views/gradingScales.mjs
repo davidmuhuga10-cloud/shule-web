@@ -80,7 +80,7 @@ function scaleCard(sc, expanded) {
   const bandsRows = (sc.bands || []).length
     ? sc.bands.map((b) => `<tr>
         <td>${b.min_score}–${b.max_score}</td><td><b>${esc(b.grade_label)}</b></td><td>${b.points ?? '—'}</td><td>${esc(b.remark || '—')}</td>
-        <td class="row-actions"><button class="icon-btn" data-edit-band="${b.id}">✏️</button><button class="icon-btn danger" data-del-band="${b.id}">🗑️</button></td>
+        <td class="row-actions"><button class="btn sm secondary" data-edit-band="${b.id}">Edit</button><button class="btn sm danger" data-del-band="${b.id}">Delete</button></td>
       </tr>`).join('')
     : `<tr><td colspan="5" class="muted center">No bands yet — add one below.</td></tr>`;
 
@@ -93,8 +93,8 @@ function scaleCard(sc, expanded) {
         ${sc.is_default ? '<span class="badge green">Default</span>' : ''}
       </div>
       ${sc.is_default ? '' : `<button class="btn ghost sm" data-default-scale="${sc.id}">Make default</button>`}
-      <button class="icon-btn" data-edit-scale="${sc.id}">✏️</button>
-      <button class="icon-btn danger" data-del-scale="${sc.id}">🗑️</button>
+      <button class="btn sm secondary" data-edit-scale="${sc.id}">Edit</button>
+      <button class="btn sm danger" data-del-scale="${sc.id}">Delete</button>
     </div>
     ${expanded ? `
     <div class="card-b table-wrap">

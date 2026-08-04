@@ -125,8 +125,8 @@ function examCard(exam, classRows) {
       <span class="badge grey">Out of ${exam.out_of}</span>
       <div class="spacer"></div>
       <button class="btn ghost sm" data-add-classes>+ Add classes</button>
-      <button class="icon-btn" data-edit-exam>✏️</button>
-      <button class="icon-btn danger" data-del-exam>🗑️</button>
+      <button class="btn sm secondary" data-edit-exam>Edit</button>
+      <button class="btn sm danger" data-del-exam>Delete</button>
     </div>
     ${rowsHtml}
   </div>`;

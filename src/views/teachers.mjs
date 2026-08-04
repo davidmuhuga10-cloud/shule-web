@@ -42,7 +42,7 @@ async function render(root, query) {
           <span class="badge ${t.status === 'active' ? 'green' : 'grey'}">${esc(t.status || 'active')}</span>
         </div>
         <div class="teacher-card-actions">
-          <button class="icon-btn" data-edit="${t.id}" title="Edit">✏️</button>
+          <button class="btn sm secondary" data-edit="${t.id}">Edit</button>
           <button class="icon-btn" data-assign="${t.id}" title="Subject assignments (in Classes &amp; Streams)">🔗</button>
           <button class="icon-btn" data-msg="${t.id}" title="Message">💬</button>
         </div>

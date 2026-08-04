@@ -12,7 +12,7 @@
  *   - Stream is required whenever the chosen class has streams set up (same
  *     rule as Add Student), enforced before you can even preview.
  */
-import { esc, toast, options, renderPrereq } from '../app.js';
+import { esc, toast, options, renderPrereq, $ } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { downloadXlsx, readXlsxFile } from '../lib/xlsxUtil.mjs';
 
@@ -178,20 +178,37 @@ function renderPreview(root, classes, state) {
 
   importBtn.onclick = async () => {
     importBtn.disabled = true; importBtn.textContent = 'Importing…';
+    area.insertAdjacentHTML('beforeend', `<div class="card-b" id="bu-progress"><p class="hint">📥 Creating ${validCount} student record(s), please wait…</p></div>`);
     const validRows = withStatus.filter((r) => !r.error).map(({ error, ...r }) => r);
     const res = await Db.students.bulkCreate({ class_id: state.class_id, stream_id: state.stream_id || null, rows: validRows });
-    if (!res.ok) { toast(res.message, 'err'); importBtn.disabled = false; importBtn.textContent = `Import ${validCount} student(s)`; return; }
+    if (!res.ok) { toast(res.message, 'err'); importBtn.disabled = false; importBtn.textContent = `Import ${validCount} student(s)`; $('#bu-progress', area)?.remove(); return; }
 
+    // Provision logins in CHUNKS (one Netlify function round trip per chunk,
+    // not per student — see admin-provision.js's createStudentsBulk) so a
+    // 19-, 50-, or 200-student import no longer means 19/50/200 sequential
+    // network round trips. Chunking (rather than one call for everything)
+    // is what lets us show real incremental progress in between.
+    const CHUNK = 15;
+    const rows = res.createdRows || [];
     let provisioned = 0;
-    for (const row of res.createdRows || []) {
-      const prov = await Db.users.provisionStudentLogin({ student_id: row.id, admission_no: row.admission_no, full_name: row.full_name });
-      if (prov && prov.ok) provisioned++;
+    const progressEl = $('#bu-progress', area);
+    const setProgress = (done) => {
+      if (!progressEl || !rows.length) return;
+      const pct = Math.round((done / rows.length) * 100);
+      progressEl.innerHTML = `<p class="hint">🔑 Setting up logins: ${done}/${rows.length} (${pct}%), please wait…</p>`;
+    };
+    setProgress(0);
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK).map((r) => ({ student_id: r.id, admission_no: r.admission_no, full_name: r.full_name }));
+      const prov = await Db.users.provisionStudentLogins(chunk);
+      if (prov && prov.ok) provisioned += prov.provisioned || 0;
+      setProgress(Math.min(i + CHUNK, rows.length));
     }
 
     area.innerHTML = `<div class="card"><div class="card-b">
       <div class="empty">
         <div class="e-ico">✅</div><h3>Import complete</h3>
-        <p>${res.created} student(s) created${res.createdRows && res.createdRows.length ? ` and ${provisioned} login(s) provisioned (default password: <b>student-&lt;admission number&gt;</b>)` : ''}.
+        <p>${res.created} student(s) created${rows.length ? ` and ${provisioned} login(s) provisioned (default password: <b>student-&lt;admission number&gt;</b>)` : ''}.
         ${res.skipped.length ? `${res.skipped.length} row(s) were skipped (duplicate admission numbers).` : ''}</p>
       </div>
       ${res.skipped.length ? `<div class="table-wrap"><table class="data">

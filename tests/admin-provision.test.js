@@ -12,7 +12,7 @@ const { studentEmailFor, studentPasswordFor, parentEmailFor, staffUsernameFor, s
   require('../netlify/functions/_lib/studentLogin.js');
 const { requireAdmin } = require('../netlify/functions/_lib/supabaseAdmin.js');
 const {
-  createStudentLogin, createStaffLogin, createParentLogin, resetPassword, setLoginStatus
+  createStudentLogin, createStudentsBulk, createStaffLogin, createParentLogin, resetPassword, setLoginStatus
 } = require('../netlify/functions/admin-provision.js');
 
 let passed = 0, failed = 0;
@@ -216,6 +216,65 @@ function mockAdmin(opts) {
     admin.auth.admin.deleteUser = async (id) => { deleteCalled = true; return origDelete(id); };
     const res = await createStudentLogin(admin, { student_id: 'stu-9', admission_no: '9', full_name: 'Rollback Test' }, SCHOOL_A);
     check('createStudentLogin rolls back the auth user when the profile insert fails', res.ok === false && deleteCalled === true);
+  }
+
+  // ---- createStudentsBulk ---------------------------------------------------
+  // Perf fix: bulk import used to call createStudentLogin once per student —
+  // sequential Netlify function round trips that made a 19-student import
+  // feel like the site had frozen. createStudentsBulk provisions a whole
+  // batch in ONE call instead.
+  {
+    const rows = [
+      { student_id: 'b-1', admission_no: '101', full_name: 'Amina Otieno' },
+      { student_id: 'b-2', admission_no: '102', full_name: 'Brian Kiptoo' },
+      { student_id: 'b-3', admission_no: '103', full_name: 'Cynthia Wanjiru' }
+    ];
+    const admin = mockAdmin();
+    const res = await createStudentsBulk(admin, { rows }, SCHOOL_A);
+    check('createStudentsBulk succeeds', res.ok === true);
+    check('createStudentsBulk provisions every row', res.provisioned === 3 && res.total === 3);
+    check('createStudentsBulk returns one result per row', res.results.length === 3);
+    check('createStudentsBulk results are all ok', res.results.every((r) => r.ok === true));
+    const profiles = admin._tables.profiles.filter((p) => p.school_id === SCHOOL_A);
+    check('createStudentsBulk inserted a profile per student', profiles.length === 3);
+  }
+  {
+    // Rows spanning more than one internal concurrency batch (CONCURRENCY=5)
+    // still all get provisioned correctly.
+    const rows = Array.from({ length: 12 }, (_, i) => ({
+      student_id: 'bulk-' + i, admission_no: String(200 + i), full_name: 'Student ' + i
+    }));
+    const admin = mockAdmin();
+    const res = await createStudentsBulk(admin, { rows }, SCHOOL_A);
+    check('createStudentsBulk handles more rows than the concurrency chunk size', res.ok === true && res.provisioned === 12);
+  }
+  {
+    // Already-provisioned students in the batch are reported ok (idempotent), not double-created.
+    const admin = mockAdmin({ tables: { profiles: [{ id: 'existing-1', student_id: 'b-1', role: 'student', school_id: SCHOOL_A }] } });
+    const rows = [
+      { student_id: 'b-1', admission_no: '101', full_name: 'Amina Otieno' },
+      { student_id: 'b-2', admission_no: '102', full_name: 'Brian Kiptoo' }
+    ];
+    const res = await createStudentsBulk(admin, { rows }, SCHOOL_A);
+    check('createStudentsBulk is idempotent for already-provisioned rows in the batch', res.ok === true && res.provisioned === 2);
+    check('createStudentsBulk does not insert a duplicate profile for the already-provisioned row',
+      admin._tables.profiles.filter((p) => p.student_id === 'b-1').length === 1);
+  }
+  {
+    // A malformed row (missing full_name) fails on its own without aborting the rest of the batch.
+    const admin = mockAdmin();
+    const rows = [
+      { student_id: 'b-1', admission_no: '101', full_name: 'Amina Otieno' },
+      { student_id: 'b-2', admission_no: '102' } // missing full_name
+    ];
+    const res = await createStudentsBulk(admin, { rows }, SCHOOL_A);
+    check('createStudentsBulk keeps going after one bad row', res.ok === true && res.provisioned === 1);
+    check('createStudentsBulk reports the bad row as failed, not silently dropped', res.results.some((r) => r.ok === false));
+  }
+  {
+    const admin = mockAdmin();
+    const res = await createStudentsBulk(admin, { rows: [] }, SCHOOL_A);
+    check('createStudentsBulk rejects an empty batch', res.ok === false);
   }
 
   // ---- staffUsernameFor / staffEmailFor --------------------------------------

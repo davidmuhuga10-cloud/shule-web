@@ -81,14 +81,23 @@ async function run() {
     await api.provisionStudentLogin({ student_id: 's1', admission_no: '5', full_name: 'Amos' });
     check('provisionStudentLogin delegates to the admin function with the right action', calls[0].action === 'create_student' && calls[0].payload.admission_no === '5');
 
+    // Perf fix: bulk-upload provisions a whole chunk of students in ONE call
+    // (create_students_bulk) instead of one call per student.
+    const rows = [{ student_id: 's2', admission_no: '6', full_name: 'Brian' }, { student_id: 's3', admission_no: '7', full_name: 'Cynthia' }];
+    await api.provisionStudentLogins(rows);
+    check('provisionStudentLogins delegates to the bulk admin action', calls[1].action === 'create_students_bulk' && calls[1].payload.rows.length === 2);
+
+    const emptyBulk = await api.provisionStudentLogins([]);
+    check('provisionStudentLogins rejects an empty batch without calling out', emptyBulk.ok === false && calls.length === 2);
+
     await api.resetPassword('p2');
-    check('resetPassword delegates correctly', calls[1].action === 'reset_password' && calls[1].payload.profile_id === 'p2');
+    check('resetPassword delegates correctly', calls[2].action === 'reset_password' && calls[2].payload.profile_id === 'p2');
 
     const badStatus = await api.setLoginStatus('p2', 'bogus');
-    check('setLoginStatus validates the status value before calling out', badStatus.ok === false && calls.length === 2);
+    check('setLoginStatus validates the status value before calling out', badStatus.ok === false && calls.length === 3);
 
     await api.setLoginStatus('p2', 'inactive');
-    check('setLoginStatus delegates with a valid status', calls[2].action === 'set_login_status' && calls[2].payload.status === 'inactive');
+    check('setLoginStatus delegates with a valid status', calls[3].action === 'set_login_status' && calls[3].payload.status === 'inactive');
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

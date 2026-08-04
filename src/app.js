@@ -53,6 +53,19 @@ export function toast(msg, type) {
   setTimeout(() => { t.style.opacity = '0'; t.style.transition = '.3s'; setTimeout(() => t.remove(), 300); }, 3200);
 }
 export function loader() { return '<div class="loader"><div class="spin"></div></div>'; }
+/** Perf/UX fix: in-view screen transitions that DON'T go through the router
+ *  (e.g. Classes -> Streams -> Subjects, which all swap `root.innerHTML`
+ *  directly rather than changing the URL hash) never got the router's
+ *  built-in `loader()` treatment — the old row stayed on screen, unchanged,
+ *  for however long the next screen's data fetch took, which read as "my
+ *  click did nothing" and invited a second click. Call this SYNCHRONOUSLY,
+ *  before the `await` that fetches the next screen's data, so there's
+ *  visible feedback the instant something is clicked, and the old row's
+ *  click targets are gone (can't double-click something that no longer
+ *  exists in the DOM). */
+export function renderLoading(root, message) {
+  root.innerHTML = `<div class="loader"><div class="spin"></div><p class="loader-msg">${esc(message || 'Loading, please wait…')}</p></div>`;
+}
 /** Print a wide table (Mark List/broadsheet) in landscape. Relying on the
  *  CSS "page" property + a named @page rule to switch orientation turned out
  *  to be unreliable in practice (reported bug: printing the Mark List
@@ -124,7 +137,30 @@ export function modal(opts) {
     </div></div>`;
   $('#modal-back').onclick = (e) => { if (e.target.id === 'modal-back') closeModal(); };
   const cancelBtn = $('#modal-cancel'); if (cancelBtn) cancelBtn.onclick = closeModal;
-  if (opts.okLabel && opts.onOk) $('#modal-ok').onclick = opts.onOk;
+  // Perf/UX fix: every "Save"-style action in the app goes through this one
+  // modal() helper, so this is the single place to fix the "click Save
+  // twice while it's still saving -> 'already exists' error" bug class —
+  // the button disables and shows a busy label the instant it's clicked,
+  // for every modal in the app, not just Add Class. If onOk doesn't close
+  // the modal (e.g. it returned early after a validation error), the button
+  // is restored so the person can fix something and try again.
+  if (opts.okLabel && opts.onOk) {
+    const okBtn = $('#modal-ok');
+    const originalLabel = okBtn.textContent;
+    okBtn.onclick = async () => {
+      if (okBtn.disabled) return;
+      okBtn.disabled = true;
+      okBtn.textContent = opts.busyLabel || 'Please wait…';
+      try {
+        await opts.onOk();
+      } finally {
+        if (document.body.contains(okBtn)) {
+          okBtn.disabled = false;
+          okBtn.textContent = originalLabel;
+        }
+      }
+    };
+  }
   if (opts.onOpen) opts.onOpen();
 }
 export function closeModal() { $('#modal-root').innerHTML = ''; }
@@ -160,7 +196,7 @@ export function renderAuth(errorMsg) {
   ].map(([ico, title, sub]) => `<div class="feat-tile"><div class="ft-ico">${ico}</div>
     <div><div class="ft-title">${title}</div><div class="ft-sub">${sub}</div></div></div>`).join('');
 
-  $('#auth-screen').innerHTML = `<div class="auth">
+  $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
       <h1>${esc(name)}</h1>
@@ -188,7 +224,7 @@ export function renderAuth(errorMsg) {
       <p class="hint">First time here? Ask your admin to set up your account.</p>
       <p class="hint">New school? <a href="#" id="go-signup">Create your school's account</a></p>
     </div></div>
-  </div>`;
+  </div></div>`;
   $('#auth-screen').classList.remove('hidden');
   $('#app').classList.add('hidden');
 
@@ -241,7 +277,7 @@ function renderAccountPicker(accounts, phone, pw, opts) {
       <div><div class="acct-school">${esc(a.school_name)}</div><div class="acct-role">${esc(ROLE_LABEL[a.role] || a.role)}</div></div>
     </label>`).join('');
 
-  $('#auth-screen').innerHTML = `<div class="auth">
+  $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
       <h1>${esc((state.settings && state.settings.school_name) || 'Shule')}</h1>
@@ -254,7 +290,7 @@ function renderAccountPicker(accounts, phone, pw, opts) {
       <button class="btn block" id="acct-continue">Continue</button>
       <p class="hint"><a href="#" id="acct-back">Back</a></p>
     </div></div>
-  </div>`;
+  </div></div>`;
   $('#auth-screen').classList.remove('hidden');
   $('#app').classList.add('hidden');
 
@@ -276,7 +312,7 @@ function renderAccountPicker(accounts, phone, pw, opts) {
  * flagged again in the delivery notes, not just here.
  * -------------------------------------------------------------------- */
 function renderForgotPassword(errorMsg) {
-  $('#auth-screen').innerHTML = `<div class="auth">
+  $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
       <h1>${esc((state.settings && state.settings.school_name) || 'Shule')}</h1>
@@ -295,7 +331,7 @@ function renderForgotPassword(errorMsg) {
       <p class="hint">⚠️ This doesn't verify it's really you yet — anyone who knows this phone number could reset this password. A verified (OTP) reset is planned for a later update.</p>
       <p class="hint"><a href="#" id="forgot-back">Back to sign in</a></p>
     </div></div>
-  </div>`;
+  </div></div>`;
   $('#auth-screen').classList.remove('hidden');
   $('#app').classList.add('hidden');
 
@@ -352,7 +388,7 @@ async function submitPasswordReset(account, phone, newPassword) {
  * defaults" step even finishes (see showSetupToast below).
  * -------------------------------------------------------------------- */
 function renderSignup() {
-  $('#auth-screen').innerHTML = `<div class="auth">
+  $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
       <h1>Bring your school onto Shule</h1>
@@ -375,7 +411,7 @@ function renderSignup() {
       </form>
       <p class="hint">Already have an account? <a href="#" id="go-login">Sign in instead</a></p>
     </div></div>
-  </div>`;
+  </div></div>`;
   $('#auth-screen').classList.remove('hidden');
   $('#app').classList.add('hidden');
 
@@ -471,7 +507,7 @@ const NAV = {
     { route: 'classes', label: 'Classes & Streams', ico: '🏫' },
     { section: 'People' },
     { route: 'students', label: 'Students', ico: '🎒' },
-    { route: 'staff-teachers', label: 'Staff', ico: '👨‍🏫' },
+    { route: 'staff-teachers', label: 'Teachers and Staff', ico: '👨‍🏫' },
     { section: 'Assessment' },
     { route: 'exams-hub', label: 'Exams', ico: '📝' },
     { route: 'reports-hub', label: 'Reports', ico: '🧾' },
