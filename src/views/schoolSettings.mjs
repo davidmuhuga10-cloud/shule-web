@@ -1,16 +1,23 @@
-import { esc, toast } from '../app.js';
+import { esc, toast, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { isContactInfoComplete } from '../lib/printHeader.mjs';
 
 const MAX_DIM = 160;
 const MAX_LEN = 45000;
-// Feature brief §1: "Reject logo uploads above a set size limit... to avoid
-// filling the database with oversized files." Checked on the ORIGINAL file
-// before any processing — a straightforward, fast reject for anything
-// clearly too big to be a logo, on top of (not instead of) the existing
-// shrink-to-fit compression below, which still handles anything under this
+// System Fixes brief §1: "Reduce the accepted maximum logo size from 5MB to
+// 1MB" — checked on the ORIGINAL file before any processing, a fast reject
+// for anything clearly too big, on top of (not instead of) the existing
+// shrink-to-fit compression below which still handles anything under this
 // limit down to a small stored thumbnail.
-const MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_UPLOAD_BYTES = 1 * 1024 * 1024; // 1 MB
+// Brief §1's "the previous file must be deleted completely from the
+// database — not left behind" is already true structurally: the logo lives
+// as a single `settings` row (key='logo'), and Db.settings.save() always
+// UPDATEs that one row in place — there's no history table, no separate
+// storage object, nothing versioned. Saving a new logo (or removing one)
+// necessarily overwrites/clears the only copy that ever existed; there is
+// no leftover to clean up. Documented here since it's easy to assume a
+// base64-in-a-text-column design needs an explicit delete step — it doesn't.
 
 export async function viewSettings(root) {
   const res = await Db.settings.get();
@@ -33,6 +40,13 @@ function render(root, settings) {
       <p>P.O. Box number, postal code, town and phone are required — no report can be printed or downloaded until these are set.</p>
     </div>`;
 
+  // System Fixes brief §3: "Mark every mandatory field with a red asterisk
+  // so it's clear at a glance what's missing." Same 4 fields
+  // isContactInfoComplete() already enforces before printing — the
+  // asterisk and the block-on-save check below both key off that exact
+  // same list, so there's only one definition of "required" anywhere.
+  const req = ' <span style="color:var(--danger)">*</span>';
+
   root.innerHTML = `
     <div class="page-head"><div><h2>School Settings</h2><p>Shown on report forms, class lists and the login screen.</p></div></div>
     ${contactWarning}
@@ -42,13 +56,18 @@ function render(root, settings) {
         <div class="field"><label>Motto (optional)</label><input id="set-motto" value="${esc(settings.school_motto || '')}" placeholder="e.g. Excellence Through Discipline"></div>
         <p class="hint" style="margin:14px 0 4px">Address / contact details (required before printing any report)</p>
         <div class="grid3">
-          <div class="field"><label>P.O. Box number</label><input id="set-pobox" value="${esc(settings.po_box || '')}" placeholder="e.g. 100"></div>
-          <div class="field"><label>Postal / ZIP code</label><input id="set-postal" value="${esc(settings.postal_code || '')}" placeholder="e.g. 00100"></div>
-          <div class="field"><label>Town</label><input id="set-town" value="${esc(settings.town || '')}" placeholder="e.g. Nairobi"></div>
+          <div class="field"><label>P.O. Box number${req}</label><input id="set-pobox" value="${esc(settings.po_box || '')}" placeholder="e.g. 100"></div>
+          <div class="field"><label>Postal / ZIP code${req}</label><input id="set-postal" value="${esc(settings.postal_code || '')}" placeholder="e.g. 00100"></div>
+          <div class="field"><label>Town${req}</label><input id="set-town" value="${esc(settings.town || '')}" placeholder="e.g. Nairobi"></div>
         </div>
         <div class="grid2">
-          <div class="field"><label>Phone</label><input id="set-phone" value="${esc(settings.phone || '')}" placeholder="e.g. 0712 345 678"></div>
+          <div class="field"><label>Phone${req}</label><input id="set-phone" value="${esc(settings.phone || '')}" placeholder="e.g. 0712 345 678"></div>
           <div class="field"><label>Email (optional)</label><input id="set-email" type="email" value="${esc(settings.email || '')}" placeholder="e.g. info@yourschool.ac.ke"></div>
+        </div>
+        <p class="hint" style="margin:14px 0 4px">Parent-facing report form dates (optional)</p>
+        <div class="grid2">
+          <div class="field"><label>School closed on</label><input id="set-closed-on" type="date" value="${esc(String(settings.school_closed_on || '').slice(0, 10))}"></div>
+          <div class="field"><label>Next term begins on</label><input id="set-next-term" type="date" value="${esc(String(settings.next_term_begins_on || '').slice(0, 10))}"></div>
         </div>
         <div class="field">
           <label>Logo (optional)</label>
@@ -59,7 +78,7 @@ function render(root, settings) {
               ${settings.logo ? '<button class="btn ghost sm" id="set-logo-remove" style="margin-top:6px">Remove logo</button>' : ''}
             </div>
           </div>
-          <p class="hint">Automatically shrunk to a small thumbnail for fast loading on report forms and class lists. Files over 5 MB are rejected outright.</p>
+          <p class="hint">Automatically shrunk to a small thumbnail for fast loading on report forms and class lists. Files over 1 MB are rejected outright — compress your image and try again.</p>
         </div>
       </div>
       <div class="modal-f" style="border-top:1px solid var(--line)"><button class="btn" id="set-save">Save settings</button></div>
@@ -72,7 +91,9 @@ function render(root, settings) {
     const file = e.target.files[0];
     if (!file) return;
     if (file.size > MAX_UPLOAD_BYTES) {
-      toast(`That image is too large (${Math.round(file.size / 1024 / 1024 * 10) / 10} MB) — please choose a file under 5 MB.`, 'err');
+      // Brief §1: "Show a clear warning... tell the user directly to
+      // compress their image to under 1MB and try again."
+      toast(`That image is too large (${Math.round(file.size / 1024 / 1024 * 10) / 10} MB) — please compress it to under 1 MB and try again.`, 'err');
       e.target.value = '';
       return;
     }
@@ -91,7 +112,8 @@ function render(root, settings) {
     toast('Logo will be removed on save.', 'warn');
   };
 
-  root.querySelector('#set-save').onclick = async () => {
+  const saveBtn = root.querySelector('#set-save');
+  saveBtn.onclick = async () => {
     const payload = {
       school_name: root.querySelector('#set-name').value,
       school_motto: root.querySelector('#set-motto').value,
@@ -100,10 +122,25 @@ function render(root, settings) {
       town: root.querySelector('#set-town').value,
       phone: root.querySelector('#set-phone').value,
       email: root.querySelector('#set-email').value,
+      school_closed_on: root.querySelector('#set-closed-on').value,
+      next_term_begins_on: root.querySelector('#set-next-term').value,
       logo: pendingLogo
     };
-    const res = await Db.settings.save(payload);
-    if (res.ok) { toast('Settings saved.', 'ok'); render(root, payload); } else toast(res.message, 'err');
+    // Brief §3: "Block saving of changes until all mandatory fields are
+    // filled in" — same 4 fields the red asterisks above flag, checked with
+    // the exact same helper printHeader.mjs/report screens already use, so
+    // "required" means one consistent thing everywhere in the app.
+    if (!isContactInfoComplete(payload)) {
+      toast('P.O. Box number, postal code, town and phone are all required before settings can be saved.', 'err');
+      return;
+    }
+    // Brief §2 (BUG): "Save Settings doesn't give immediate feedback... users
+    // click it repeatedly." See withBusy() in app.js — same one-line fix
+    // applied to every other standalone Save/action button in the app.
+    await withBusy(saveBtn, async () => {
+      const res = await Db.settings.save(payload);
+      if (res.ok) { toast('Settings saved.', 'ok'); render(root, payload); } else toast(res.message, 'err');
+    }, 'Saving…');
   };
 }
 

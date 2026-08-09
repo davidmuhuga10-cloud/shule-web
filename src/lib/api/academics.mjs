@@ -228,10 +228,13 @@ export function createAcademicsApi(supabase) {
         const { data, error } = await q;
         if (error) return err(error.message);
         const rows = (data || []).map((s) => ({ ...s, class_name: s.classes ? s.classes.name : '' }));
-        for (const s of rows) {
+        // System Fixes brief §13 (site-wide performance under load): one
+        // student-count round trip per stream, fired together instead of
+        // awaited one at a time — every stream's count is independent.
+        await Promise.all(rows.map(async (s) => {
           const { count } = await supabase.from('students').select('id', { count: 'exact', head: true }).eq('stream_id', s.id);
           s.student_count = count || 0;
-        }
+        }));
         rows.sort((a, b) => a.class_name !== b.class_name
           ? String(a.class_name).localeCompare(String(b.class_name))
           : String(a.name).localeCompare(String(b.name)));

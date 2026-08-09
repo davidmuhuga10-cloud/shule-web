@@ -4,7 +4,7 @@
  * to both admin and teacher (see NAV in app.js) — Zeraki-style, marking
  * attendance is a day-to-day teacher action, not admin-only.
  */
-import { esc, options, toast, renderPrereq, loader, state } from '../app.js';
+import { esc, options, toast, renderPrereq, loader, state, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 
 const STATUSES = [
@@ -86,12 +86,13 @@ async function renderMarkStudents(body, classes, sel) {
     rosterEl.querySelectorAll('.status-btn').forEach((b) => b.classList.toggle('on', b.dataset.status === 'present'));
   };
 
-  rosterEl.querySelector('#att-save').onclick = async () => {
+  const saveAttBtn = rosterEl.querySelector('#att-save');
+  saveAttBtn.onclick = () => withBusy(saveAttBtn, async () => {
     const records = Object.keys(marks).filter((sid) => marks[sid]).map((sid) => ({ student_id: sid, status: marks[sid] }));
     if (!records.length) { toast('Mark at least one student first.', 'err'); return; }
     const r = await Db.attendance.saveStudentAttendance({ date: sel.date, class_id: sel.class_id, records, marked_by: state.profile.staff_id });
     if (r.ok) toast(`Attendance saved for ${r.saved} student(s).`, 'ok'); else toast(r.message, 'err');
-  };
+  }, 'Saving…');
 }
 
 async function renderMarkStaff(body, sel) {
@@ -128,12 +129,13 @@ async function renderMarkStaff(body, sel) {
     rosterEl.querySelectorAll(`[data-staff="${b.dataset.staff}"]`).forEach((x) => x.classList.toggle('on', x === b));
   });
 
-  rosterEl.querySelector('#att-staff-save').onclick = async () => {
+  const saveStaffAttBtn = rosterEl.querySelector('#att-staff-save');
+  saveStaffAttBtn.onclick = () => withBusy(saveStaffAttBtn, async () => {
     const records = Object.keys(marks).filter((sid) => marks[sid]).map((sid) => ({ staff_id: sid, status: marks[sid] }));
     if (!records.length) { toast('Mark at least one staff member first.', 'err'); return; }
     const r = await Db.attendance.saveStaffAttendance({ date: sel.date, records, marked_by: state.profile.staff_id });
     if (r.ok) toast(`Attendance saved for ${r.saved} staff member(s).`, 'ok'); else toast(r.message, 'err');
-  };
+  }, 'Saving…');
 }
 
 async function renderSummary(body, classes, sel) {

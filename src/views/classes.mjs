@@ -17,7 +17,7 @@
  * gone — creating a brand-new subject now happens inline from the stream's
  * "+ Add subject" picker.
  */
-import { esc, modal, closeModal, toast, confirmAction, options, renderLoading } from '../app.js';
+import { esc, modal, closeModal, toast, confirmAction, options, renderLoading, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { STANDARD_CLASS_LEVELS } from '../lib/api/academics.mjs';
 
@@ -309,7 +309,7 @@ async function openAddSubjectModal(root, cls, stream, staff, alreadyAssignedIds)
       chip.classList.toggle('on');
     });
     const addBtn = document.getElementById('new-subject-add');
-    if (addBtn) addBtn.onclick = async () => {
+    if (addBtn) addBtn.onclick = () => withBusy(addBtn, async () => {
       const nameInput = document.getElementById('new-subject-name');
       const name = nameInput.value.trim();
       if (!name) return;
@@ -319,6 +319,6 @@ async function openAddSubjectModal(root, cls, stream, staff, alreadyAssignedIds)
       selected.add(String(res.data.id));
       toast('Subject added.', 'ok');
       renderModal();
-    };
+    }, 'Adding…');
   }
 }

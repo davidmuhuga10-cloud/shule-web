@@ -488,6 +488,11 @@ create table public.exams (
   exam_type text not null default 'written',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  -- System Fixes brief §8: soft-delete instead of an immediate hard delete —
+  -- a deleted exam moves to the Deleted Exams submodule for 30 days (still
+  -- restorable), then gets permanently purged. NULL = not deleted, still
+  -- shown normally in Exam Desk (0013_deleted_exams).
+  deleted_at timestamptz,
   -- 'summative'/'formative'/'cat'/'mock' are the pre-0012 types, kept valid
   -- (nothing already saved under them breaks) but no longer offered in the
   -- UI, which now offers Zeraki-style types instead (0012_exam_workflow_v2).
@@ -499,6 +504,7 @@ create table public.exams (
 create trigger trg_exams_updated_at before update on public.exams
   for each row execute function public.set_updated_at();
 create index idx_exams_school on public.exams(school_id);
+create index idx_exams_deleted_at on public.exams(deleted_at) where deleted_at is not null;
 
 -- Phase 2h (brief §7.1): which classes were explicitly chosen to sit a given
 -- exam — purely a "should this class show on the exam's board at all"

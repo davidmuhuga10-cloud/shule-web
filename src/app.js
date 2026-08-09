@@ -20,9 +20,8 @@ import { viewBulkUpload } from './views/bulkUpload.mjs';
 import { viewStaffHub } from './views/staffTeachers.mjs';
 import { viewGrading } from './views/gradingScales.mjs';
 import { viewExamsHub } from './views/examsHub.mjs';
-import { viewExams } from './views/exams.mjs';
-import { viewMarks } from './views/marksEntry.mjs';
-import { viewPublishing } from './views/publishing.mjs';
+import { viewExamDesk } from './views/examDesk.mjs';
+import { viewDeletedExams } from './views/deletedExams.mjs';
 import { viewReportsHub } from './views/reportsHub.mjs';
 import { viewBroadsheet } from './views/broadsheet.mjs';
 import { viewExamAnalysis } from './views/examAnalysis.mjs';
@@ -183,6 +182,33 @@ export function options(list, valKey, labKey, selected, placeholder) {
 }
 
 /* ------------------------------ Modal ------------------------------------ */
+// System Fixes brief §2 (BUG): "Clicking 'Save Settings' doesn't give
+// immediate feedback... users click it repeatedly, and multiple duplicate
+// save actions go through." Fix, applied site-wide per the brief's own
+// instruction ("this should be a general pattern used everywhere in the
+// system, not just on the Save Settings button") — ANY button that fires a
+// background action should freeze + show a busy label the instant it's
+// clicked, and only re-enable on success/failure. modal()'s OK button
+// already did exactly this inline (see below); this is that same logic
+// pulled out so every OTHER standalone Save/action button in the app
+// (schoolSettings.mjs, marksEntry.mjs, attendance.mjs, classes.mjs,
+// gradingScales.mjs, messaging.mjs, ...) can use the identical one-line
+// wrapper instead of hand-rolling it again per button.
+export async function withBusy(btn, fn, busyLabel) {
+  if (!btn || btn.disabled) return;
+  const originalLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = busyLabel || 'Please wait…';
+  try {
+    await fn();
+  } finally {
+    if (document.body.contains(btn)) {
+      btn.disabled = false;
+      btn.textContent = originalLabel;
+    }
+  }
+}
+
 export function modal(opts) {
   const wide = opts.wide ? ' wide' : '';
   const foot = opts.footer === false ? '' :
@@ -197,29 +223,13 @@ export function modal(opts) {
     </div></div>`;
   $('#modal-back').onclick = (e) => { if (e.target.id === 'modal-back') closeModal(); };
   const cancelBtn = $('#modal-cancel'); if (cancelBtn) cancelBtn.onclick = closeModal;
-  // Perf/UX fix: every "Save"-style action in the app goes through this one
-  // modal() helper, so this is the single place to fix the "click Save
-  // twice while it's still saving -> 'already exists' error" bug class —
-  // the button disables and shows a busy label the instant it's clicked,
-  // for every modal in the app, not just Add Class. If onOk doesn't close
-  // the modal (e.g. it returned early after a validation error), the button
-  // is restored so the person can fix something and try again.
+  // Every "Save"-style action in the app goes through this one modal()
+  // helper, so this is the single place that fixes the "click Save twice
+  // while it's still saving -> 'already exists' error" bug class for every
+  // modal in the app, not just Add Class — see withBusy() above.
   if (opts.okLabel && opts.onOk) {
     const okBtn = $('#modal-ok');
-    const originalLabel = okBtn.textContent;
-    okBtn.onclick = async () => {
-      if (okBtn.disabled) return;
-      okBtn.disabled = true;
-      okBtn.textContent = opts.busyLabel || 'Please wait…';
-      try {
-        await opts.onOk();
-      } finally {
-        if (document.body.contains(okBtn)) {
-          okBtn.disabled = false;
-          okBtn.textContent = originalLabel;
-        }
-      }
-    };
+    okBtn.onclick = () => withBusy(okBtn, opts.onOk, opts.busyLabel || 'Please wait…');
   }
   if (opts.onOpen) opts.onOpen();
 }
@@ -605,8 +615,8 @@ const NAV = {
 // just have them as icons" — exams-hub/reports-hub/settings are the actual
 // sidebar entries now; these are what their icon tiles/tabs link to).
 const HIDDEN_ALLOWED_ROUTES = {
-  admin: ['bulk-upload', 'exams', 'marks', 'publishing', 'grading', 'class-list', 'broadsheet', 'reports', 'transcript', 'certificates', 'exam-analysis', 'score-sheet'],
-  teacher: ['bulk-upload', 'exams', 'marks', 'publishing', 'class-list', 'broadsheet', 'reports', 'transcript', 'certificates', 'exam-analysis', 'score-sheet']
+  admin: ['bulk-upload', 'exam-desk', 'deleted-exams', 'grading', 'class-list', 'broadsheet', 'reports', 'transcript', 'certificates', 'exam-analysis', 'score-sheet'],
+  teacher: ['bulk-upload', 'exam-desk', 'class-list', 'broadsheet', 'reports', 'transcript', 'certificates', 'exam-analysis', 'score-sheet']
 };
 
 function allowedRoutes(role) {
@@ -662,9 +672,8 @@ const ROUTES = {
   'staff-teachers': viewStaffHub,
   'grading': viewGrading,
   'exams-hub': viewExamsHub,
-  'exams': viewExams,
-  'marks': viewMarks,
-  'publishing': viewPublishing,
+  'exam-desk': viewExamDesk,
+  'deleted-exams': viewDeletedExams,
   'reports-hub': viewReportsHub,
   'broadsheet': viewBroadsheet,
   'exam-analysis': viewExamAnalysis,

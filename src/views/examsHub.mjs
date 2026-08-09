@@ -5,16 +5,21 @@
  * flat sidebar entry lands here first; each tile is just a `go()` to an
  * existing, unchanged screen — nothing about how those screens work
  * changes, only how you get to them.
+ *
+ * System Fixes brief §14: Manage Exams, Enter Marks and Publish Results are
+ * now ONE combined module, "Exam Desk" — no more separate tiles for those
+ * three. Brief §8 adds Deleted Exams (admin-only, like Grading Scales).
  */
 import { go, state } from '../app.js';
 
 export async function viewExamsHub(root) {
   const isAdmin = state.profile && state.profile.role === 'admin';
   const tiles = [
-    { ico: '📝', title: 'Manage Exams', desc: 'Create an exam, choose classes, and track marks entry through to publishing.', route: 'exams' },
-    { ico: '✍️', title: 'Enter Marks', desc: "Record a class's marks for a subject.", route: 'marks' },
-    { ico: '✅', title: 'Publish Results', desc: 'Review and publish marks so students and parents can see them.', route: 'publishing' },
-    ...(isAdmin ? [{ ico: '🎯', title: 'Grading Scales', desc: 'The grade bands and points used to grade every score.', route: 'grading' }] : [])
+    { ico: '🗂️', title: 'Exam Desk', desc: 'Create an exam, choose classes, enter marks, and publish results — everything in one place.', route: 'exam-desk' },
+    ...(isAdmin ? [
+      { ico: '🗑️', title: 'Deleted Exams', desc: 'Exams deleted in the last 30 days — restore one before it\'s permanently removed.', route: 'deleted-exams' },
+      { ico: '🎯', title: 'Grading Scales', desc: 'The grade bands and points used to grade every score.', route: 'grading' }
+    ] : [])
   ];
 
   root.innerHTML = `

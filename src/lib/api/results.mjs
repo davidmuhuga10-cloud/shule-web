@@ -33,8 +33,12 @@ import { getEffectiveClassSubjectIds, getEffectiveClassSubjectIdsBatch } from '.
 // feature to be scoped in detail later"); selecting it today just creates a
 // normal single exam shell, same as every other type.
 const EXAM_TYPES = ['written', 'consolidated', 'supplementary', 'kpsea_kjsea', 'year_average'];
+// System Fixes brief §6: renamed labels only — the stored exam_type values
+// ('written'/'supplementary') are unchanged, so nothing already saved needs
+// migrating, existing filters/branches elsewhere keyed on these values keep
+// working exactly as before.
 export const EXAM_TYPE_LABELS = {
-  written: 'Written Test', consolidated: 'Consolidated Exam', supplementary: 'Supplementary Exam',
+  written: 'Normal Exam', consolidated: 'Consolidated Exam', supplementary: 'CAT',
   kpsea_kjsea: 'KPSEA/KJSEA', year_average: 'Year Average'
 };
 export const RANKING_CRITERIA_LABELS = { mean_marks: 'Mean marks', mean_points: 'Mean points' };
@@ -63,6 +67,20 @@ async function setSubmissionStatus(supabase, examId, classId, subjectId, nextSta
     .insert({ exam_id: examId, class_id: classId, subject_id: subjectId, status: nextStatus }).select().single();
   if (error) return err(error.message || 'You do not have permission to do that.');
   return ok(data);
+}
+
+/** Shared by listDeletedExams()/purgeExpiredDeletedExams() below — a plain
+ *  module-level helper (not `this.`) so it works the same whether called as
+ *  a method or destructured, matching every other cross-method helper in
+ *  this file (setSubmissionStatus, computeClassAverage). */
+async function purgeExpired(supabase) {
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: expired } = await supabase.from('exams').select('id').not('deleted_at', 'is', null).lt('deleted_at', cutoff);
+  const ids = (expired || []).map((e) => e.id);
+  if (!ids.length) return ok(null, { purged: 0 });
+  const { error } = await supabase.from('exams').delete().in('id', ids);
+  if (error) return err(error.message);
+  return ok(null, { purged: ids.length });
 }
 
 /** Step 10's "Deviation Exam" — a raw class average (unweighted paper-
@@ -102,8 +120,11 @@ async function computeClassAverage(supabase, examId, classId) {
 
 export function createResultsApi(supabase, gradingApi) {
   return {
+    // System Fixes brief §8: a soft-deleted exam (exams.deleted_at set) is
+    // never returned by the normal exam list — it only shows up in Deleted
+    // Exams (listDeletedExams below) until it's restored or auto-purged.
     async listExams() {
-      const { data, error } = await supabase.from('exams').select('*, academic_years(name), terms(name)');
+      const { data, error } = await supabase.from('exams').select('*, academic_years(name), terms(name)').is('deleted_at', null);
       if (error) return err(error.message);
       const rows = (data || []).map((e) => ({
         ...e,
@@ -187,11 +208,79 @@ export function createResultsApi(supabase, gradingApi) {
       return ok(saved);
     },
 
+    // System Fixes brief §8: hard-delete, kept only for purgeExpiredDeletedExams()
+    // (and the mock-supabase test path where an unmigrated/no-column call
+    // still needs to work) — day-to-day "Delete" on an exam card now goes
+    // through softDeleteExam() below instead, so an admin gets a 30-day
+    // undo window rather than instant, unrecoverable loss (results
+    // cascade-delete automatically once this actually runs — ON DELETE
+    // CASCADE in schema.sql).
     async deleteExam(id) {
-      // results cascade-delete automatically (ON DELETE CASCADE in schema.sql).
       const { error } = await supabase.from('exams').delete().eq('id', id);
       if (error) return err(error.message);
       return ok(true);
+    },
+
+    /** Soft-delete: the exam disappears from listExams()/the Exam Desk
+     *  board immediately, but stays fully intact in the database — Deleted
+     *  Exams (below) is where it lives for up to 30 days, restorable at
+     *  any point in that window. */
+    async softDeleteExam(id) {
+      if (!id) return err('Missing exam.');
+      const { data, error } = await supabase.from('exams').update({ deleted_at: new Date().toISOString() }).eq('id', id).select().single();
+      if (error) return err(error.message);
+      return ok(data);
+    },
+
+    /** Deleted Exams submodule's list — every soft-deleted exam still
+     *  within its 30-day window, newest-deleted first, each with
+     *  days_remaining so the UI can show "purges in N days". Opportunistically
+     *  sweeps anything that's already past 30 days first (purgeExpiredDeletedExams)
+     *  since this app has no background cron — a school that never opens
+     *  Deleted Exams simply keeps old entries a little longer than 30 days,
+     *  which is harmless (they're already invisible everywhere else), and
+     *  the moment anyone does open it, the sweep catches up instantly. */
+    async listDeletedExams() {
+      await purgeExpired(supabase);
+      const { data, error } = await supabase.from('exams').select('*, academic_years(name), terms(name)').not('deleted_at', 'is', null);
+      if (error) return err(error.message);
+      const now = Date.now();
+      const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+      const rows = (data || []).map((e) => {
+        const deletedAt = new Date(e.deleted_at).getTime();
+        const daysRemaining = isNaN(deletedAt) ? null : Math.max(0, Math.ceil((deletedAt + THIRTY_DAYS_MS - now) / (24 * 60 * 60 * 1000)));
+        return {
+          ...e,
+          academic_year_name: e.academic_years ? e.academic_years.name : '',
+          term_name: e.terms ? e.terms.name : '',
+          days_remaining: daysRemaining
+        };
+      });
+      rows.sort((a, b) => String(b.deleted_at).localeCompare(String(a.deleted_at)));
+      return ok(rows);
+    },
+
+    /** Undo — clears deleted_at so the exam reappears on the Exam Desk
+     *  board exactly as it was (nothing about it was ever touched other
+     *  than the timestamp). */
+    async restoreExam(id) {
+      if (!id) return err('Missing exam.');
+      const { data, error } = await supabase.from('exams').update({ deleted_at: null }).eq('id', id).select().single();
+      if (error) return err(error.message);
+      return ok(data);
+    },
+
+    /** Section 8: "After 30 days, [deleted exams] should be automatically
+     *  and completely purged from the database." No server-side cron exists
+     *  in this app today, so this runs as a lazy sweep (see listDeletedExams
+     *  above) rather than a true background job — functionally equivalent
+     *  from an admin's point of view (nothing past 30 days is ever visible
+     *  or restorable again), just not driven by a clock running with nobody
+     *  watching. Exposed standalone too, in case a real scheduled task is
+     *  wired up later (e.g. a Supabase pg_cron job calling this same logic
+     *  in SQL, or a scheduled Netlify function). */
+    async purgeExpiredDeletedExams() {
+      return purgeExpired(supabase);
     },
 
     /** Load the entry grid: every student in the chosen class(+stream), with
@@ -346,19 +435,23 @@ export function createResultsApi(supabase, gradingApi) {
       if (!q.exam_id) return err('Please choose an exam.');
       if (!q.class_id) return err('Please choose a class.');
 
-      const { data: exam } = await supabase.from('exams').select('*').eq('id', q.exam_id).maybeSingle();
+      // System Fixes brief §12/§13: these three don't depend on each other
+      // — used to be three sequential round trips before anything else
+      // could start, now one wave.
+      const [{ data: exam }, { data: examClass }, subjectIdsFromAssignments] = await Promise.all([
+        supabase.from('exams').select('*').eq('id', q.exam_id).maybeSingle(),
+        // Step 10: publish-time settings for this (exam, class) — ranking
+        // criteria, deviation exam, overall grading system, minimum learning
+        // areas — chosen via savePublishSettings()/the Publish Results
+        // screen. All optional; a class that's never been through that
+        // step falls back to exactly today's single global behaviour below.
+        supabase.from('exam_classes').select('*').eq('exam_id', q.exam_id).eq('class_id', q.class_id).maybeSingle(),
+        getEffectiveClassSubjectIds(supabase, q.class_id)
+      ]);
       if (!exam) return err('Exam not found.');
       const examOutOf = Number(exam.out_of) || 100;
 
-      // Step 10: publish-time settings for this (exam, class) — ranking
-      // criteria, deviation exam, overall grading system, minimum learning
-      // areas — chosen via savePublishSettings()/the Publish Results screen.
-      // All optional; a class that's never been through that step falls
-      // back to exactly today's single global behaviour below.
-      const { data: examClass } = await supabase.from('exam_classes').select('*')
-        .eq('exam_id', q.exam_id).eq('class_id', q.class_id).maybeSingle();
-
-      let subjectIds = await getEffectiveClassSubjectIds(supabase, q.class_id);
+      let subjectIds = subjectIdsFromAssignments;
       if (!subjectIds.length) {
         const { data: examResults } = await supabase.from('results').select('subject_id').eq('exam_id', q.exam_id).eq('class_id', q.class_id);
         subjectIds = [...new Set((examResults || []).map((r) => r.subject_id))];
@@ -398,15 +491,20 @@ export function createResultsApi(supabase, gradingApi) {
 
       let studentQuery = supabase.from('students').select('*').eq('class_id', q.class_id).eq('status', 'active');
       if (q.stream_id) studentQuery = studentQuery.eq('stream_id', q.stream_id);
-      const { data: students } = await studentQuery;
+      // System Fixes brief §12/§13: `students` and `results` don't depend on
+      // each other (or on subjects/submissions/papers above) — fired
+      // together instead of `results` waiting its turn after streamMap is
+      // built below, even though nothing in between actually needs it yet.
+      const [{ data: students }, { data: results }] = await Promise.all([
+        studentQuery,
+        supabase.from('results').select('*').eq('exam_id', q.exam_id).eq('class_id', q.class_id)
+      ]);
 
       const streamIds = [...new Set((students || []).map((s) => s.stream_id).filter(Boolean))];
       const { data: streamRows } = streamIds.length
         ? await supabase.from('streams').select('id, name').in('id', streamIds)
         : { data: [] };
       const streamMap = {}; (streamRows || []).forEach((s) => { streamMap[s.id] = s.name; });
-
-      const { data: results } = await supabase.from('results').select('*').eq('exam_id', q.exam_id).eq('class_id', q.class_id);
 
       // Combine per-paper rows into one effective score per (student, subject) —
       // normalize each paper's own out_of, apply its weight, scale to the
@@ -649,18 +747,18 @@ export function createResultsApi(supabase, gradingApi) {
       const examClassByClassId = {};
       (examClassRows || []).forEach((r) => { examClassByClassId[r.class_id] = r; });
 
-      // Bug fix (feature brief §8): a class explicitly added to an exam but
-      // with zero enrolled students was still showing up as "pending" marks
-      // entry (e.g. "0/9 subjects have marks") even though there is, and can
-      // be, nothing to enter — the marks-entry screen for that class already
-      // correctly says "No students found". Drop any class with zero active
-      // students from the board entirely rather than showing a misleading
-      // pending status for it; it starts appearing again automatically the
-      // moment a student is actually enrolled into it.
+      // A class explicitly added to an exam but with zero enrolled students
+      // has nothing to enter — the marks-entry screen for it already
+      // correctly says "No students found". An earlier version of this
+      // fix dropped such a class from the board ENTIRELY, but that reads
+      // exactly like "my selected class vanished / wasn't saved" (System
+      // Fixes brief §7's bug report) even though exam_classes still has the
+      // row — saveExam never actually loses anything. Fixed properly now:
+      // keep the class on the board with its own honest 'no_students'
+      // status (see below) instead of a misleading "pending marks" status
+      // OR silently disappearing.
       const { data: activeStudentRows } = await supabase.from('students').select('class_id').eq('status', 'active').in('class_id', classIds);
       const classIdsWithStudents = new Set((activeStudentRows || []).map((r) => r.class_id));
-      classIds = classIds.filter((cid) => classIdsWithStudents.has(cid));
-      if (!classIds.length) return ok([]);
 
       const { data: classes } = await supabase.from('classes').select('id, name').in('id', classIds);
       const classMap = indexById(classes || []);
@@ -706,7 +804,8 @@ export function createResultsApi(supabase, gradingApi) {
         // distinct from "Published" (visible on request) since parents
         // haven't necessarily been proactively notified yet.
         let status;
-        if (subjectsTotal === 0) status = 'no_subjects';
+        if (!classIdsWithStudents.has(cid)) status = 'no_students';
+        else if (subjectsTotal === 0) status = 'no_subjects';
         else if (subjectsPublished >= subjectsTotal) status = ec.released_at ? 'released' : 'published';
         else if (subjectsWithMarks >= subjectsTotal) status = 'ready_to_publish';
         else if (subjectsWithMarks > 0) status = 'in_progress';
@@ -775,12 +874,17 @@ export function createResultsApi(supabase, gradingApi) {
       const { data: examResults } = await supabase.from('results').select('subject_id').eq('exam_id', examId).eq('class_id', classId);
       const subjectIds = [...new Set((examResults || []).map((r) => r.subject_id))];
       if (!subjectIds.length) return err('No marks have been entered for this class yet.');
+      // System Fixes brief §12/§13: each subject's publish is fully
+      // independent (its own result_submissions row, no cross-subject
+      // read/write) — used to be awaited one at a time in a for-loop, which
+      // for a class with a dozen-plus subjects meant that many sequential
+      // round trips just to click "Publish Results." Firing them all at
+      // once and waiting on the whole batch cuts that to the time of the
+      // single slowest one.
+      const outcomes = await Promise.all(subjectIds.map((subjectId) => setSubmissionStatus(supabase, examId, classId, subjectId, 'published')));
       let published = 0;
       const failures = [];
-      for (const subjectId of subjectIds) {
-        const r = await setSubmissionStatus(supabase, examId, classId, subjectId, 'published');
-        if (r.ok) published++; else failures.push({ subject_id: subjectId, message: r.message });
-      }
+      outcomes.forEach((r, i) => { if (r.ok) published++; else failures.push({ subject_id: subjectIds[i], message: r.message }); });
       return ok(null, { published, total: subjectIds.length, failures });
     },
 
@@ -839,12 +943,12 @@ export function createResultsApi(supabase, gradingApi) {
       const { data: submissions } = await supabase.from('result_submissions').select('subject_id, status').eq('exam_id', examId).eq('class_id', classId);
       const toReopen = (submissions || []).filter((s) => s.status === 'published').map((s) => s.subject_id);
       if (!toReopen.length) return err('Nothing published yet for this class.');
+      // Same fix as publishExam() above — independent per-subject writes,
+      // fired together instead of one at a time.
+      const outcomes = await Promise.all(toReopen.map((subjectId) => setSubmissionStatus(supabase, examId, classId, subjectId, 'draft')));
       let reopened = 0;
       const failures = [];
-      for (const subjectId of toReopen) {
-        const r = await setSubmissionStatus(supabase, examId, classId, subjectId, 'draft');
-        if (r.ok) reopened++; else failures.push({ subject_id: subjectId, message: r.message });
-      }
+      outcomes.forEach((r, i) => { if (r.ok) reopened++; else failures.push({ subject_id: toReopen[i], message: r.message }); });
       const { data: ec } = await supabase.from('exam_classes').select('id').eq('exam_id', examId).eq('class_id', classId).maybeSingle();
       if (ec) await supabase.from('exam_classes').update({ released_at: null, released_by: null }).eq('id', ec.id);
       return ok(null, { reopened, total: toReopen.length, failures });

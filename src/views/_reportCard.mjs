@@ -1,4 +1,5 @@
 import { esc } from '../app.js';
+import { printHeaderHtml } from '../lib/printHeader.mjs';
 
 /**
  * Renders a Report Form (report card) into `container` from a
@@ -53,19 +54,12 @@ export function renderReportCard(container, data, extra) {
 
   const initials = (s.full_name || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
 
-  const logoHtml = settings.logo ? `<img class="logo-thumb" src="${settings.logo}">` : `<div class="logo-placeholder">🏫</div>`;
-
   container.innerHTML = `
     <div class="report">
-      ${settings.school_name ? `
       <div class="r-head">
-        ${logoHtml}
-        <div>
-          <h2>${esc(settings.school_name)}</h2>
-          <div class="muted">${settings.po_box ? 'P.O. Box ' + esc(settings.po_box) + ' · ' : ''}${settings.phone ? esc(settings.phone) + ' · ' : ''}${esc(settings.email || '')}</div>
-        </div>
-      </div>` : ''}
-      <div class="r-title-bar">ACADEMIC REPORT FORM — ${esc(s.class_name)}${s.stream_name ? ' ' + esc(s.stream_name) : ''} — ${esc(exam.name)}${data.term_name ? ' · ' + esc(data.term_name) : ''}${data.session_name ? ' · ' + esc(data.session_name) : ''}</div>
+        ${printHeaderHtml(settings, 'Academic Report Form')}
+      </div>
+      <div class="r-title-bar">${esc(s.class_name)}${s.stream_name ? ' ' + esc(s.stream_name) : ''} — ${esc(exam.name)}${data.term_name ? ' · ' + esc(data.term_name) : ''}${data.session_name ? ' · ' + esc(data.session_name) : ''}</div>
       <div class="r-student-row">
         <div class="r-avatar">${esc(initials)}</div>
         <div class="r-meta">
@@ -101,10 +95,31 @@ export function renderReportCard(container, data, extra) {
           }).join('') || '<tr><td colspan="6" class="muted center">No marks recorded for this exam.</td></tr>'}</tbody>
         </table></div>
         ${remarksHtml(s, data.overall_grade, bands)}
+        ${termDatesHtml(settings)}
         ${descriptorsHtml(bands)}
       </div>
     </div>
   `;
+}
+
+/** Brief §16: two optional parent-facing fields — "School Closed On" and
+ *  "Next Term Begins On" — set (with a date picker) in School Settings and
+ *  simply displayed here when present; nothing prints when a school hasn't
+ *  set either one, since both are explicitly optional. */
+function fmtReportDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+function termDatesHtml(settings) {
+  const closed = fmtReportDate(settings.school_closed_on);
+  const nextTerm = fmtReportDate(settings.next_term_begins_on);
+  if (!closed && !nextTerm) return '';
+  return `<div class="r-term-dates">
+    ${closed ? `<div>School closes on: <b>${esc(closed)}</b></div>` : ''}
+    ${nextTerm ? `<div>Next term begins on: <b>${esc(nextTerm)}</b></div>` : ''}
+  </div>`;
 }
 
 /** Auto-generated Class Teacher's / Principal's remarks (feature brief:
@@ -170,19 +185,30 @@ function remarksHtml(student, overallGrade, bands) {
 
 /** The "Grade Descriptors" reference table — whatever bands the school's
  *  default grading scale actually has (not hard-coded to CBC's 4/8 bands),
- *  so a custom scale still shows its own real ranges here. */
+ *  so a custom scale still shows its own real ranges here.
+ *
+ *  System Fixes brief §10: TRANSPOSED — performance levels run across as
+ *  COLUMNS instead of down as rows (image4 -> image5 in the brief), so this
+ *  table takes a fixed 2 rows of vertical space no matter how many bands the
+ *  school's scale has, instead of growing one row taller per band — the
+ *  single biggest contributor to the form spilling onto a second printed
+ *  page for scales with a lot of bands (e.g. CBC's 8-band default). Each
+ *  band's optional remark moves into its column header (under the grade
+ *  label) instead of being dropped, so no information is lost in the swap. */
 function descriptorsHtml(bands) {
   if (!bands.length) return '';
   return `
     <div class="r-descriptors">
       <div class="r-descriptors-h">Grade Descriptors</div>
-      <div class="table-wrap"><table class="report-grid">
-        <thead><tr><th>Performance Level</th><th class="num">Points</th><th>Range (%)</th></tr></thead>
-        <tbody>${bands.map((b) => `<tr>
-          <td><b>${esc(b.grade_label)}</b>${b.remark ? ' — ' + esc(b.remark) : ''}</td>
-          <td class="num">${esc(b.points === null || b.points === undefined ? '—' : b.points)}</td>
-          <td>${esc(b.min_score)}–${esc(b.max_score)}</td>
-        </tr>`).join('')}</tbody>
+      <div class="table-wrap"><table class="report-grid r-descriptors-grid">
+        <thead><tr>
+          <th>Performance Level</th>
+          ${bands.map((b) => `<th class="num"><b>${esc(b.grade_label)}</b>${b.remark ? `<div class="r-descriptor-remark">${esc(b.remark)}</div>` : ''}</th>`).join('')}
+        </tr></thead>
+        <tbody>
+          <tr><td>Points</td>${bands.map((b) => `<td class="num">${esc(b.points === null || b.points === undefined ? '—' : b.points)}</td>`).join('')}</tr>
+          <tr><td>Range (%)</td>${bands.map((b) => `<td class="num">${esc(b.min_score)}–${esc(b.max_score)}</td>`).join('')}</tr>
+        </tbody>
       </table></div>
     </div>
   `;

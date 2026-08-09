@@ -253,6 +253,13 @@ table.data td.num,table.data th.num{text-align:center}
 .mark-list-grid th.sum-col,.mark-list-grid td.sum-col{width:50px}
 .mark-list-grid tr:last-child td{border-bottom:1.3px solid var(--grid-ink)}
 .mark-cell .mark-grade{color:var(--grid-text);font-weight:600;font-size:10.5px}
+/* System Fixes brief §15: Mark List summary stat tables (Class Grade
+   Summary / Gender Grade Summary side by side, Grade Breakdown by Subject
+   below), replacing the old single "Class average" line. */
+.bs-summary{padding:16px 18px}
+.bs-summary-h{font-weight:700;font-size:12.5px;margin-bottom:6px}
+.bs-summary-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+@media (max-width:720px){.bs-summary-grid{grid-template-columns:1fr}}
 
 /* Shared printable-report header (feature brief §2/§4): logo far left,
    school name centered with the report title below it, address block far
@@ -416,10 +423,13 @@ table.data td.num,table.data th.num{text-align:center}
 /* Redesigned Zeraki-style report form (feature brief "Report Forms and Merit
    List Design" — condensed, gridded, everything fits one printable page). */
 .report{background:#fff;border:1px solid var(--line);border-radius:12px;padding:0;max-width:800px;margin:0 auto;overflow:hidden}
-.report .r-head{display:flex;gap:14px;align-items:center;padding:18px 22px;border-bottom:1px solid var(--line)}
-.report .r-head h2{font-size:16px}
-.report .r-head .muted{font-size:12px}
-.report .r-title-bar{background:var(--brand);color:#fff;text-align:center;font-weight:750;letter-spacing:.2px;padding:9px 14px;font-size:13.5px}
+/* System Fixes brief §9: report form header now uses the same shared
+   printHeaderHtml() component as Mark List/Class List (logo far left,
+   school name centered, address block on the right) instead of its own
+   bespoke left-aligned layout — .print-header (main.css:261) supplies the
+   flex/border/padding, this just adds the report card's own outer inset. */
+.report .r-head{padding:16px 22px 0}
+.report .r-title-bar{background:var(--brand);color:#fff;text-align:center;font-weight:750;letter-spacing:.2px;padding:9px 14px;font-size:13.5px;margin-top:12px}
 .report .r-student-row{display:flex;gap:18px;align-items:flex-start;padding:16px 22px;border-bottom:1px solid var(--line)}
 .report .r-avatar{width:56px;height:56px;border-radius:50%;background:var(--brand);color:#fff;display:grid;place-items:center;font-weight:750;font-size:18px;flex:none}
 .report .r-meta{display:grid;grid-template-columns:1fr 1fr;gap:6px 22px;font-size:12.5px;flex:1;min-width:200px}
@@ -427,27 +437,40 @@ table.data td.num,table.data th.num{text-align:center}
 .report .r-chart{flex:none;width:220px}
 .report .r-chart .r-chart-title{font-size:10px;color:var(--muted);text-align:center;margin-bottom:2px}
 .report .r-summary{display:grid;grid-template-columns:repeat(5,1fr);gap:0;border-bottom:1px solid var(--line)}
-.report .r-summary .box{padding:12px 8px;text-align:center;border-right:1px solid var(--line)}
+.report .r-summary .box{padding:9px 8px;text-align:center;border-right:1px solid var(--line)}
 .report .r-summary .box:last-child{border-right:none}
 .report .r-summary .box .v{font-size:18px;font-weight:750;color:var(--brand)}
 .report .r-summary .box .l{font-size:10px;color:var(--muted);margin-top:2px}
-.report .r-body{padding:16px 22px}
+.report .r-body{padding:14px 22px}
 .report .report-grid{width:100%;border-collapse:collapse;font-size:12px}
 .report .report-grid th,.report .report-grid td{border:1px solid var(--line);padding:7px 8px}
-.report .report-grid th{font-size:10.5px;background:#f7f9fb}
+/* Brief §11: match the header treatment Mark List/Class List already use
+   (.mark-list-grid th, main.css:243) — uppercase, letter-spaced, bold —
+   instead of a slightly different plain-case style just on this report. */
+.report .report-grid th{font-size:10.5px;font-weight:800;background:#f7f9fb;text-transform:uppercase;letter-spacing:.3px}
 .pos-pill{background:var(--accent);color:#fff;font-weight:750;padding:2px 9px;border-radius:14px;font-size:12px}
 /* Class Teacher's / Principal's remarks + Grade Descriptors, at the bottom
    of the report form (feature brief: "remarks are a must" — always
    auto-generated from the learner's overall performance band, not a blank
    free-text box; a signature line is printed instead). */
-.report .r-remarks{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
-.report .r-remark-box{border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:#f7f9fb}
+.report .r-remarks{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px}
+.report .r-remark-box{border:1px solid var(--line);border-radius:8px;padding:10px 14px;background:#f7f9fb}
 .report .r-remark-h{font-weight:700;font-size:12px;margin-bottom:6px}
-.report .r-remark-box p{margin:0;font-size:12.5px;line-height:1.5}
-.report .r-sig{margin-top:14px;font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.report .r-remark-box p{margin:0;font-size:12.5px;line-height:1.45}
+.report .r-sig{margin-top:10px;font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
 .report .r-sig-line{flex:1;border-bottom:1px dashed var(--line);height:1px}
-.report .r-descriptors{margin-top:18px}
-.report .r-descriptors-h{font-weight:700;font-size:13px;margin-bottom:8px}
+.report .r-descriptors{margin-top:12px}
+.report .r-descriptors-h{font-weight:700;font-size:13px;margin-bottom:6px}
+/* System Fixes brief §10: transposed Grade Descriptors table (bands as
+   columns, not rows) — tighter cell padding and a smaller remark line under
+   each grade label, since a scale with many bands (e.g. CBC's 8) now needs
+   many narrow columns instead of a handful of wide rows. */
+.report .r-descriptors-grid th,.report .r-descriptors-grid td{padding:5px 6px}
+.report .r-descriptor-remark{font-weight:400;font-size:8.5px;color:var(--muted);margin-top:2px;white-space:normal}
+/* System Fixes brief §16: optional parent-facing "School closed on" / "Next
+   term begins on" lines, printed only when set — small, unobtrusive, right
+   above the signatures. */
+.report .r-term-dates{display:flex;gap:22px;margin-top:10px;font-size:11px;color:var(--muted)}
 /* Column-selection checkboxes (class list print options) */
 .chk-row{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:2px}
 .chk{display:flex;align-items:center;gap:7px;font-weight:500;font-size:13px;cursor:pointer;color:var(--ink)}

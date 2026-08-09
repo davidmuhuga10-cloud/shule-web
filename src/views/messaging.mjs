@@ -6,7 +6,7 @@
  * SMS" tab since the real Africa's Talking billing integration is a later
  * sprint.
  */
-import { esc, options, toast, renderPrereq, loader, fmtDate } from '../app.js';
+import { esc, options, toast, renderPrereq, loader, fmtDate, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { groupMessagesByBatch } from '../lib/api/messaging.mjs';
 import { takeNavIntent } from '../lib/navIntent.mjs';
@@ -239,14 +239,14 @@ async function renderBuySms(body) {
   `;
 
   body.querySelectorAll('#sms-packages [data-credits]').forEach((chip) => {
-    chip.onclick = async () => {
+    chip.onclick = () => withBusy(chip, async () => {
       const credits = Number(chip.dataset.credits) || 0;
       const current = Number(balance) || 0;
       const r = await Db.settings.save({ sms_credit_balance: String(current + credits) });
       if (!r.ok) { toast(r.message, 'err'); return; }
       toast(`Added ${credits.toLocaleString()} credits (demo — no real billing yet).`, 'ok');
       renderBuySms(body);
-    };
+    }, 'Adding…');
   });
 }
 

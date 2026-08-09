@@ -1,4 +1,4 @@
-import { esc, modal, closeModal, toast, confirmAction } from '../app.js';
+import { esc, modal, closeModal, toast, confirmAction, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { CBC_COMPETENCY_SCALE_NAME } from '../lib/api/grading.mjs';
 
@@ -42,22 +42,23 @@ async function render(root) {
   root.querySelector('#add-scale').onclick = () => openScaleModal(root);
   const emptyBtn = root.querySelector('#empty-add-scale');
   if (emptyBtn) emptyBtn.onclick = () => openScaleModal(root);
-  const doLoadCbcScale = async () => {
+  const doLoadCbcScale = async (btn) => withBusy(btn, async () => {
     const r = await Db.grading.loadCbcCompetencyScale();
     if (!r.ok) { toast(r.message, 'err'); return; }
     toast(r.added ? 'CBC competency scale loaded.' : 'The CBC competency scale is already loaded.', 'ok');
     render(root);
-  };
+  }, 'Loading…');
   const loadBtn = root.querySelector('#load-cbc-scale'), emptyLoadBtn = root.querySelector('#empty-load-cbc-scale');
-  if (loadBtn) loadBtn.onclick = doLoadCbcScale;
-  if (emptyLoadBtn) emptyLoadBtn.onclick = doLoadCbcScale;
+  if (loadBtn) loadBtn.onclick = () => doLoadCbcScale(loadBtn);
+  if (emptyLoadBtn) emptyLoadBtn.onclick = () => doLoadCbcScale(emptyLoadBtn);
 
   scales.forEach((sc) => {
     root.querySelector(`[data-edit-scale="${sc.id}"]`).onclick = () => openScaleModal(root, sc);
-    root.querySelector(`[data-default-scale="${sc.id}"]`)?.addEventListener('click', async () => {
+    const defaultBtn = root.querySelector(`[data-default-scale="${sc.id}"]`);
+    defaultBtn?.addEventListener('click', () => withBusy(defaultBtn, async () => {
       const r = await Db.grading.setDefaultScale(sc.id);
       if (r.ok) { toast('Default scale updated.', 'ok'); render(root); } else toast(r.message, 'err');
-    });
+    }, 'Setting…'));
     root.querySelector(`[data-del-scale="${sc.id}"]`).onclick = () => confirmAction('Delete this grading scale and all its bands?', async () => {
       const r = await Db.grading.deleteScale(sc.id);
       if (r.ok) { toast('Scale deleted.', 'ok'); render(root); } else toast(r.message, 'err');

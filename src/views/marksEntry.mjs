@@ -1,7 +1,18 @@
-import { esc, toast, options, renderPrereq, loader, confirmAction, modal, closeModal, state } from '../app.js';
+/**
+ * marksEntry.mjs — the "Marks Entry" panel of Exam Desk (System Fixes brief
+ * §4/§14: the standalone Enter Marks module is gone — this file no longer
+ * owns its own page/route. It now exports `renderMarksPanel()`, an
+ * embeddable panel that examDesk.mjs mounts into one tab of a class's Exam
+ * Desk detail view, right alongside the Publish & Review panel
+ * (publishing.mjs). Everything below this point (subject filtering, the
+ * marks grid, Maximum Marks gate, bulk upload, submit preview) is unchanged
+ * from when it was its own page — only the outer page-with-its-own-exam/
+ * class-pickers wrapper is gone, since Exam Desk's board is what picks the
+ * exam+class now.
+ */
+import { esc, toast, options, loader, confirmAction, modal, closeModal, state, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { SUBMISSION_STATUS_LABELS } from '../lib/api/results.mjs';
-import { takeNavIntent } from '../lib/navIntent.mjs';
 import { buildMarkColumns, buildMarksTemplateCsv, parseMarksCsv, matchAndValidate, scoresByColumn } from '../lib/marksCsv.mjs';
 
 /** Brief Step 5's "spreadsheet upload should be a PC-only option; on phone,
@@ -23,67 +34,33 @@ const STATUS_DOT = { draft: '', submitted: '🟦', approved: '🟦', published: 
 // threaded as an extra parameter through every render/load function below.
 let teachersSeeAllReports = false;
 
-export async function viewMarks(root) {
-  const [examsRes, classesRes, subjectsRes, settingsRes] = await Promise.all([
-    Db.results.listExams(), Db.classes.list(), Db.subjects.list(), Db.settings.get()
-  ]);
-  const exams = examsRes.ok ? examsRes.data : [];
-  const classes = classesRes.ok ? classesRes.data : [];
-  const subjects = subjectsRes.ok ? subjectsRes.data : [];
-  teachersSeeAllReports = settingsRes.ok && String(settingsRes.data.teachers_see_all_reports) === 'true';
-
-  if (!exams.length) { renderPrereq(root, 'No exams found', 'Please create an exam first.', 'exams', 'Go to Exams'); return; }
-  if (!classes.length) { renderPrereq(root, 'No classes found', 'Please create a class first.', 'classes', 'Go to Classes'); return; }
-  if (!subjects.length) { renderPrereq(root, 'No subjects found', 'Open a class\'s stream and assign it some subjects first.', 'classes', 'Go to Classes'); return; }
-
-  // A "🎯 Enter Marks" click from the Manage Exams board hands off exactly
-  // which exam+class to open here — see navIntent.mjs. An admin's "Edit
-  // Marks" quick-link from Publish Results (Step 9) additionally hands off
-  // a specific subject_id, so it lands straight on that subject's grid
-  // instead of whichever one happens to sort first. Falls back to the
-  // normal blank pickers when opened directly from the sidebar.
-  const intent = takeNavIntent('marks-entry') || {};
-  render(root, exams, classes, subjects, { exam_id: intent.exam_id || '', class_id: intent.class_id || '', stream_id: '', subject_id: intent.subject_id || '' });
+let visibilityLoaded = false;
+async function ensureTeacherVisibility() {
+  if (visibilityLoaded) return;
+  const res = await Db.settings.get();
+  teachersSeeAllReports = res.ok && String(res.data.teachers_see_all_reports) === 'true';
+  visibilityLoaded = true;
 }
 
-function render(root, exams, classes, subjects, sel) {
-  root.innerHTML = `
-    <div class="page-head"><div><h2>Enter Marks</h2><p>Choose an exam and class, then pick any subject to mark — every subject assigned to the class is available here, no need to hunt through a separate menu.</p></div></div>
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-b grid3">
-        <div class="field"><label>Exam</label><select id="mk-exam">${options(exams, 'id', 'name', sel.exam_id, 'Choose an exam')}</select></div>
-        <div class="field"><label>Class</label><select id="mk-class">${options(classes, 'id', 'name', sel.class_id, 'Choose a class')}</select></div>
-        <div class="field"><label>Stream (optional)</label><select id="mk-stream" ${sel.class_id ? '' : 'disabled'}><option value="">Whole class</option></select></div>
-      </div>
-    </div>
-    <div id="mk-panel"></div>
-  `;
-
-  const classSel = root.querySelector('#mk-class'), streamSel = root.querySelector('#mk-stream');
-
-  async function refreshStreams(cid) {
-    if (!cid) { streamSel.disabled = true; streamSel.innerHTML = '<option value="">Whole class</option>'; return; }
-    const sres = await Db.streams.list(cid);
-    streamSel.disabled = false;
-    streamSel.innerHTML = '<option value="">Whole class</option>' + options(sres.ok ? sres.data : [], 'id', 'name', '');
+/** Exam Desk's "Marks Entry" tab (System Fixes brief §4/§14) — mounts
+ *  straight into a container the caller (examDesk.mjs) already put in the
+ *  DOM, for one already-chosen (exam, class[, stream]). No exam/class
+ *  picker here anymore — Exam Desk's board is what picks those; this panel
+ *  starts directly at the subject-tabs + grid, optionally pre-selecting one
+ *  subject_id (used by Publish & Review's "Edit Marks"/"Upload" quick-links
+ *  to land straight on that subject instead of whichever sorts first). */
+export async function renderMarksPanel(container, sel) {
+  await ensureTeacherVisibility();
+  const subjectsRes = await Db.subjects.list();
+  const subjects = subjectsRes.ok ? subjectsRes.data : [];
+  container.innerHTML = '<div id="mk-panel"></div>';
+  if (!subjects.length) {
+    container.innerHTML = `<div class="card"><div class="card-b"><div class="empty">
+      <div class="e-ico">📚</div><h3>No subjects found</h3><p>Open a class's stream and assign it some subjects first.</p>
+    </div></div></div>`;
+    return;
   }
-  if (sel.class_id) refreshStreams(sel.class_id);
-
-  const reload = () => {
-    const next = {
-      exam_id: root.querySelector('#mk-exam').value,
-      class_id: root.querySelector('#mk-class').value,
-      stream_id: root.querySelector('#mk-stream').value
-    };
-    if (next.exam_id && next.class_id) loadClassPanel(root, exams, classes, subjects, next);
-    else root.querySelector('#mk-panel').innerHTML = '';
-  };
-
-  classSel.onchange = async (e) => { await refreshStreams(e.target.value); reload(); };
-  streamSel.onchange = reload;
-  root.querySelector('#mk-exam').onchange = reload;
-
-  if (sel.exam_id && sel.class_id) loadClassPanel(root, exams, classes, subjects, sel);
+  await loadClassPanel(container, [], [], subjects, { exam_id: sel.exam_id, class_id: sel.class_id, stream_id: sel.stream_id || '', subject_id: sel.subject_id || '' });
 }
 
 /** Every subject assigned to the class (falling back to every subject in
@@ -229,14 +206,15 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
             <button class="btn" id="mk-maxmarks-save" style="margin-top:10px">Save and continue</button>
           </div>
         </div>`;
-      gridEl.querySelector('#mk-maxmarks-save').onclick = async () => {
+      const maxMarksSaveBtn = gridEl.querySelector('#mk-maxmarks-save');
+      maxMarksSaveBtn.onclick = () => withBusy(maxMarksSaveBtn, async () => {
         const val = gridEl.querySelector('#mk-maxmarks-input').value;
         if (!val || Number(val) <= 0) { toast('Enter a positive Maximum Marks value.', 'err'); return; }
         const r = await Db.results.setMaxMarks(examId, classId, subject.id, val);
         if (!r.ok) { toast(r.message, 'err'); return; }
         toast('Maximum Marks set.', 'ok');
         renderGridForPaper();
-      };
+      });
       return;
     }
     const maxMarksHint = (!papers.length && !res.max_marks_set && hasAnyMarks) ? `
@@ -294,7 +272,8 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
       });
     };
 
-    if (canEdit) gridEl.querySelector('#mk-save').onclick = async () => {
+    const saveMarksBtn = gridEl.querySelector('#mk-save');
+    if (canEdit) saveMarksBtn.onclick = () => withBusy(saveMarksBtn, async () => {
       const inputs = [...gridEl.querySelectorAll('input[data-student]')];
       const invalid = inputs.filter((i) => i.value !== '' && (isNaN(Number(i.value)) || Number(i.value) < 0 || Number(i.value) > res.out_of));
       if (invalid.length) { toast(`${invalid.length} score(s) are out of range (0–${res.out_of}).`, 'err'); return; }
@@ -305,7 +284,7 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
       if (!saveRes.ok) { toast(saveRes.message, 'err'); return; }
       toast(`Saved ${saveRes.saved} score(s)${saveRes.cleared ? `, cleared ${saveRes.cleared}` : ''}.`, 'ok');
       renderGridForPaper();
-    };
+    }, 'Saving…');
 
     const submitBtn = gridEl.querySelector('#mk-submit');
     if (submitBtn) submitBtn.onclick = () => {

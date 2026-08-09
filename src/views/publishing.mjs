@@ -1,67 +1,46 @@
-import { esc, toast, options, renderPrereq, loader, confirmAction, modal, closeModal, go, state } from '../app.js';
+import { esc, toast, options, loader, confirmAction, modal, closeModal, go, state } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { SUBMISSION_STATUS_LABELS, RANKING_CRITERIA_LABELS } from '../lib/api/results.mjs';
-import { takeNavIntent, setNavIntent } from '../lib/navIntent.mjs';
+import { setNavIntent } from '../lib/navIntent.mjs';
 
-/** Publish Results — the school-side view of the publishing workflow
- *  (Subject Teacher -> Class Teacher -> Supervisor -> Admin; "Supervisor"
- *  here is any teacher an admin has granted the publish_results capability
- *  to, or an admin). A result only becomes visible to a parent once its
- *  (exam, class, subject) row here reaches "published" — see
- *  result_submissions in migrations/0005_exam_workflow.sql. Every button
- *  below just attempts the move; the database itself is what enforces who
- *  is allowed to do it, so a rejected action simply shows the server's
- *  explanation as a toast. */
+/** publishing.mjs — the "Publish & Review" panel of Exam Desk (System Fixes
+ *  brief §14: this used to be its own "Publish Results" page/route; it's
+ *  now an embeddable panel examDesk.mjs mounts for one already-chosen
+ *  (exam, class), right alongside the Marks Entry panel (marksEntry.mjs),
+ *  so an admin never has to leave the class's Exam Desk detail view to move
+ *  between "how's marks entry going" and "review & publish".
+ *
+ *  Covers the publishing workflow (Subject Teacher -> Class Teacher ->
+ *  Supervisor -> Admin; "Supervisor" here is any teacher an admin has
+ *  granted the publish_results capability to, or an admin). A result only
+ *  becomes visible to a parent once its (exam, class, subject) row here
+ *  reaches "published" — see result_submissions in
+ *  migrations/0005_exam_workflow.sql. Every button below just attempts the
+ *  move; the database itself is what enforces who is allowed to do it, so
+ *  a rejected action simply shows the server's explanation as a toast. */
 const STATUS_BADGE_CLASS = { draft: 'grey', submitted: 'blue', approved: 'blue', published: 'green' };
 
-export async function viewPublishing(root) {
-  const [examsRes, classesRes] = await Promise.all([Db.results.listExams(), Db.classes.list()]);
-  const exams = examsRes.ok ? examsRes.data : [];
-  const classes = classesRes.ok ? classesRes.data : [];
-  if (!exams.length) { renderPrereq(root, 'No exams found', 'Please create an exam first.', 'exams', 'Go to Exams'); return; }
-  if (!classes.length) { renderPrereq(root, 'No classes found', 'Please create a class first.', 'classes', 'Go to Classes'); return; }
-  // A "Review & Publish" click from the Manage Exams board hands off exactly
-  // which exam+class to open here — see navIntent.mjs.
-  const intent = takeNavIntent('publishing') || {};
-  render(root, exams, classes, { exam_id: intent.exam_id || '', class_id: intent.class_id || '' });
-}
-
-function render(root, exams, classes, sel) {
-  root.innerHTML = `
-    <div class="page-head"><div><h2>Publish Results</h2><p>Approve and publish each subject's marks so parents can see them — nothing is visible to a parent until it's published here.</p></div></div>
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-b grid3">
-        <div class="field"><label>Exam</label><select id="pb-exam">${options(exams, 'id', 'name', sel.exam_id, 'Choose an exam')}</select></div>
-        <div class="field"><label>Class</label><select id="pb-class">${options(classes, 'id', 'name', sel.class_id, 'Choose a class')}</select></div>
-        <div class="field" style="align-self:end"><button class="btn" id="pb-publish-all">🚀 Publish Results</button></div>
+/** Mounts the panel into `container` for one (exam, class). `onEditSubject`
+ *  is called with a subject_id when the admin clicks "✏️ Edit Marks" or
+ *  "Upload" on a subject row — examDesk.mjs uses it to flip its detail view
+ *  over to the Marks Entry tab pre-selecting that subject, entirely within
+ *  the same screen (no page navigation, matching brief §14's "one place"). */
+export async function renderPublishPanel(container, sel, onEditSubject) {
+  container.innerHTML = `
+    <div class="card no-print" style="margin-bottom:16px">
+      <div class="card-b" style="display:flex;align-items:center;gap:10px">
+        <p class="hint" style="margin:0;flex:1">Approve and publish each subject's marks so parents can see them — nothing is visible to a parent until it's published here.</p>
+        <button class="btn" id="pb-publish-all">🚀 Publish Results</button>
       </div>
     </div>
     <div id="pb-list"></div>
   `;
-
-  const reload = () => {
-    const next = { exam_id: root.querySelector('#pb-exam').value, class_id: root.querySelector('#pb-class').value };
-    if (next.exam_id && next.class_id) loadList(root, next);
-    else root.querySelector('#pb-list').innerHTML = '';
-  };
-  root.querySelector('#pb-exam').onchange = reload;
-  root.querySelector('#pb-class').onchange = reload;
-  // Brief Step 10: clicking Publish opens the Publish Results Settings
-  // modal first (Ranking Criteria / Deviation Exam / Minimum learning areas
-  // / Overall Grading System — deliberately exam+class-wide, never a
-  // per-subject grading system per the brief's explicit exception) — those
-  // settings are saved BEFORE the actual publish runs, so getBroadsheet()/
-  // Exam Analysis pick them up immediately afterwards.
-  root.querySelector('#pb-publish-all').onclick = () => {
-    const examId = root.querySelector('#pb-exam').value, classId = root.querySelector('#pb-class').value;
-    if (!examId || !classId) { toast('Choose an exam and class first.', 'err'); return; }
-    openPublishSettingsModal(root, examId, classId);
-  };
-
-  if (sel.exam_id && sel.class_id) loadList(root, sel);
+  container.querySelector('#pb-publish-all').onclick = () => openPublishSettingsModal(container, sel, onEditSubject);
+  await loadList(container, sel, onEditSubject);
 }
 
-async function openPublishSettingsModal(root, examId, classId) {
+async function openPublishSettingsModal(root, sel, onEditSubject) {
+  const examId = sel.exam_id, classId = sel.class_id;
   const [scalesRes, deviationRes, examClassesRes] = await Promise.all([
     Db.grading.listScales(), Db.results.listDeviationExamChoices(examId, classId), Db.results.listExamClasses(examId)
   ]);
@@ -104,7 +83,7 @@ async function openPublishSettingsModal(root, examId, classId) {
       closeModal();
       if (!r.ok) { toast(r.message, 'err'); return; }
       toast(`Published ${r.published} of ${r.total} subject(s)${r.failures.length ? ` — ${r.failures.length} could not be published yet` : ''}.`, r.failures.length ? 'warn' : 'ok');
-      loadList(root, { exam_id: examId, class_id: classId });
+      loadList(root, sel, onEditSubject);
     }
   });
 }
@@ -116,7 +95,7 @@ async function openPublishSettingsModal(root, examId, classId) {
  *  new parallel "still published but editable" state — simpler and already
  *  covered by the same DB trigger rules. Selectable per learning area, with
  *  a select-all checkbox. */
-function openGrantAccessModal(root, sel, rows) {
+function openGrantAccessModal(root, sel, rows, onEditSubject) {
   const grantable = rows.filter((r) => r.status === 'published' || r.status === 'approved');
   if (!grantable.length) { toast('No published or approved subjects to grant edit access on yet.', 'err'); return; }
   modal({
@@ -146,7 +125,7 @@ function openGrantAccessModal(root, sel, rows) {
       }
       closeModal();
       toast(`Reopened ${done} of ${chosen.length} subject(s)${failures.length ? ' — some could not be reopened' : ''}.`, failures.length ? 'warn' : 'ok');
-      loadList(root, sel);
+      loadList(root, sel, onEditSubject);
     }
   });
 }
@@ -177,7 +156,7 @@ async function remindPendingTeachers(root, sel, rows) {
   );
 }
 
-async function loadList(root, sel) {
+async function loadList(root, sel, onEditSubject) {
   const listEl = root.querySelector('#pb-list');
   listEl.innerHTML = loader();
   const res = await Db.results.listSubmissions(sel.exam_id, sel.class_id);
@@ -255,46 +234,43 @@ async function loadList(root, sel) {
   if (remindBtn) remindBtn.onclick = () => remindPendingTeachers(root, sel, rows);
 
   const grantBtn = listEl.querySelector('#pb-grant-access');
-  if (grantBtn) grantBtn.onclick = () => openGrantAccessModal(root, sel, rows);
+  if (grantBtn) grantBtn.onclick = () => openGrantAccessModal(root, sel, rows, onEditSubject);
 
   const withdrawBtn = listEl.querySelector('#pb-withdraw');
   if (withdrawBtn) withdrawBtn.onclick = () => confirmAction(
     'Withdraw all published results for this class? They go back to "not submitted" and will no longer be visible to parents until republished.',
     async () => {
       const r = await Db.results.withdrawExam(sel.exam_id, sel.class_id);
-      if (r.ok) { toast(`Withdrew ${r.reopened} of ${r.total} subject(s).`, 'ok'); loadList(root, sel); } else toast(r.message, 'err');
+      if (r.ok) { toast(`Withdrew ${r.reopened} of ${r.total} subject(s).`, 'ok'); loadList(root, sel, onEditSubject); } else toast(r.message, 'err');
     },
     true
   );
 
-  listEl.querySelectorAll('[data-upload]').forEach((b) => b.onclick = () => {
-    setNavIntent('marks-entry', { exam_id: sel.exam_id, class_id: sel.class_id, subject_id: b.dataset.upload });
-    go('marks');
-  });
-  listEl.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => {
-    setNavIntent('marks-entry', { exam_id: sel.exam_id, class_id: sel.class_id, subject_id: b.dataset.edit });
-    go('marks');
-  });
+  // Brief §14: "Edit Marks"/"Upload" no longer navigates to a separate
+  // page — it flips Exam Desk's own detail view over to the Marks Entry
+  // tab, pre-selecting this subject, all within the same screen.
+  listEl.querySelectorAll('[data-upload]').forEach((b) => b.onclick = () => onEditSubject(b.dataset.upload));
+  listEl.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => onEditSubject(b.dataset.edit));
 
   listEl.querySelectorAll('[data-approve]').forEach((b) => b.onclick = () => confirmAction(
     'Approve this subject\'s results? This confirms the class teacher has reviewed them.',
     async () => {
       const r = await Db.results.approveSubmission(sel.exam_id, sel.class_id, b.dataset.approve);
-      if (r.ok) { toast('Approved.', 'ok'); loadList(root, sel); } else toast(r.message, 'err');
+      if (r.ok) { toast('Approved.', 'ok'); loadList(root, sel, onEditSubject); } else toast(r.message, 'err');
     }
   ));
   listEl.querySelectorAll('[data-publish]').forEach((b) => b.onclick = () => confirmAction(
     'Publish this subject\'s results? Parents will be able to see them immediately.',
     async () => {
       const r = await Db.results.publishSubmission(sel.exam_id, sel.class_id, b.dataset.publish);
-      if (r.ok) { toast('Published.', 'ok'); loadList(root, sel); } else toast(r.message, 'err');
+      if (r.ok) { toast('Published.', 'ok'); loadList(root, sel, onEditSubject); } else toast(r.message, 'err');
     }
   ));
   listEl.querySelectorAll('[data-reopen]').forEach((b) => b.onclick = () => confirmAction(
     'Reopen this subject? It goes back to "not submitted" — the class teacher will need to approve and publish it again after any corrections.',
     async () => {
       const r = await Db.results.reopenSubmission(sel.exam_id, sel.class_id, b.dataset.reopen);
-      if (r.ok) { toast('Reopened.', 'ok'); loadList(root, sel); } else toast(r.message, 'err');
+      if (r.ok) { toast('Reopened.', 'ok'); loadList(root, sel, onEditSubject); } else toast(r.message, 'err');
     },
     true
   ));

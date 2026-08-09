@@ -15,6 +15,7 @@
  */
 import { esc, options, renderPrereq, loader, go, printOptionsHtml, wirePrintOptions } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
+import { computeGradeSummaries } from '../lib/broadsheetSummary.mjs';
 import { downloadXlsxAOA } from '../lib/xlsxUtil.mjs';
 import { buildBroadsheetAoa } from '../lib/broadsheetXlsx.mjs';
 import { printHeaderHtml, isContactInfoComplete, renderMissingContactInfo } from '../lib/printHeader.mjs';
@@ -69,10 +70,11 @@ function cell(score, gr) {
 async function load(root, classes, sel) {
   const sheetEl = root.querySelector('#bs-sheet');
   sheetEl.innerHTML = loader();
-  const [res, settingsRes] = await Promise.all([Db.results.getBroadsheet(sel), Db.settings.get()]);
+  const [res, settingsRes, bandsRes] = await Promise.all([Db.results.getBroadsheet(sel), Db.settings.get(), Db.grading.defaultScaleBands()]);
   if (!res.ok) { sheetEl.innerHTML = `<div class="card pad">⚠️ ${esc(res.message)}</div>`; return; }
   const settings = settingsRes.ok ? settingsRes.data : {};
   const cls = classes.find((c) => c.id === sel.class_id);
+  const bands = bandsRes || [];
 
   // Feature brief §3: block printing/downloading until the school's
   // structured contact/address details are set — the logo stays optional.
@@ -112,7 +114,7 @@ async function load(root, classes, sel) {
           <td class="num sum-col">${s.stream_position || '—'}</td><td class="num sum-col"><b>${s.position || '—'}</b></td>
         </tr>`).join('')}</tbody>
       </table></div>
-      <div class="card-b" style="border-top:1px solid var(--line)">Class average: <b>${res.class_average}</b></div>
+      ${summaryTablesHtml(res.students, res.subjects, bands)}
     </div>
   `;
   wirePrintOptions(sheetEl, 'bs', `${cls ? cls.name : 'Class'} Mark List — ${res.exam.name}`);
@@ -123,4 +125,51 @@ async function load(root, classes, sel) {
     const fname = `mark-list-${(cls ? cls.name : 'class')}-${res.exam.name}`.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
     downloadXlsxAOA(fname, aoa, 'Mark List');
   };
+}
+
+/** Brief §15: renders computeGradeSummaries()'s data as three tables below
+ *  the grid, replacing the old single "Class average" figure. Reuses the
+ *  same generic `table.data` styling every other admin table already uses
+ *  (main.css:208) rather than introducing a third table look, and the same
+ *  single @page override printWithOptions() applies to the whole print job
+ *  (app.js) — there's no per-section stylesheet here that could let these
+ *  tables end up in a different orientation than the grid above them within
+ *  one printout. */
+function summaryTablesHtml(students, subjects, bands) {
+  const { gradeOrder, classSummary, genderSummary, subjectBreakdown } = computeGradeSummaries(students, subjects, bands);
+  if (!gradeOrder.length) return '';
+
+  return `
+    <div class="card-b bs-summary" style="border-top:1px solid var(--line)">
+      <div class="bs-summary-grid">
+        <div>
+          <div class="bs-summary-h">Class Grade Summary</div>
+          <div class="table-wrap"><table class="data">
+            <thead><tr><th>Grade</th><th class="num">Students</th><th class="num">%</th></tr></thead>
+            <tbody>${classSummary.map((r) => `<tr>
+              <td><span class="badge blue">${esc(r.grade)}</span></td><td class="num">${r.count}</td><td class="num">${r.pct}%</td>
+            </tr>`).join('')}</tbody>
+          </table></div>
+        </div>
+        <div>
+          <div class="bs-summary-h">Gender Grade Summary</div>
+          <div class="table-wrap"><table class="data">
+            <thead><tr><th>Grade</th><th class="num">Male</th><th class="num">Female</th><th class="num">Total</th></tr></thead>
+            <tbody>${genderSummary.map((r) => `<tr>
+              <td><span class="badge blue">${esc(r.grade)}</span></td><td class="num">${r.male}</td><td class="num">${r.female}</td><td class="num">${r.total}</td>
+            </tr>`).join('')}</tbody>
+          </table></div>
+        </div>
+      </div>
+      <div style="margin-top:16px">
+        <div class="bs-summary-h">Grade Breakdown by Subject</div>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Subject</th>${gradeOrder.map((g) => `<th class="num">${esc(g)}</th>`).join('')}</tr></thead>
+          <tbody>${subjectBreakdown.map((row) => `<tr>
+            <td>${esc(row.subject_name)}</td>${gradeOrder.map((g) => `<td class="num">${row.counts[g] || '—'}</td>`).join('')}
+          </tr>`).join('')}</tbody>
+        </table></div>
+      </div>
+    </div>
+  `;
 }

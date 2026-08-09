@@ -1,4 +1,4 @@
-import { esc, options, renderPrereq, loader, toast } from '../app.js';
+import { esc, options, renderPrereq, loader, toast, printOptionsHtml, wirePrintOptions } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { renderReportCard } from './_reportCard.mjs';
 import { takeNavIntent } from '../lib/navIntent.mjs';
@@ -83,38 +83,48 @@ function render(root, exams, classes, intent) {
       cardEl.innerHTML = '';
       // Print bar goes at the TOP, above every report form — not appended
       // after the fact, which is what put it below the content before.
+      // Brief §11: same shared portrait/landscape + A4/A5/Letter print
+      // controls every other report (Mark List/Class List/Score Sheet) uses,
+      // instead of a bare print button with no size/orientation choice.
       const printBar = document.createElement('div');
-      printBar.className = 'no-print center'; printBar.style.marginBottom = '16px';
-      printBar.innerHTML = `<button class="btn secondary" id="rf-print">🖨️ Print all report form(s)</button>`;
+      printBar.className = 'report-toolbar no-print'; printBar.style.marginBottom = '16px';
+      printBar.innerHTML = printOptionsHtml('rf', 'portrait');
       cardEl.appendChild(printBar);
+      // Brief §12: this used to be N sequential get_report_card() RPC round
+      // trips, one per student, awaited one at a time in a for-loop — for a
+      // class of 40+ students that's 40 round trips back to back, the
+      // highest-value cause identified for "report forms... take too long to
+      // generate." Firing every request at once and awaiting the whole batch
+      // turns "N round trips in series" into "1 round trip's worth of wait."
+      const results = await Promise.all(students.map((s) => Db.results.getReportCard(examId, s.id)));
       let printed = 0;
-      for (const s of students) {
-        const res = await Db.results.getReportCard(examId, s.id);
-        if (!res.ok) continue;
+      students.forEach((s, i) => {
+        const res = results[i];
+        if (!res.ok) return;
         const page = document.createElement('div');
         page.className = 'batch-page';
         cardEl.appendChild(page);
         renderReportCard(page, res.data, extra);
         printed++;
-      }
+      });
       if (!printed) { cardEl.innerHTML = `<div class="card pad">⚠️ No accessible report cards for this class/exam yet.</div>`; return; }
-      printBar.querySelector('#rf-print').textContent = `🖨️ Print all ${printed} report form(s)`;
-      printBar.querySelector('#rf-print').onclick = () => window.print();
+      wirePrintOptions(printBar, 'rf', `Report Forms — ${classes.find((c) => c.id === classId) ? classes.find((c) => c.id === classId).name : ''}`);
       return;
     }
 
     const res = await Db.results.getReportCard(examId, studentId);
     if (!res.ok) { cardEl.innerHTML = `<div class="card pad">⚠️ ${esc(res.message)}</div>`; return; }
     cardEl.innerHTML = '';
-    // Same top-of-page placement for the single-student case.
+    // Same top-of-page placement + shared print controls for the
+    // single-student case.
     const printBar = document.createElement('div');
-    printBar.className = 'no-print center'; printBar.style.marginBottom = '16px';
-    printBar.innerHTML = '<button class="btn secondary" id="rf-print">🖨️ Print</button>';
+    printBar.className = 'report-toolbar no-print'; printBar.style.marginBottom = '16px';
+    printBar.innerHTML = printOptionsHtml('rf', 'portrait');
     cardEl.appendChild(printBar);
     const cardBody = document.createElement('div');
     cardEl.appendChild(cardBody);
     renderReportCard(cardBody, res.data, extra);
-    printBar.querySelector('#rf-print').onclick = () => window.print();
+    wirePrintOptions(printBar, 'rf', `Report Form — ${res.data.student ? res.data.student.full_name : ''}`);
   };
 
   root.querySelector('#rf-class').onchange = async (e) => { await refreshStudents(e.target.value); wireStudentSelect(); };
