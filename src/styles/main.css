@@ -5,6 +5,11 @@
   --ok:#2f9e6f; --ok-bg:#e8f6ef; --warn:#c9860a; --warn-bg:#fdf3e2;
   --radius:12px; --radius-sm:8px; --shadow:0 1px 3px rgba(16,32,45,.08),0 1px 2px rgba(16,32,45,.06);
   --shadow-lg:0 10px 30px rgba(16,32,45,.15); --sidebar:250px;
+  /* Deep black grid lines + text for printable reports (Mark List/Class
+     List/Score Sheet/Exam Analysis) — deliberately darker/bolder than the
+     app's normal --line/--muted, matching the ink weight of the reference
+     printed sample rather than the softer on-screen UI palette. */
+  --grid-ink:#000000; --grid-text:#000000;
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
@@ -217,19 +222,64 @@ table.data td.num,table.data th.num{text-align:center}
    blowing the sheet past printable landscape width. Every column type below
    gets an explicit width so switching to fixed layout doesn't just squash
    the Name column or the summary columns instead. */
-.mark-list-grid{border-collapse:collapse;font-size:12px;table-layout:fixed;width:100%}
-.mark-list-grid th,.mark-list-grid td{border:1px solid var(--line);padding:7px 8px;white-space:nowrap;overflow:hidden}
-.mark-list-grid th{font-size:10px}
+.mark-list-grid{border-collapse:collapse;font-size:12px;table-layout:fixed;width:100%;color:var(--grid-text)}
+.mark-list-grid th,.mark-list-grid td{border:1.3px solid var(--grid-ink);padding:7px 8px}
+/* Header-truncation fix (feature brief §6): "Total Marks" was printing as
+   "Total Mk" and "Stream Position" as "Stream Po..." because every header
+   cell was fixed-height, single-line and clipped with overflow:hidden. Every
+   header now wraps onto as many lines as it needs — the header ROW grows
+   downward to fit the full text, instead of the text being cut off — while
+   data cells (mostly short numbers/grades) stay single-line and compact.
+   Bug fix: this table used to also carry the generic ".data" class, whose
+   "table.data th{white-space:nowrap}" rule has higher CSS specificity than
+   ".mark-list-grid th{white-space:normal}" — so the wrap NEVER actually
+   applied, and a long single-line header like "Integrated Science and
+   Technology" silently overflowed its fixed-width column and visually
+   bled into the next header cell instead of wrapping. Dropping the ".data"
+   class (this table is fully self-styled by .mark-list-grid already) fixes
+   the specificity fight; overflow-wrap:break-word then wraps normally at
+   word boundaries and only breaks inside a single long word if that word
+   alone doesn't fit the column. */
+.mark-list-grid th{font-size:10px;font-weight:800;color:var(--grid-text);background:#f7f9fb;text-transform:uppercase;letter-spacing:.3px;text-align:left;white-space:normal;word-break:normal;overflow-wrap:break-word;vertical-align:bottom;overflow:visible}
+.mark-list-grid td{white-space:nowrap;overflow:hidden}
+.mark-list-grid td.num,.mark-list-grid th.num{text-align:center}
 .mark-list-grid th.id-col,.mark-list-grid td.id-col{width:64px}
-.mark-list-grid th.name-col,.mark-list-grid td.name-col{width:150px;white-space:normal}
+.mark-list-grid th.name-col,.mark-list-grid td.name-col{width:150px;white-space:normal;word-break:normal}
 .mark-list-grid th.str-col,.mark-list-grid td.str-col{width:44px}
 /* Subject header cells: fixed width regardless of the subject's name length
    — a long name wraps onto multiple lines (row height grows) instead of
    stretching the column horizontally. */
-.mark-list-grid th.subj-col{width:70px;white-space:normal;word-break:break-word;vertical-align:bottom}
+.mark-list-grid th.subj-col{width:70px}
 .mark-list-grid th.sum-col,.mark-list-grid td.sum-col{width:50px}
-.mark-list-grid tr:last-child td{border-bottom:1px solid var(--line)}
-.mark-cell .mark-grade{color:var(--muted);font-size:10.5px}
+.mark-list-grid tr:last-child td{border-bottom:1.3px solid var(--grid-ink)}
+.mark-cell .mark-grade{color:var(--grid-text);font-weight:600;font-size:10.5px}
+
+/* Shared printable-report header (feature brief §2/§4): logo far left,
+   school name centered with the report title below it, address block far
+   right — same layout for the Class List, Mark List, Score Sheet and Exam
+   Analysis report. See src/lib/printHeader.mjs. */
+.print-header{display:flex;align-items:center;gap:16px;border-bottom:2px solid var(--grid-ink);padding-bottom:16px;margin-bottom:4px}
+.print-header .ph-logo{flex:0 0 auto}
+.print-header .ph-logo-img{width:56px;height:56px}
+.print-header .ph-center{flex:1;min-width:0;text-align:center}
+.print-header .ph-school{font-size:19px;font-weight:800;color:var(--grid-text);line-height:1.25}
+.print-header .ph-title{font-size:13px;font-weight:700;color:var(--grid-text);margin-top:2px}
+.print-header .ph-address{flex:0 0 auto;text-align:right;font-size:11px;color:var(--grid-text);line-height:1.55;white-space:nowrap}
+/* Class List / Score Sheet full-grid print table (feature brief §2: "print
+   as a table with clear rows, columns, and borders — the same standard
+   already used on the mark list"), plus a shaded title band ("GRADE 8 -
+   CLASS LIST") matching the reference sample. */
+.print-grid{border-collapse:collapse;width:100%;font-size:12.5px;color:var(--grid-text)}
+.print-grid th,.print-grid td{border:1.3px solid var(--grid-ink);padding:8px 10px}
+.print-grid th{background:#f7f9fb;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--grid-text);text-align:left;white-space:normal;word-break:break-all}
+.print-grid td.num,.print-grid th.num{text-align:center}
+.grid-title-band{text-align:center;font-weight:800;font-size:12px;background:#f0f2f5;color:var(--grid-text);border:1.3px solid var(--grid-ink);border-bottom:none;padding:8px;letter-spacing:.3px}
+.print-opts{display:flex;gap:8px;align-items:center}
+.print-opts select{padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;background:#fff}
+/* Toolbar for Download/Print/paper-size controls, sat ABOVE the printable
+   report card (not mixed into the print header itself) so the card below
+   it is a true preview of exactly what prints. */
+.report-toolbar{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-bottom:12px}
 
 /* ---------- Badges ---------- */
 .badge{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:11.5px;font-weight:650}
@@ -402,7 +452,15 @@ table.data td.num,table.data th.num{text-align:center}
 .chk-row{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:2px}
 .chk{display:flex;align-items:center;gap:7px;font-weight:500;font-size:13px;cursor:pointer;color:var(--ink)}
 .chk input{width:auto;margin:0}
-.col.print-hide{background:#fafbfc}
+/* Bug fix (feature brief §2): this used to be scoped to ".col.print-hide",
+   a class that's never actually applied anywhere (classList.mjs toggles
+   "print-hide" on elements classed "col-guardian_name" etc, not "col") — so
+   the rule silently never matched and an unticked Guardian/Guardian Contact
+   column kept showing on both screen and print regardless of the checkbox.
+   Matching on ".print-hide" alone, and unconditionally (not just inside
+   @media print), makes the on-screen preview and the printed/downloaded
+   output agree with what's actually ticked. */
+.print-hide{display:none!important}
 /* Logo (School Settings + printouts) */
 .logo-thumb{width:64px;height:64px;border-radius:10px;object-fit:cover;border:1px solid var(--line);background:#fff}
 .logo-placeholder{width:64px;height:64px;border-radius:10px;border:1.5px dashed var(--line);display:grid;place-items:center;color:var(--muted);font-size:22px;background:#fafbfc}
@@ -420,7 +478,6 @@ table.data td.num,table.data th.num{text-align:center}
   .report{border:none;box-shadow:none;max-width:none}
   body{background:#fff}
   .card{box-shadow:none;border:none}
-  .col.print-hide{display:none!important}
   .batch-page{page-break-after:always}
   .batch-page:last-child{page-break-after:auto}
   /* Wide printable tables (broadsheet, class list, transcript) — shrink to
@@ -429,6 +486,9 @@ table.data td.num,table.data th.num{text-align:center}
   .table-wrap{overflow:visible}
   table.data{font-size:10.5px}
   table.data th,table.data td{padding:5px 7px}
+  .print-header{break-inside:avoid;page-break-inside:avoid}
+  .print-grid{font-size:10.5px}
+  .print-grid th,.print-grid td{padding:5px 7px}
 }
 
 /* ---------- Loader ---------- */

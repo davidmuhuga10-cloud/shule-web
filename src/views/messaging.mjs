@@ -9,6 +9,7 @@
 import { esc, options, toast, renderPrereq, loader, fmtDate } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { groupMessagesByBatch } from '../lib/api/messaging.mjs';
+import { takeNavIntent } from '../lib/navIntent.mjs';
 
 const SCOPE_LABELS = {
   class: 'A whole class (guardians)',
@@ -39,7 +40,17 @@ export async function viewMessaging(root) {
   const staff = staffRes.ok ? staffRes.data : [];
   const exams = examsRes.ok ? examsRes.data : [];
   if (!classes.length) { renderPrereq(root, 'No classes found', 'Please create a class first.', 'classes', 'Go to Classes'); return; }
-  render(root, { classes, students, staff, exams }, { tab: 'compose', scope: 'class', class_id: classes[0].id, exam_id: exams[0] ? exams[0].id : '', body: '' });
+  // A "📨 Send Results" click from the Manage Exams board (brief Step 13)
+  // hands off straight to the exam_results scope, pre-filled with exactly
+  // which exam+class to send — see navIntent.mjs.
+  const intent = takeNavIntent('messaging') || {};
+  render(root, { classes, students, staff, exams }, {
+    tab: 'compose',
+    scope: intent.scope || 'class',
+    class_id: intent.class_id || classes[0].id,
+    exam_id: intent.exam_id || (exams[0] ? exams[0].id : ''),
+    body: ''
+  });
 }
 
 function render(root, data, sel) {

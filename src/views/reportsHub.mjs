@@ -8,6 +8,8 @@ import { go } from '../app.js';
 const TILES = [
   { ico: '📋', title: 'Class List', desc: 'Print the list of students in a class.', route: 'class-list' },
   { ico: '📊', title: 'Mark List', desc: 'Students × subjects, with grades, points and position.', route: 'broadsheet' },
+  { ico: '📈', title: 'Exam Analysis', desc: 'Top students and class-wide performance analysis for an exam.', route: 'exam-analysis' },
+  { ico: '📝', title: 'Score Sheet', desc: 'A blank, printable scoring sheet for one class and learning area.', route: 'score-sheet' },
   { ico: '🧾', title: 'Report Forms', desc: "Print a student's or a whole class's report forms.", route: 'reports' },
   { ico: '📜', title: 'Transcript', desc: "A student's results across multiple exams/terms.", route: 'transcript' },
   { ico: '🎓', title: 'Leaving Certificate', desc: 'Print a certificate for a student who is leaving.', route: 'certificates' }

@@ -1,7 +1,8 @@
-import { esc, options, renderPrereq, loader, toast } from '../app.js';
+import { esc, options, renderPrereq, loader, toast, go, printOptionsHtml, wirePrintOptions } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { downloadXlsx } from '../lib/xlsxUtil.mjs';
 import { takeNavIntent } from '../lib/navIntent.mjs';
+import { printHeaderHtml, isContactInfoComplete, renderMissingContactInfo } from '../lib/printHeader.mjs';
 
 const CL_COLS = [
   { key: 'admission_no', label: 'Admission No.', on: true },
@@ -53,6 +54,14 @@ function render(root, classes, sel) {
   };
   classSel.onchange = async (e) => { await refreshStreams(e.target.value); reload(); };
   streamSel.onchange = reload;
+  // Bug fix (feature brief §2): unticking a column (e.g. Guardian) only took
+  // effect visually via this 'change' listener — but load() rebuilds
+  // #cl-list's markup from scratch on every class/stream change, which reset
+  // every column back to CL_COLS' hardcoded default and silently dropped
+  // whatever the checkboxes actually said. applyColVisibility() is now also
+  // called right after that rebuild (see load() below), so the print/
+  // download output always matches what's currently ticked, not just
+  // whatever was ticked on the very first render.
   root.querySelectorAll('[data-col]').forEach((cb) => cb.onchange = () => applyColVisibility(root));
 
   if (sel.class_id) load(root, classes, sel);
@@ -74,27 +83,27 @@ async function load(root, classes, sel) {
   const settings = settingsRes.ok ? settingsRes.data : {};
   const cls = classes.find((c) => c.id === sel.class_id);
 
-  const logoHtml = settings.logo
-    ? `<img class="logo-thumb" src="${settings.logo}">`
-    : `<div class="logo-placeholder">🏫</div>`;
+  // Feature brief §3: block printing/downloading until the school's
+  // structured contact/address details are set — the logo stays optional.
+  if (!isContactInfoComplete(settings)) { renderMissingContactInfo(listEl, () => go('settings')); return; }
+
+  const streamName = root.querySelector('#cl-stream') && root.querySelector('#cl-stream').selectedIndex > 0
+    ? root.querySelector('#cl-stream').options[root.querySelector('#cl-stream').selectedIndex].textContent : '';
+  const titleBand = `${esc((cls ? cls.name : '').toUpperCase())}${streamName ? ' - ' + esc(streamName.toUpperCase()) : ''} - CLASS LIST`;
 
   listEl.innerHTML = `
+    <div class="report-toolbar no-print">
+      <button class="btn secondary" id="cl-download">⬇️ Download Excel</button>
+      ${printOptionsHtml('cl', 'portrait')}
+    </div>
     <div class="card">
-      <div class="card-b" style="display:flex;gap:16px;align-items:center;border-bottom:1px solid var(--line);padding-bottom:16px">
-        ${logoHtml}
-        <div>
-          <h3 style="font-size:18px">${esc(settings.school_name || 'School')}</h3>
-          <div class="muted" style="font-size:12.5px">
-            ${settings.po_box ? 'P.O. Box ' + esc(settings.po_box) + ' · ' : ''}${settings.phone ? esc(settings.phone) + ' · ' : ''}${esc(settings.email || '')}
-          </div>
-          <div style="font-weight:650;margin-top:4px">Class List — ${esc(cls ? cls.name : '')}</div>
-        </div>
-        <div class="spacer"></div>
-        <button class="btn secondary no-print" id="cl-download">⬇️ Download Excel</button>
-        <button class="btn secondary no-print" onclick="window.print()">🖨️ Print</button>
+      <div class="card-b" style="border-bottom:1px solid var(--line);padding-bottom:12px">
+        ${printHeaderHtml(settings, `Class List — ${cls ? cls.name : ''}${streamName ? ' (' + streamName + ')' : ''}`)}
       </div>
       <div class="card-b table-wrap">
-        ${students.length ? `<table class="data">
+        ${students.length ? `
+        <div class="grid-title-band">${titleBand}</div>
+        <table class="print-grid">
           <thead><tr>
             <th class="col-admission_no">Admission No.</th><th class="col-full_name">Name</th>
             <th class="col-gender">Gender</th><th class="col-stream_name">Stream</th>
@@ -110,17 +119,24 @@ async function load(root, classes, sel) {
     </div>
   `;
 
+  // Re-apply whatever the "Columns to print" checkboxes actually say right
+  // now, every time this markup is (re)built — see the note on the
+  // checkbox wiring in render() above.
+  applyColVisibility(root);
+
   // "Download Excel" respects exactly whichever columns are currently ticked
   // in the "Columns to print" picker above — one field-picker drives both
   // print and export (brief §5: "let the admin choose which fields to
   // include, rather than forcing every field into the export").
   const downloadBtn = root.querySelector('#cl-download');
+  const suggestedName = `${cls ? cls.name : 'Class'}${streamName ? ' ' + streamName : ''} Classlist`;
   if (downloadBtn) downloadBtn.onclick = () => {
     if (!students.length) { toast('No students to export.', 'warn'); return; }
     const activeCols = CL_COLS.filter((c) => {
       const cb = root.querySelector(`[data-col="${c.key}"]`);
       return cb ? cb.checked : true;
     });
-    downloadXlsx(`class-list-${(cls ? cls.name : 'export').replace(/\s+/g, '-').toLowerCase()}.xlsx`, students, activeCols, 'Class List');
+    downloadXlsx(suggestedName.replace(/[\\/:*?"<>|]+/g, ''), students, activeCols, 'Class List');
   };
+  wirePrintOptions(listEl, 'cl', suggestedName.replace(/[\\/:*?"<>|]+/g, ''));
 }

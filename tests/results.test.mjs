@@ -41,11 +41,11 @@ async function run() {
     check('saveExam requires an academic year', (await results.saveExam({ name: 'Midterm', term_id: 't1' })).ok === false);
     const saved = await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1' });
     check('saveExam succeeds and defaults out_of to 100', saved.ok === true && saved.data.out_of === 100);
-    check('saveExam defaults exam_type to summative', saved.data.exam_type === 'summative');
-    const typed = await results.saveExam({ name: 'CAT 1', academic_year_id: 'y1', term_id: 't1', exam_type: 'cat' });
-    check('saveExam accepts a valid exam_type', typed.data.exam_type === 'cat');
+    check('saveExam defaults exam_type to written (Zeraki-style types, brief Step 1)', saved.data.exam_type === 'written');
+    const typed = await results.saveExam({ name: 'Supplementary 1', academic_year_id: 'y1', term_id: 't1', exam_type: 'supplementary' });
+    check('saveExam accepts a valid exam_type', typed.data.exam_type === 'supplementary');
     const badType = await results.saveExam({ name: 'Weird', academic_year_id: 'y1', term_id: 't1', exam_type: 'nonsense' });
-    check('saveExam falls back to summative for an unrecognized exam_type', badType.data.exam_type === 'summative');
+    check('saveExam falls back to written for an unrecognized exam_type', badType.data.exam_type === 'written');
   }
 
   // ---- getResultsEntry / saveResultsEntry (whole-subject, no papers) ------------
@@ -143,7 +143,7 @@ async function run() {
     check('per-paper rows are saved separately (2 rows for one subject)', rows.length === 2);
     check('per-paper rows are not individually graded', rows.every((r) => r.grade_label === null));
 
-    const sheet = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1' });
+    const sheet = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1', includeUnpublished: true });
     // 80/100*100*0.6 = 48, 40/50*100*0.4 = 32 -> 80 combined, on the exam's own out_of (100).
     check('getBroadsheet combines per-paper marks into one weighted effective score', sheet.students.find((s) => s.student_id === 's1').scores.su1 === 80);
   }
@@ -157,7 +157,7 @@ async function run() {
       { student_id: 's1', score: '90' }, { student_id: 's2', score: '70' }, { student_id: 's3', score: '60' }, { student_id: 's4', score: '60' }
     ] });
 
-    const sheet = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1' });
+    const sheet = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1', includeUnpublished: true });
     check('getBroadsheet succeeds', sheet.ok === true);
     check('getBroadsheet includes the subjects assigned to the class', sheet.subjects.length === 2);
     check('getBroadsheet reports each subject\'s (default draft) submission status', sheet.subjects.every((s) => s.submission_status === 'draft'));
@@ -193,7 +193,7 @@ async function run() {
     await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [
       { student_id: 's1', score: '85' }, { student_id: 's2', score: '40' }, { student_id: 's3', score: '95' }
     ] });
-    const sheet = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1' });
+    const sheet = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1', includeUnpublished: true });
     const byId = {}; sheet.students.forEach((s) => { byId[s.student_id] = s; });
     check('class-wide position ranks South Only first', byId.s3.position === 1);
     check('North Best is #2 class-wide but #1 within their own stream', byId.s1.position === 2 && byId.s1.stream_position === 1);
@@ -209,10 +209,37 @@ async function run() {
     await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '80' }, { student_id: 's2', score: '90' }] });
     await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su2', scores: [{ student_id: 's1', score: '70' }] });
 
-    const sheet = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1' });
+    const sheet = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1', includeUnpublished: true });
     const byId = {}; sheet.students.forEach((s) => { byId[s.student_id] = s; });
     check('a student below min_subjects_for_ranking gets no position', byId.s2.position === '');
     check('a student meeting min_subjects_for_ranking is still ranked', byId.s1.position === 1);
+  }
+
+  // ---- getBroadsheet (Mark List) only shows PUBLISHED subjects (feature brief §5) ----
+  {
+    const { sb, results } = freshApis();
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100 })).data;
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '85' }] });
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su2', scores: [{ student_id: 's1', score: '70' }] });
+
+    const beforePublish = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1' });
+    check('with nothing published yet, the Mark List shows no subjects at all', beforePublish.subjects.length === 0);
+
+    await results.submitForApproval(exam.id, 'c1', 'su1');
+    await results.approveSubmission(exam.id, 'c1', 'su1');
+    const stillDraft = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1' });
+    check('a subject that is submitted/approved but not yet published still does not appear', stillDraft.subjects.length === 0);
+
+    await results.publishSubmission(exam.id, 'c1', 'su1');
+    const afterPublish = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1' });
+    check('once published, exactly that one subject appears', afterPublish.subjects.length === 1 && afterPublish.subjects[0].id === 'su1');
+    check('the still-draft subject (su2) is omitted entirely, not shown with a draft badge', afterPublish.subjects.every((s) => s.id !== 'su2'));
+    const jane = afterPublish.students.find((s) => s.student_id === 's1');
+    check('a published subject\'s score is still included in the student\'s row', jane.scores.su1 === 85);
+    check('an omitted (unpublished) subject\'s score key is not present on the student row', !('su2' in jane.scores));
+
+    const unfiltered = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1', includeUnpublished: true });
+    check('includeUnpublished:true opts back into seeing every assigned subject regardless of status', unfiltered.subjects.length === 2);
   }
 
   // ---- getReportCard (via mocked RPC) ---------------------------------------------
@@ -371,12 +398,136 @@ async function run() {
     check('a class with marks is never silently dropped from the board', stillThere.data.length === 2);
   }
 
+  // ---- listExamClasses excludes a selected class with ZERO enrolled students (bug fix, feature brief §8) ----
+  {
+    const { sb, results } = freshApis({
+      classes: [{ id: 'c1', name: 'Grade 8' }, { id: 'c2', name: 'Grade 9' }, { id: 'c3', name: 'PP1' }],
+      students: [{ id: 's1', admission_no: '1', full_name: 'A', gender: 'Male', class_id: 'c1', status: 'active' }],
+      subject_class_assignments: [{ id: 'sca1', subject_id: 'su1', class_id: 'c1' }, { id: 'sca2', subject_id: 'su1', class_id: 'c2' }, { id: 'sca3', subject_id: 'su1', class_id: 'c3' }]
+    });
+    // Grade 9 and PP1 have zero enrolled students (the exact reported bug: a
+    // school with 26 students all in Grade 8, but Grade 9/PP1 still showed
+    // up as "0/9 subjects have marks") — both are still explicitly selected
+    // onto the exam here, same as the real report.
+    const exam = (await results.saveExam({ name: 'Opener Exams', academic_year_id: 'y1', term_id: 't1', class_ids: ['c1', 'c2', 'c3'] })).data;
+
+    const rows = await results.listExamClasses(exam.id);
+    check('only the class that actually has enrolled students appears', rows.data.length === 1 && rows.data[0].class_id === 'c1');
+    check('the zero-student classes are not listed as pending at all', !rows.data.some((r) => r.class_id === 'c2' || r.class_id === 'c3'));
+
+    // Enroll a student into Grade 9 after the fact — it should start
+    // appearing automatically, without needing to touch the exam again.
+    sb._tables.students.push({ id: 's9', admission_no: '9', full_name: 'New Kid', gender: 'Male', class_id: 'c2', status: 'active' });
+    const afterEnroll = await results.listExamClasses(exam.id);
+    check('a class that gains a student is picked up automatically on the next load', afterEnroll.data.some((r) => r.class_id === 'c2'));
+    check('the still-empty class (PP1) remains excluded', !afterEnroll.data.some((r) => r.class_id === 'c3'));
+  }
+
   // ---- listExamClassChoices (Phase 2h) ---------------------------------------------
   {
     const { results } = freshApis({ classes: [{ id: 'c1', name: 'Grade 7' }, { id: 'c2', name: 'Grade 8' }] });
     const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', class_ids: ['c1'] })).data;
     const choices = await results.listExamClassChoices(exam.id);
     check('listExamClassChoices excludes classes already added to the exam', choices.data.length === 1 && choices.data[0].id === 'c2');
+  }
+
+  // ---- setMaxMarks / getResultsEntry max_marks_set (Zeraki brief Step 5) ----------
+  {
+    const { results } = freshApis();
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', class_ids: ['c1'] })).data;
+
+    check('setMaxMarks requires exam/class/subject', (await results.setMaxMarks(null, 'c1', 'su1', 50)).ok === false);
+    check('setMaxMarks rejects a non-positive value', (await results.setMaxMarks(exam.id, 'c1', 'su1', -5)).ok === false);
+    check('setMaxMarks rejects a non-numeric value', (await results.setMaxMarks(exam.id, 'c1', 'su1', 'abc')).ok === false);
+
+    const before = await results.getResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1' });
+    check('getResultsEntry reports max_marks_set=false before Maximum Marks is ever set', before.max_marks_set === false && before.out_of === 100);
+
+    const set = await results.setMaxMarks(exam.id, 'c1', 'su1', 50);
+    check('setMaxMarks succeeds with a positive value', set.ok === true);
+
+    const after = await results.getResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1' });
+    check('getResultsEntry picks up the new Maximum Marks', after.out_of === 50);
+    check('getResultsEntry reports max_marks_set=true once confirmed', after.max_marks_set === true);
+
+    const other = await results.getResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su2' });
+    check('setMaxMarks is scoped to the one subject, not the whole exam', other.max_marks_set === false && other.out_of === 100);
+
+    const updated = await results.setMaxMarks(exam.id, 'c1', 'su1', 40);
+    check('setMaxMarks updates an already-set value rather than erroring', updated.ok === true && updated.data.max_marks === 40);
+  }
+
+  // ---- savePublishSettings + getBroadsheet ranking/min-subjects (Step 10) --------
+  {
+    const { results } = freshApis();
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100, class_ids: ['c1'] })).data;
+
+    check('savePublishSettings fails for a class not on the exam', (await results.savePublishSettings(exam.id, 'no-such-class', { min_subjects: 2 })).ok === false);
+
+    const saved = await results.savePublishSettings(exam.id, 'c1', { ranking_criteria: 'mean_points', min_subjects: 1 });
+    check('savePublishSettings succeeds for a class actually on the exam', saved.ok === true);
+
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: 80 }, { student_id: 's2', score: 60 }] });
+    await results.publishExam(exam.id, 'c1');
+
+    const bs = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1' });
+    check('getBroadsheet reflects the saved ranking_criteria', bs.ranking_criteria === 'mean_points');
+    check('getBroadsheet reflects the saved min_subjects', bs.min_subjects === 1);
+    check('getBroadsheet has no deviation_exam when none was configured', bs.deviation_exam === null);
+
+    // A class that never went through Publish Settings behaves exactly as
+    // before: default ranking, and min_subjects falls back to the school
+    // setting (0 here, since none was seeded).
+    const exam2 = (await results.saveExam({ name: 'Opener', academic_year_id: 'y1', term_id: 't1', out_of: 100, class_ids: ['c1'] })).data;
+    const bs2 = await results.getBroadsheet({ exam_id: exam2.id, class_id: 'c1' });
+    check('getBroadsheet defaults ranking_criteria to mean_marks when unset', bs2.ranking_criteria === 'mean_marks');
+    check('getBroadsheet defaults min_subjects to 0 when unset and no school setting exists', bs2.min_subjects === 0);
+  }
+
+  // ---- listDeviationExamChoices + Deviation Exam comparison (Step 10) ------------
+  {
+    const { results } = freshApis();
+    const exam1 = (await results.saveExam({ name: 'Term 1 Exam', academic_year_id: 'y1', term_id: 't1', out_of: 100, class_ids: ['c1'] })).data;
+    const exam2 = (await results.saveExam({ name: 'Term 2 Exam', academic_year_id: 'y1', term_id: 't1', out_of: 100, class_ids: ['c1'] })).data;
+
+    check('listDeviationExamChoices is empty before any OTHER exam has published results', (await results.listDeviationExamChoices(exam2.id, 'c1')).data.length === 0);
+
+    await results.saveResultsEntry({ exam_id: exam1.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: 90 }, { student_id: 's2', score: 70 }] });
+    await results.publishExam(exam1.id, 'c1');
+
+    const choices = await results.listDeviationExamChoices(exam2.id, 'c1');
+    check('listDeviationExamChoices includes a different, published-for-this-class exam', choices.data.length === 1 && choices.data[0].id === exam1.id);
+    check('listDeviationExamChoices excludes the exam being configured itself', (await results.listDeviationExamChoices(exam1.id, 'c1')).data.every((e) => e.id !== exam1.id));
+
+    await results.savePublishSettings(exam2.id, 'c1', { deviation_exam_id: exam1.id });
+    await results.saveResultsEntry({ exam_id: exam2.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: 60 }, { student_id: 's2', score: 60 }] });
+    await results.publishExam(exam2.id, 'c1');
+
+    const bs = await results.getBroadsheet({ exam_id: exam2.id, class_id: 'c1' });
+    check('getBroadsheet resolves the configured Deviation Exam', bs.deviation_exam !== null && bs.deviation_exam.exam_id === exam1.id);
+    check('getBroadsheet\'s deviation_exam carries the comparison exam\'s name', bs.deviation_exam.exam_name === 'Term 1 Exam');
+  }
+
+  // ---- withdrawExam / markReleased (Step 13: Withdraw Results / Send Results) ----
+  {
+    const { results } = freshApis();
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100, class_ids: ['c1'] })).data;
+
+    check('withdrawExam fails when nothing has been published yet', (await results.withdrawExam(exam.id, 'c1')).ok === false);
+
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: 80 }] });
+    await results.publishExam(exam.id, 'c1');
+    const released = await results.markReleased(exam.id, 'c1', 'stf1');
+    check('markReleased succeeds once a subject is published', released.ok === true && !!released.data.released_at);
+
+    const withdrawn = await results.withdrawExam(exam.id, 'c1');
+    check('withdrawExam reopens every published subject back to draft', withdrawn.ok === true && withdrawn.reopened === 1);
+
+    const status = await results.getSubmissionStatus(exam.id, 'c1', 'su1');
+    check('a withdrawn subject is back to draft', status.data.status === 'draft');
+
+    const ec = await results.listExamClasses(exam.id);
+    check('withdrawExam clears the released_at stamp', ec.data.find((r) => r.class_id === 'c1').released_at === null);
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

@@ -76,15 +76,40 @@ async function renderBoard(root, exams, classes, years, terms) {
       setNavIntent('report-forms', { exam_id: e.id, class_id: b.dataset.print });
       go('reports');
     });
+    // Step 13 — post-publish admin actions.
+    card.querySelectorAll('[data-analyze]').forEach((b) => b.onclick = () => {
+      setNavIntent('exam-analysis', { exam_id: e.id, class_id: b.dataset.analyze });
+      go('exam-analysis');
+    });
+    card.querySelectorAll('[data-send-results]').forEach((b) => b.onclick = () => confirmAction(
+      'Send this class\'s results to parents now? This marks the class "Released" and takes you to Messaging to send.',
+      async () => {
+        const r = await Db.results.markReleased(e.id, b.dataset.sendResults);
+        if (!r.ok) { toast(r.message, 'err'); return; }
+        setNavIntent('messaging', { exam_id: e.id, class_id: b.dataset.sendResults, scope: 'exam_results' });
+        go('messaging');
+      }
+    ));
+    card.querySelectorAll('[data-withdraw]').forEach((b) => b.onclick = () => confirmAction(
+      'Withdraw this class\'s published results? Every published subject goes back to "not submitted" — parents will no longer see them until you republish.',
+      async () => {
+        const r = await Db.results.withdrawExam(e.id, b.dataset.withdraw);
+        if (!r.ok) { toast(r.message, 'err'); return; }
+        toast(`Withdrew ${r.reopened} of ${r.total} subject(s).`, 'ok');
+        renderBoard(root, exams, classes, years, terms);
+      },
+      true
+    ));
   });
 }
 
 const STATUS_META = {
   no_subjects: { label: 'No subjects assigned', cls: 'grey' },
-  not_started: { label: 'Not started', cls: 'red' },
+  not_started: { label: 'Results Not Uploaded', cls: 'red' },
   in_progress: { label: 'Marks incomplete', cls: 'amber' },
-  ready_to_publish: { label: 'Ready to review', cls: 'blue' },
-  published: { label: 'Published', cls: 'green' }
+  ready_to_publish: { label: 'Pending Publishing', cls: 'blue' },
+  published: { label: 'Published', cls: 'green' },
+  released: { label: 'Released', cls: 'green' }
 };
 
 function fmtDate(iso) {
@@ -104,8 +129,16 @@ function examCard(exam, classRows) {
       else if (r.status === 'not_started') action = `<button class="btn ghost sm" data-continue="${r.class_id}">📝 Enter Marks</button>`;
       else if (r.status === 'in_progress') action = `<button class="btn ghost sm" data-continue="${r.class_id}">📝 Continue marks entry</button>`;
       else if (r.status === 'ready_to_publish') action = `<button class="btn ghost sm" data-review="${r.class_id}">✅ Review &amp; Publish</button>`;
-      else action = `<button class="btn ghost sm" data-print="${r.class_id}">🖨️ Print Reports</button>`;
-      const lastPub = r.status === 'published' && r.last_published_at
+      else {
+        // Step 13: published/released classes get the full set of
+        // post-publish actions instead of just "Print Reports".
+        action = `
+          <button class="btn ghost sm" data-analyze="${r.class_id}">🔎 Analyze</button>
+          <button class="btn ghost sm" data-send-results="${r.class_id}">📨 Send Results</button>
+          <button class="btn ghost sm" data-print="${r.class_id}">🖨️ Print Reports</button>
+          <button class="btn ghost sm" data-withdraw="${r.class_id}">↩️ Withdraw</button>`;
+      }
+      const lastPub = (r.status === 'published' || r.status === 'released') && r.last_published_at
         ? `${fmtDate(r.last_published_at)}${r.last_published_by ? ` by ${esc(r.last_published_by)}` : ''}` : '—';
       return `<tr>
         <td>${esc(r.class_name)}</td>
@@ -120,7 +153,7 @@ function examCard(exam, classRows) {
   return `<div class="card" style="margin-bottom:16px" data-exam-card="${exam.id}">
     <div class="card-h">
       <h3>${esc(exam.name)}</h3>
-      <span class="badge grey">${esc(EXAM_TYPE_LABELS[exam.exam_type] || exam.exam_type || 'Summative')}</span>
+      <span class="badge grey">${esc(EXAM_TYPE_LABELS[exam.exam_type] || exam.exam_type || 'Written Test')}</span>
       <span class="badge blue">${esc(exam.academic_year_name)} · ${esc(exam.term_name)}</span>
       <span class="badge grey">Out of ${exam.out_of}</span>
       <div class="spacer"></div>
@@ -141,9 +174,13 @@ function examCard(exam, classRows) {
 function openExamModal(root, years, terms, classes, existing, currentClassRows) {
   const selectedIds = new Set((currentClassRows || []).map((r) => r.class_id));
   const lockedIds = new Set((currentClassRows || []).filter((r) => r.subjects_with_marks > 0).map((r) => r.class_id));
+  const minByClass = {};
+  (currentClassRows || []).forEach((r) => { minByClass[r.class_id] = r.min_subjects; });
+  const initialType = existing ? existing.exam_type : 'written';
 
   modal({
     title: existing ? 'Edit exam' : 'Add exam',
+    wide: true,
     body: `
       <div class="field"><label>Exam name</label><input id="ex-name" value="${esc(existing ? existing.name : '')}" placeholder="e.g. End of Term 1 Exam"></div>
       <div class="grid2">
@@ -151,27 +188,43 @@ function openExamModal(root, years, terms, classes, existing, currentClassRows) 
         <div class="field"><label>Term</label><select id="ex-term">${options(terms, 'id', 'name', existing ? existing.term_id : '', 'Choose a term')}</select></div>
       </div>
       <div class="grid2">
-        <div class="field"><label>Exam type</label><select id="ex-type">${options(EXAM_TYPE_CHOICES, 'id', 'name', existing ? existing.exam_type : 'summative')}</select></div>
+        <div class="field"><label>Exam type</label><select id="ex-type">${options(EXAM_TYPE_CHOICES, 'id', 'name', initialType)}</select></div>
         <div class="field"><label>Out of (max score)</label><input id="ex-outof" type="number" value="${existing ? existing.out_of : 100}"></div>
       </div>
+      <p class="hint" id="ex-consolidated-note" style="display:${initialType === 'consolidated' ? '' : 'none'};color:var(--warn)">
+        ⚠️ Combining two or more exams together isn't built yet — this creates a normal single exam for now; the merge behaviour is being scoped separately.
+      </p>
       <div class="field">
-        <label>Which classes are sitting this exam?</label>
-        <p class="hint" style="margin-top:0">Tick every class that will sit this exam — you can add more later from the exam card.</p>
-        <div style="max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px">
+        <label>Which grades are sitting this exam?</label>
+        <p class="hint" style="margin-top:0">Tick every class that will sit this exam, and optionally set a minimum number of learning areas a student must have taken to be ranked — anyone who sat fewer is shown as "X" instead of skewing the class mean. Leave blank to use the school-wide default. You can add more classes later from the exam card.</p>
+        <div style="max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px">
           ${classes.length ? classes.map((c) => `
-            <label style="display:flex;align-items:center;gap:8px;padding:4px 0">
-              <input type="checkbox" data-class-check value="${c.id}" ${selectedIds.has(c.id) ? 'checked' : ''} ${lockedIds.has(c.id) ? 'disabled' : ''}>
-              <span>${esc(c.name)}</span>
-              ${lockedIds.has(c.id) ? '<span class="muted" style="font-size:11px">(has marks recorded — can\'t remove)</span>' : ''}
-            </label>`).join('') : '<p class="muted" style="margin:0">No classes yet — add a class first.</p>'}
+            <div style="display:flex;align-items:center;gap:8px;padding:5px 0">
+              <label style="display:flex;align-items:center;gap:8px;flex:1;margin:0">
+                <input type="checkbox" data-class-check value="${c.id}" ${selectedIds.has(c.id) ? 'checked' : ''} ${lockedIds.has(c.id) ? 'disabled' : ''}>
+                <span>${esc(c.name)}</span>
+                ${lockedIds.has(c.id) ? '<span class="muted" style="font-size:11px">(has marks recorded — can\'t remove)</span>' : ''}
+              </label>
+              <input type="number" min="0" data-class-min="${c.id}" placeholder="Min. learning areas" title="Minimum learning areas for ${esc(c.name)}" style="width:150px" value="${minByClass[c.id] === null || minByClass[c.id] === undefined ? '' : minByClass[c.id]}">
+            </div>`).join('') : '<p class="muted" style="margin:0">No classes yet — add a class first.</p>'}
         </div>
       </div>
     `,
     okLabel: 'Save',
+    onOpen: () => {
+      document.getElementById('ex-type').onchange = (e) => {
+        document.getElementById('ex-consolidated-note').style.display = e.target.value === 'consolidated' ? '' : 'none';
+      };
+    },
     onOk: async () => {
       const lockedButUnchecked = [...lockedIds]; // always resubmitted regardless of checkbox state (disabled inputs don't post)
       const ticked = [...document.querySelectorAll('[data-class-check]')].filter((cb) => cb.checked).map((cb) => cb.value);
       const classIds = [...new Set([...ticked, ...lockedButUnchecked])];
+      const minSubjectsByClass = {};
+      document.querySelectorAll('[data-class-min]').forEach((inp) => {
+        if (classIds.indexOf(inp.dataset.classMin) === -1) return;
+        minSubjectsByClass[inp.dataset.classMin] = inp.value === '' ? null : inp.value;
+      });
       const res = await Db.results.saveExam({
         id: existing ? existing.id : undefined,
         name: document.getElementById('ex-name').value,
@@ -179,7 +232,8 @@ function openExamModal(root, years, terms, classes, existing, currentClassRows) 
         term_id: document.getElementById('ex-term').value,
         exam_type: document.getElementById('ex-type').value,
         out_of: document.getElementById('ex-outof').value,
-        class_ids: classIds
+        class_ids: classIds,
+        min_subjects_by_class: minSubjectsByClass
       });
       if (!res.ok) { toast(res.message, 'err'); return; }
       closeModal();

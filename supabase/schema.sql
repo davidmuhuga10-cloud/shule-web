@@ -485,10 +485,16 @@ create table public.exams (
   term_id uuid not null references public.terms(id) on delete cascade,
   out_of numeric not null default 100,
   status text not null default 'open',         -- informational only (e.g. 'open'/'closed'); no fixed enum, no logic branches on it
-  exam_type text not null default 'summative',
+  exam_type text not null default 'written',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint exams_exam_type_check check (exam_type in ('summative', 'formative', 'cat', 'mock'))
+  -- 'summative'/'formative'/'cat'/'mock' are the pre-0012 types, kept valid
+  -- (nothing already saved under them breaks) but no longer offered in the
+  -- UI, which now offers Zeraki-style types instead (0012_exam_workflow_v2).
+  constraint exams_exam_type_check check (exam_type in (
+    'summative', 'formative', 'cat', 'mock',
+    'written', 'consolidated', 'supplementary', 'kpsea_kjsea', 'year_average'
+  ))
 );
 create trigger trg_exams_updated_at before update on public.exams
   for each row execute function public.set_updated_at();
@@ -504,7 +510,19 @@ create table public.exam_classes (
   exam_id uuid not null references public.exams(id) on delete cascade,
   class_id uuid not null references public.classes(id) on delete cascade,
   created_at timestamptz not null default now(),
-  unique (exam_id, class_id)
+  -- 0012_exam_workflow_v2 (brief Steps 1/3/10/13) — per-(exam,class) fields,
+  -- all nullable so an exam/class that never goes through the new
+  -- publish-settings step behaves exactly as before (falls back to the
+  -- existing global settings / single default grading scale / mean-marks
+  -- ranking respectively):
+  min_subjects integer,                              -- Step 1: "minimum learning areas" — below this, a student is excluded from ranking (shown as X)
+  ranking_criteria text,                              -- Step 10: 'mean_marks' | 'mean_points', chosen at publish time
+  deviation_exam_id uuid references public.exams(id) on delete set null, -- Step 10: prior exam to compare this class's performance against
+  grading_scale_id uuid references public.grading_scales(id) on delete set null, -- Step 10: Overall Grading System (exam+class level only — see the brief's explicit exception against a per-subject selector)
+  released_at timestamptz,                            -- Step 3/13: results actually sent to parents ("Send Results") -> Zeraki's "Released" status
+  released_by uuid references public.staff(id) on delete set null,
+  unique (exam_id, class_id),
+  constraint exam_classes_ranking_criteria_check check (ranking_criteria is null or ranking_criteria in ('mean_marks', 'mean_points'))
 );
 create index idx_exam_classes_school on public.exam_classes(school_id);
 create index idx_exam_classes_exam on public.exam_classes(exam_id);
@@ -565,6 +583,7 @@ create table public.result_submissions (
   approved_at timestamptz,
   published_by uuid references public.staff(id) on delete set null,
   published_at timestamptz,
+  max_marks numeric,  -- 0012_exam_workflow_v2 (brief Step 5): per-subject "Maximum Marks" override, set by the teacher before entering scores; falls back to the exam's out_of when null
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (exam_id, class_id, subject_id),
@@ -894,6 +913,13 @@ create policy exam_classes_admin_write on public.exam_classes for insert
   with check (public.is_admin() and school_id = public.current_school_id());
 create policy exam_classes_admin_delete on public.exam_classes for delete
   using (public.is_admin() and school_id = public.current_school_id());
+-- 0012_exam_workflow_v2: publish-settings/Withdraw Results/Send Results all
+-- update an existing exam_classes row in place (min_subjects, ranking
+-- criteria, deviation exam, grading scale, released_at/by) — same admin-only
+-- rule as the insert/delete policies above.
+create policy exam_classes_admin_update on public.exam_classes for update
+  using (public.is_admin() and school_id = public.current_school_id())
+  with check (public.is_admin() and school_id = public.current_school_id());
 
 -- results: staff (admin+teacher) can enter/edit and always read everything
 -- in their own school (published or not — they need to review before
@@ -1021,6 +1047,42 @@ $$;
 grant execute on function public.resolve_staff_login_email(text, text) to anon, authenticated;
 
 -- ============================================================================
+-- find_login_accounts_by_phone RPC — landing-redesign brief B1 ("System
+-- should auto-identify whether a user is a parent, teacher, or admin based
+-- on their phone number... If the phone number exists in TWO OR MORE
+-- schools... prompt the user to select the correct account").
+--
+-- Deliberately narrow, same spirit as resolve_staff_login_email above: given
+-- ONLY a phone number, across ALL schools (security definer bypasses RLS,
+-- same justification as get_school_public_info/resolve_staff_login_email —
+-- this has to run before the caller is authenticated into any one school),
+-- return just enough for the login screen to build a picker and then
+-- proceed through the EXISTING per-role login functions — never a password,
+-- never anything beyond what's needed to pick the right account:
+--   school_code, school_name, role, display_name
+-- Only active profiles at active schools are considered. Students are
+-- intentionally excluded — they sign in with an admission number, not a
+-- phone (frozen/unchanged by this brief).
+-- ============================================================================
+create or replace function public.find_login_accounts_by_phone(p_phone text)
+returns table (school_code text, school_name text, role user_role, display_name text)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select s.code, s.name, p.role, p.name
+  from public.profiles p
+  join public.schools s on s.id = p.school_id
+  where p.phone = trim(coalesce(p_phone, ''))
+    and p.status = 'active'
+    and s.status = 'active'
+    and p.role in ('admin', 'teacher', 'parent')
+  order by s.name, p.role;
+$$;
+grant execute on function public.find_login_accounts_by_phone(text) to anon, authenticated;
+
+-- ============================================================================
 -- seed_school_defaults RPC — populates a brand-new school with the same CBC
 -- subject list, default grading scale/bands and default settings keys every
 -- school used to get from seed.sql when there was only ever one tenant.
@@ -1036,6 +1098,7 @@ set search_path = public
 as $$
 declare
   v_scale_id uuid;
+  v_year_id uuid;
 begin
   insert into public.subjects (school_id, name, level, code, description) values
     (p_school_id, 'Language Activities', 'Pre-Primary', '', ''),
@@ -1106,6 +1169,27 @@ begin
     -- everyone with a total > 0", the same behaviour every school already had.
     (p_school_id, 'min_subjects_for_ranking', '0')
   on conflict (school_id, key) do nothing;
+
+  -- Landing-redesign brief C2: "Academic year and terms should be
+  -- automatically created when a new school is created" — previously the
+  -- admin had to do this by hand on day one via the Dashboard's "Getting set
+  -- up" checklist. Dates are left null (the admin can fill them in later
+  -- under Settings > Academic Years & Terms); what matters here is that an
+  -- active year with 3 terms already exists so exams/results aren't blocked
+  -- on a manual setup step. on conflict is a no-op guard for re-running this
+  -- function against a school that already has a year (e.g. a retried call).
+  insert into public.academic_years (id, school_id, name, status)
+  values (gen_random_uuid(), p_school_id, extract(year from now())::text, 'active')
+  on conflict (school_id, name) do nothing
+  returning id into v_year_id;
+
+  if v_year_id is not null then
+    insert into public.terms (school_id, academic_year_id, name, status) values
+      (p_school_id, v_year_id, 'Term 1', 'active'),
+      (p_school_id, v_year_id, 'Term 2', 'upcoming'),
+      (p_school_id, v_year_id, 'Term 3', 'upcoming')
+    on conflict (academic_year_id, name) do nothing;
+  end if;
 end;
 $$;
 

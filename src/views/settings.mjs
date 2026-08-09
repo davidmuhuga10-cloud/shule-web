@@ -14,12 +14,14 @@
 import { viewSettings as renderSchoolProfile } from './schoolSettings.mjs';
 import { viewUsers as renderUserAccounts } from './userAccounts.mjs';
 import { viewAcademicCalendar as renderAcademicCalendar } from './academicCalendar.mjs';
+import { viewPermissions as renderPermissions } from './permissionsSettings.mjs';
 import { takeNavIntent } from '../lib/navIntent.mjs';
 
 const TABS = [
   { key: 'profile', label: 'School Settings', render: renderSchoolProfile },
   { key: 'users', label: 'User Accounts', render: renderUserAccounts },
-  { key: 'calendar', label: 'Academic Years & Terms', render: renderAcademicCalendar }
+  { key: 'calendar', label: 'Academic Years & Terms', render: renderAcademicCalendar },
+  { key: 'permissions', label: 'Permissions', render: renderPermissions }
 ];
 
 export async function viewSettingsHub(root) {

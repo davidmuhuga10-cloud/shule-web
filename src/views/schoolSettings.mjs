@@ -1,8 +1,16 @@
 import { esc, toast } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
+import { isContactInfoComplete } from '../lib/printHeader.mjs';
 
 const MAX_DIM = 160;
 const MAX_LEN = 45000;
+// Feature brief §1: "Reject logo uploads above a set size limit... to avoid
+// filling the database with oversized files." Checked on the ORIGINAL file
+// before any processing — a straightforward, fast reject for anything
+// clearly too big to be a logo, on top of (not instead of) the existing
+// shrink-to-fit compression below, which still handles anything under this
+// limit down to a small stored thumbnail.
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5 MB
 
 export async function viewSettings(root) {
   const res = await Db.settings.get();
@@ -15,19 +23,35 @@ function render(root, settings) {
     ? `<img class="logo-thumb" id="set-logo-preview" src="${settings.logo}">`
     : `<div class="logo-placeholder" id="set-logo-preview">🏫</div>`;
 
+  // Feature brief §3: contact/address details are compulsory before
+  // anything can be printed (the logo stays optional) — a visible reminder
+  // right here, on the screen where an admin would actually fix it, rather
+  // than only surfacing it as a dead end on some report screen later.
+  const contactWarning = isContactInfoComplete(settings) ? '' : `
+    <div class="empty warn" style="margin-bottom:16px">
+      <div class="e-ico">⚠️</div><h3>Contact details required before printing</h3>
+      <p>P.O. Box number, postal code, town and phone are required — no report can be printed or downloaded until these are set.</p>
+    </div>`;
+
   root.innerHTML = `
     <div class="page-head"><div><h2>School Settings</h2><p>Shown on report forms, class lists and the login screen.</p></div></div>
+    ${contactWarning}
     <div class="card">
       <div class="card-b">
         <div class="field"><label>School name</label><input id="set-name" value="${esc(settings.school_name || '')}" placeholder="e.g. Riverside Academy"></div>
         <div class="field"><label>Motto (optional)</label><input id="set-motto" value="${esc(settings.school_motto || '')}" placeholder="e.g. Excellence Through Discipline"></div>
-        <div class="grid2">
-          <div class="field"><label>P.O. Box</label><input id="set-pobox" value="${esc(settings.po_box || '')}" placeholder="e.g. 100–00100, Nairobi"></div>
-          <div class="field"><label>Phone</label><input id="set-phone" value="${esc(settings.phone || '')}" placeholder="e.g. 0712 345 678"></div>
+        <p class="hint" style="margin:14px 0 4px">Address / contact details (required before printing any report)</p>
+        <div class="grid3">
+          <div class="field"><label>P.O. Box number</label><input id="set-pobox" value="${esc(settings.po_box || '')}" placeholder="e.g. 100"></div>
+          <div class="field"><label>Postal / ZIP code</label><input id="set-postal" value="${esc(settings.postal_code || '')}" placeholder="e.g. 00100"></div>
+          <div class="field"><label>Town</label><input id="set-town" value="${esc(settings.town || '')}" placeholder="e.g. Nairobi"></div>
         </div>
-        <div class="field"><label>Email</label><input id="set-email" type="email" value="${esc(settings.email || '')}" placeholder="e.g. info@yourschool.ac.ke"></div>
+        <div class="grid2">
+          <div class="field"><label>Phone</label><input id="set-phone" value="${esc(settings.phone || '')}" placeholder="e.g. 0712 345 678"></div>
+          <div class="field"><label>Email (optional)</label><input id="set-email" type="email" value="${esc(settings.email || '')}" placeholder="e.g. info@yourschool.ac.ke"></div>
+        </div>
         <div class="field">
-          <label>Logo</label>
+          <label>Logo (optional)</label>
           <div style="display:flex;align-items:center;gap:14px">
             ${logoPreview}
             <div>
@@ -35,7 +59,7 @@ function render(root, settings) {
               ${settings.logo ? '<button class="btn ghost sm" id="set-logo-remove" style="margin-top:6px">Remove logo</button>' : ''}
             </div>
           </div>
-          <p class="hint">Automatically shrunk to a small thumbnail for fast loading on report forms and class lists.</p>
+          <p class="hint">Automatically shrunk to a small thumbnail for fast loading on report forms and class lists. Files over 5 MB are rejected outright.</p>
         </div>
       </div>
       <div class="modal-f" style="border-top:1px solid var(--line)"><button class="btn" id="set-save">Save settings</button></div>
@@ -47,6 +71,11 @@ function render(root, settings) {
   root.querySelector('#set-logo-file').onchange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      toast(`That image is too large (${Math.round(file.size / 1024 / 1024 * 10) / 10} MB) — please choose a file under 5 MB.`, 'err');
+      e.target.value = '';
+      return;
+    }
     shrinkImage(file, (dataUrl) => {
       pendingLogo = dataUrl;
       const preview = document.getElementById('set-logo-preview');
@@ -67,6 +96,8 @@ function render(root, settings) {
       school_name: root.querySelector('#set-name').value,
       school_motto: root.querySelector('#set-motto').value,
       po_box: root.querySelector('#set-pobox').value,
+      postal_code: root.querySelector('#set-postal').value,
+      town: root.querySelector('#set-town').value,
       phone: root.querySelector('#set-phone').value,
       email: root.querySelector('#set-email').value,
       logo: pendingLogo

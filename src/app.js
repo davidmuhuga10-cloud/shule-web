@@ -25,6 +25,8 @@ import { viewMarks } from './views/marksEntry.mjs';
 import { viewPublishing } from './views/publishing.mjs';
 import { viewReportsHub } from './views/reportsHub.mjs';
 import { viewBroadsheet } from './views/broadsheet.mjs';
+import { viewExamAnalysis } from './views/examAnalysis.mjs';
+import { viewScoreSheet } from './views/scoreSheet.mjs';
 import { viewReports } from './views/reportForms.mjs';
 import { viewClassList } from './views/classList.mjs';
 import { viewTranscript } from './views/transcript.mjs';
@@ -74,9 +76,24 @@ export function renderLoading(root, message) {
  *  plain @page{size:landscape} override right before printing, then remove
  *  it again once the print dialog closes. */
 export function printLandscape() {
+  printWithOptions('landscape', 'A4');
+}
+/** Feature brief §2/§4: every printout should be "adjustable to different
+ *  printing requirements: portrait, landscape, Letter, A4, and A5" — a
+ *  generalized version of the old printLandscape() (kept above as a thin
+ *  wrapper so its one existing caller keeps working unchanged) that swaps in
+ *  a plain @page override for whichever orientation/paper size the admin
+ *  picked, right before printing, and removes it again once the print
+ *  dialog closes — same reasoning as the old landscape-only version: the CSS
+ *  "page" property + a named @page rule is unreliable across browsers, this
+ *  boring swap-in/swap-out approach is not. */
+const PRINT_PAPER_SIZES = { A4: 'A4', A5: 'A5', Letter: 'letter' };
+export function printWithOptions(orientation, paperSize) {
+  const size = PRINT_PAPER_SIZES[paperSize] || 'A4';
+  const orient = orientation === 'landscape' ? 'landscape' : 'portrait';
   const style = document.createElement('style');
-  style.id = 'print-landscape-override';
-  style.textContent = '@page{size:A4 landscape;margin:10mm}';
+  style.id = 'print-options-override';
+  style.textContent = `@page{size:${size} ${orient};margin:10mm}`;
   document.head.appendChild(style);
   const cleanup = () => { style.remove(); window.removeEventListener('afterprint', cleanup); };
   window.addEventListener('afterprint', cleanup);
@@ -85,6 +102,49 @@ export function printLandscape() {
   // (e.g. cancelling before the dialog fully engages) — make sure the
   // override never lingers and affects the next, unrelated print.
   setTimeout(cleanup, 5000);
+}
+/** Shared "🖨️ Print" + paper-size/orientation controls, for every report
+ *  view that lets the admin choose portrait/landscape and A4/A5/Letter
+ *  before printing (feature brief §2/§4). idPrefix keeps element IDs unique
+ *  per view when more than one of these could theoretically be on a page.
+ *  Returns the HTML; call wirePrintOptions(root, idPrefix, onPrint) after
+ *  inserting it to wire the Print button to printWithOptions() using
+ *  whichever orientation/size is currently selected. */
+export function printOptionsHtml(idPrefix, defaultOrientation) {
+  const landscapeDefault = defaultOrientation === 'landscape';
+  return `<div class="print-opts no-print">
+    <select id="${idPrefix}-orient" title="Orientation">
+      <option value="portrait" ${landscapeDefault ? '' : 'selected'}>Portrait</option>
+      <option value="landscape" ${landscapeDefault ? 'selected' : ''}>Landscape</option>
+    </select>
+    <select id="${idPrefix}-size" title="Paper size">
+      <option value="A4" selected>A4</option>
+      <option value="A5">A5</option>
+      <option value="Letter">Letter</option>
+    </select>
+    <button class="btn secondary" id="${idPrefix}-print-btn">🖨️ Print</button>
+  </div>`;
+}
+/** suggestedFilename (optional, feature brief §2: "suggest a clear file name
+ *  e.g. 'Grade 10 Classlist'") is applied to document.title just before
+ *  printing and restored right after — browsers' "Save as PDF" print target
+ *  defaults its filename to the page title, so this is what actually makes
+ *  that suggestion show up in the save dialog. */
+export function wirePrintOptions(root, idPrefix, suggestedFilename) {
+  const btn = root.querySelector(`#${idPrefix}-print-btn`);
+  if (!btn) return;
+  btn.onclick = () => {
+    const orient = root.querySelector(`#${idPrefix}-orient`).value;
+    const size = root.querySelector(`#${idPrefix}-size`).value;
+    if (suggestedFilename) {
+      const prevTitle = document.title;
+      document.title = suggestedFilename;
+      const restore = () => { document.title = prevTitle; window.removeEventListener('afterprint', restore); };
+      window.addEventListener('afterprint', restore);
+      setTimeout(restore, 5000);
+    }
+    printWithOptions(orient, size);
+  };
 }
 export function initials(name) {
   return String(name || '?').trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
@@ -545,8 +605,8 @@ const NAV = {
 // just have them as icons" — exams-hub/reports-hub/settings are the actual
 // sidebar entries now; these are what their icon tiles/tabs link to).
 const HIDDEN_ALLOWED_ROUTES = {
-  admin: ['bulk-upload', 'exams', 'marks', 'publishing', 'grading', 'class-list', 'broadsheet', 'reports', 'transcript', 'certificates'],
-  teacher: ['bulk-upload', 'exams', 'marks', 'publishing', 'class-list', 'broadsheet', 'reports', 'transcript', 'certificates']
+  admin: ['bulk-upload', 'exams', 'marks', 'publishing', 'grading', 'class-list', 'broadsheet', 'reports', 'transcript', 'certificates', 'exam-analysis', 'score-sheet'],
+  teacher: ['bulk-upload', 'exams', 'marks', 'publishing', 'class-list', 'broadsheet', 'reports', 'transcript', 'certificates', 'exam-analysis', 'score-sheet']
 };
 
 function allowedRoutes(role) {
@@ -607,6 +667,8 @@ const ROUTES = {
   'publishing': viewPublishing,
   'reports-hub': viewReportsHub,
   'broadsheet': viewBroadsheet,
+  'exam-analysis': viewExamAnalysis,
+  'score-sheet': viewScoreSheet,
   'reports': viewReports,
   'class-list': viewClassList,
   'transcript': viewTranscript,
@@ -701,6 +763,16 @@ async function bootApp() {
   $('#um-name').textContent = state.profile.name;
   $('#um-role').textContent = ({ admin: 'Administrator', teacher: 'Teacher / Staff', student: 'Student', parent: 'Parent' })[state.profile.role] || state.profile.role;
   if (state.settings && state.settings.school_name) $('#brand-school').textContent = state.settings.school_name;
+  // Feature brief §1: "On login, display the logo next to the school name,
+  // if the school has one set. If not, show what's currently there" — the
+  // sidebar brand box always keeps its size (set in CSS), so swapping its
+  // content for an <img> here never shifts the layout even before this
+  // resolves; the generic 🎓 mark stays exactly as it was for any school
+  // that hasn't uploaded a logo.
+  const brandLogo = $('.sidebar .brand .logo');
+  if (brandLogo && state.settings && state.settings.logo) {
+    brandLogo.innerHTML = `<img src="${state.settings.logo}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:10px">`;
+  }
 
   Db.dashboard.getActiveContext().then((active) => {
     $('#topctx').innerHTML = active.academic_year_name

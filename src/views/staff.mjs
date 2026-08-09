@@ -3,13 +3,21 @@ import { Db } from '../lib/api/index.mjs';
 
 const JOB_TITLES = ['Teacher', 'Head Teacher', 'Deputy Head Teacher', 'Bursar', 'Support Staff'];
 
+// Bug fix (feature brief §9.1): a teacher was showing up under BOTH
+// Teachers and Staff — a teacher isn't a Staff member in this app's
+// structure, the two lists are meant to be kept separate (same isTeacher()
+// rule teachers.mjs already uses to decide what belongs on ITS list).
+function isTeacher(s) {
+  return String(s.role || '').toLowerCase() === 'teacher';
+}
+
 export async function viewStaff(root) {
   await render(root);
 }
 
 async function render(root) {
   const [res, usersRes] = await Promise.all([Db.staff.list(), Db.users.list()]);
-  const staff = res.ok ? res.data : [];
+  const staff = (res.ok ? res.data : []).filter((s) => !isTeacher(s));
   // Login account per staff member, for the reset-password/enable-disable
   // actions below — those moved here from the old, now-admin-only "User
   // Accounts" screen (see userAccounts.mjs), so managing a staff member's

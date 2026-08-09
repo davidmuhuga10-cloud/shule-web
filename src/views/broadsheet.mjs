@@ -13,13 +13,11 @@
  * (deviation from the class average), STR POS and OVR POS (position within
  * the student's own stream vs. within the whole class).
  */
-import { esc, options, renderPrereq, loader, printLandscape } from '../app.js';
+import { esc, options, renderPrereq, loader, go, printOptionsHtml, wirePrintOptions } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { downloadXlsxAOA } from '../lib/xlsxUtil.mjs';
 import { buildBroadsheetAoa } from '../lib/broadsheetXlsx.mjs';
-
-const STATUS_BADGE_CLASS = { draft: 'grey', submitted: 'blue', approved: 'blue', published: 'green' };
-const STATUS_SHORT = { draft: 'Draft', submitted: 'Subm.', approved: 'Appr.', published: 'Publ.' };
+import { printHeaderHtml, isContactInfoComplete, renderMissingContactInfo } from '../lib/printHeader.mjs';
 
 export async function viewBroadsheet(root) {
   const [examsRes, classesRes] = await Promise.all([Db.results.listExams(), Db.classes.list()]);
@@ -76,35 +74,31 @@ async function load(root, classes, sel) {
   const settings = settingsRes.ok ? settingsRes.data : {};
   const cls = classes.find((c) => c.id === sel.class_id);
 
+  // Feature brief §3: block printing/downloading until the school's
+  // structured contact/address details are set — the logo stays optional.
+  if (!isContactInfoComplete(settings)) { renderMissingContactInfo(sheetEl, () => go('settings')); return; }
+
   if (!res.students.length) {
     sheetEl.innerHTML = `<div class="card"><div class="card-b"><div class="empty"><div class="e-ico">🎒</div><h3>No students found</h3><p>No active students match this class/stream yet.</p></div></div></div>`;
     return;
   }
   if (!res.subjects.length) {
-    sheetEl.innerHTML = `<div class="card"><div class="card-b"><div class="empty warn"><div class="e-ico">⚠️</div><h3>No subjects with marks yet</h3><p>Assign subjects to this class, or enter some marks, then come back.</p></div></div></div>`;
+    sheetEl.innerHTML = `<div class="card"><div class="card-b"><div class="empty warn"><div class="e-ico">⚠️</div><h3>No published subjects yet</h3><p>A subject only appears on the Mark List once its results are published — assign subjects and publish results, then come back.</p></div></div></div>`;
     return;
   }
 
-  const logoHtml = settings.logo ? `<img class="logo-thumb" src="${settings.logo}">` : `<div class="logo-placeholder">🏫</div>`;
-
   sheetEl.innerHTML = `
+    <div class="report-toolbar no-print">
+      <button class="btn secondary" id="bs-download">⬇️ Download Excel</button>
+      ${printOptionsHtml('bs', 'landscape')}
+    </div>
     <div class="card">
-      <div class="card-b" style="display:flex;gap:16px;align-items:center;border-bottom:1px solid var(--line);padding-bottom:16px">
-        ${logoHtml}
-        <div>
-          <h3 style="font-size:18px">${esc(settings.school_name || 'School')}</h3>
-          <div class="muted" style="font-size:12.5px">
-            ${settings.po_box ? 'P.O. Box ' + esc(settings.po_box) + ' · ' : ''}${settings.phone ? esc(settings.phone) + ' · ' : ''}${esc(settings.email || '')}
-          </div>
-          <div style="font-weight:650;margin-top:4px">${esc(res.exam.name)} — Mark List — ${esc(cls ? cls.name : '')}</div>
-        </div>
-        <div class="spacer"></div>
-        <button class="btn secondary no-print" id="bs-download">⬇️ Download Excel</button>
-        <button class="btn secondary no-print" id="bs-print">🖨️ Print</button>
+      <div class="card-b" style="border-bottom:1px solid var(--line);padding-bottom:12px">
+        ${printHeaderHtml(settings, `${res.exam.name} — Mark List — ${cls ? cls.name : ''}`)}
       </div>
-      <div class="card-b table-wrap"><table class="data mark-list-grid">
+      <div class="card-b table-wrap"><table class="mark-list-grid">
         <thead><tr><th class="id-col">Adm. No.</th><th class="name-col">Name</th><th class="str-col">Str</th>
-          ${res.subjects.map((s) => `<th class="num subj-col">${esc(s.code || s.name)}<br><span class="badge ${STATUS_BADGE_CLASS[s.submission_status] || 'grey'}" style="font-size:9.5px">${esc(STATUS_SHORT[s.submission_status] || s.submission_status)}</span></th>`).join('')}
+          ${res.subjects.map((s) => `<th class="num subj-col">${esc(s.code || s.name)}</th>`).join('')}
           <th class="num sum-col">SBJ</th><th class="num sum-col">TT MKS</th><th class="num sum-col">MN MKS</th><th class="num sum-col">PL</th>
           <th class="num sum-col">TT PTS</th><th class="num sum-col">MN PTS</th><th class="num sum-col">DEV</th><th class="num sum-col">STR POS</th><th class="num sum-col">OVR POS</th></tr></thead>
         <tbody>${res.students.map((s) => `<tr>
@@ -121,7 +115,7 @@ async function load(root, classes, sel) {
       <div class="card-b" style="border-top:1px solid var(--line)">Class average: <b>${res.class_average}</b></div>
     </div>
   `;
-  sheetEl.querySelector('#bs-print').onclick = printLandscape;
+  wirePrintOptions(sheetEl, 'bs', `${cls ? cls.name : 'Class'} Mark List — ${res.exam.name}`);
   sheetEl.querySelector('#bs-download').onclick = () => {
     const streamSel = root.querySelector('#bs-stream');
     const streamName = streamSel && streamSel.selectedIndex > 0 ? streamSel.options[streamSel.selectedIndex].textContent : '';

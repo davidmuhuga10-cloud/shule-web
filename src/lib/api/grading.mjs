@@ -140,6 +140,18 @@ export function createGradingApi(supabase) {
       return bands || [];
     },
 
+    /** A SPECIFIC scale's bands, by id — brief Step 10's "Overall Grading
+     *  System" is chosen per (exam, class) at publish time (exam_classes.
+     *  grading_scale_id), which may or may not be the school's single
+     *  is_default scale defaultScaleBands() above always uses. Falls back to
+     *  the default scale when scaleId is falsy, so callers can pass
+     *  `exam_classes.grading_scale_id` straight through without a null check. */
+    async scaleBands(scaleId) {
+      if (!scaleId) return api.defaultScaleBands();
+      const { data: bands } = await supabase.from('grade_ranges').select('*').eq('grading_scale_id', scaleId);
+      return bands || [];
+    },
+
     gradeScore
   };
   return api;

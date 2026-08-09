@@ -1,27 +1,49 @@
-import { esc, toast, options, renderPrereq, loader, confirmAction, state } from '../app.js';
+import { esc, toast, options, renderPrereq, loader, confirmAction, modal, closeModal, state } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { SUBMISSION_STATUS_LABELS } from '../lib/api/results.mjs';
 import { takeNavIntent } from '../lib/navIntent.mjs';
 import { buildMarkColumns, buildMarksTemplateCsv, parseMarksCsv, matchAndValidate, scoresByColumn } from '../lib/marksCsv.mjs';
 
+/** Brief Step 5's "spreadsheet upload should be a PC-only option; on phone,
+ *  only key-in should be offered" — a pragmatic, no-library heuristic
+ *  (coarse pointer = touch-primary device) rather than literal user-agent
+ *  sniffing, which is trivially spoofable and actively discouraged; this is
+ *  just a UX nudge (a phone CAN still technically drive a file picker), not
+ *  a security boundary, so an approximation is the right level of effort. */
+function isLikelyPc() {
+  try { return !window.matchMedia('(pointer: coarse)').matches; } catch (e) { return true; }
+}
+
 const STATUS_BADGE_CLASS = { draft: 'grey', submitted: 'blue', approved: 'blue', published: 'green' };
 const STATUS_DOT = { draft: '', submitted: '🟦', approved: '🟦', published: '🟩' };
 
+// Step 4/12: which subjects a non-admin teacher sees here is gated by
+// Settings > Permissions' "Show all school reports to all teachers" toggle
+// — fetched once per view-load (it doesn't change mid-session) rather than
+// threaded as an extra parameter through every render/load function below.
+let teachersSeeAllReports = false;
+
 export async function viewMarks(root) {
-  const [examsRes, classesRes, subjectsRes] = await Promise.all([Db.results.listExams(), Db.classes.list(), Db.subjects.list()]);
+  const [examsRes, classesRes, subjectsRes, settingsRes] = await Promise.all([
+    Db.results.listExams(), Db.classes.list(), Db.subjects.list(), Db.settings.get()
+  ]);
   const exams = examsRes.ok ? examsRes.data : [];
   const classes = classesRes.ok ? classesRes.data : [];
   const subjects = subjectsRes.ok ? subjectsRes.data : [];
+  teachersSeeAllReports = settingsRes.ok && String(settingsRes.data.teachers_see_all_reports) === 'true';
 
   if (!exams.length) { renderPrereq(root, 'No exams found', 'Please create an exam first.', 'exams', 'Go to Exams'); return; }
   if (!classes.length) { renderPrereq(root, 'No classes found', 'Please create a class first.', 'classes', 'Go to Classes'); return; }
   if (!subjects.length) { renderPrereq(root, 'No subjects found', 'Open a class\'s stream and assign it some subjects first.', 'classes', 'Go to Classes'); return; }
 
   // A "🎯 Enter Marks" click from the Manage Exams board hands off exactly
-  // which exam+class to open here — see navIntent.mjs. Falls back to the
+  // which exam+class to open here — see navIntent.mjs. An admin's "Edit
+  // Marks" quick-link from Publish Results (Step 9) additionally hands off
+  // a specific subject_id, so it lands straight on that subject's grid
+  // instead of whichever one happens to sort first. Falls back to the
   // normal blank pickers when opened directly from the sidebar.
   const intent = takeNavIntent('marks-entry') || {};
-  render(root, exams, classes, subjects, { exam_id: intent.exam_id || '', class_id: intent.class_id || '', stream_id: '' });
+  render(root, exams, classes, subjects, { exam_id: intent.exam_id || '', class_id: intent.class_id || '', stream_id: '', subject_id: intent.subject_id || '' });
 }
 
 function render(root, exams, classes, subjects, sel) {
@@ -67,16 +89,42 @@ function render(root, exams, classes, subjects, sel) {
 /** Every subject assigned to the class (falling back to every subject in
  *  the school if none have been explicitly assigned yet — an unconfigured
  *  class should never BLOCK marks entry, just not pre-narrow it), each with
- *  its current publishing status and how many students already have a mark. */
+ *  its current publishing status and how many students already have a mark.
+ *
+ *  Brief Step 4: "a teacher should see only the exams and subjects actually
+ *  assigned to them" — an admin (or a teacher when Settings > Permissions'
+ *  "Show all school reports to all teachers" is on) still sees every
+ *  assigned-to-the-class subject exactly as before; a plain teacher is
+ *  further narrowed down to subject_teacher_assignments rows naming THEM
+ *  specifically for this class. Reassigning a subject to a different
+ *  teacher is picked up live (this list is rebuilt fresh on every
+ *  load, never cached), matching Step 4's "disappear from the original
+ *  teacher's list and appear on the newly assigned teacher's list
+ *  automatically." A teacher with zero subjects assigned to them in an
+ *  otherwise-configured class sees none here — that's the point of the
+ *  filter, not a bug. */
 async function loadSubjectTabs(examId, classId, allSubjects) {
   const [assignedRes, submissionsRes] = await Promise.all([
     Db.assignments.getClassSubjects(classId),
     Db.results.listSubmissions(examId, classId)
   ]);
-  const assignedIds = (assignedRes.ok ? assignedRes.data : []).map((a) => a.subject_id);
+  const classAssignedIds = (assignedRes.ok ? assignedRes.data : []).map((a) => a.subject_id);
+  const isAdmin = state.profile && state.profile.role === 'admin';
+
+  let poolIds;
+  if (classAssignedIds.length) poolIds = classAssignedIds;
+  else if (isAdmin || teachersSeeAllReports) poolIds = allSubjects.map((s) => s.id);
+  else poolIds = [];
+
+  if (!isAdmin && !teachersSeeAllReports && state.profile && state.profile.staff_id) {
+    const mineRes = await Db.assignments.listTeacherAssignments({ staff_id: state.profile.staff_id, class_id: classId });
+    const mineIds = new Set((mineRes.ok ? mineRes.data : []).map((a) => a.subject_id));
+    poolIds = poolIds.filter((id) => mineIds.has(id));
+  }
+
   const bySubjectId = {};
   allSubjects.forEach((s) => { bySubjectId[s.id] = s; });
-  const pool = assignedIds.length ? assignedIds.map((id) => bySubjectId[id]).filter(Boolean) : allSubjects;
+  const pool = poolIds.map((id) => bySubjectId[id]).filter(Boolean);
   const statusRows = submissionsRes.ok ? submissionsRes.data : [];
   const statusBySubject = {};
   statusRows.forEach((r) => { statusBySubject[r.subject_id] = r; });
@@ -107,7 +155,9 @@ async function loadClassPanel(root, exams, classes, subjects, sel) {
           </span>`).join('')}</div>
       </div>
       <div class="modal-f" style="border-top:1px solid var(--line);justify-content:flex-start">
-        <button class="btn secondary sm" id="mk-bulk-toggle">📥 Bulk upload marks (this class)</button>
+        ${isLikelyPc()
+          ? '<button class="btn secondary sm" id="mk-bulk-toggle">📥 Bulk upload marks (this class)</button>'
+          : '<span class="hint" style="margin:0">Spreadsheet bulk upload is available on a computer — key in marks here on a phone/tablet.</span>'}
       </div>
     </div>
     <div id="mk-bulk-area"></div>
@@ -119,7 +169,8 @@ async function loadClassPanel(root, exams, classes, subjects, sel) {
   });
 
   let bulkOpen = false;
-  panel.querySelector('#mk-bulk-toggle').onclick = () => {
+  const bulkToggleBtn = panel.querySelector('#mk-bulk-toggle');
+  if (bulkToggleBtn) bulkToggleBtn.onclick = () => {
     bulkOpen = !bulkOpen;
     const area = panel.querySelector('#mk-bulk-area');
     if (bulkOpen) { renderBulkUpload(area, sel, subjectTabs); panel.querySelector('#mk-grid').style.display = 'none'; }
@@ -158,28 +209,65 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
       return;
     }
 
+    const hasAnyMarks = rows.some((r) => r.score !== '' && r.score !== null && r.score !== undefined);
+
+    // Step 5: "the teacher must set Maximum Marks for that subject before
+    // entering scores" — a paper-less subject with no Maximum Marks set yet
+    // and no scores recorded yet is BLOCKED from the grid entirely (a
+    // confirmed number has to exist before anyone types anything, otherwise
+    // the system silently assumes "out of 100" as the brief warns against).
+    // Once marks already exist (imported, or set under an earlier default)
+    // we no longer hard-block — that would strand real data behind a wall —
+    // we just show a non-blocking hint so it can still be corrected.
+    if (!papers.length && !res.max_marks_set && !hasAnyMarks) {
+      gridEl.innerHTML = `
+        <div class="card">
+          <div class="card-h"><h3>${esc(subject.name)} — set Maximum Marks first</h3></div>
+          <div class="card-b">
+            <p class="hint" style="margin-top:0">Before any scores can be entered for <b>${esc(subject.name)}</b> in this class, set what the marks are out of (e.g. 100, 50, 30). This avoids the system silently assuming "out of 100" for every subject.</p>
+            <div class="field" style="max-width:220px"><label>Maximum Marks</label><input type="number" min="1" step="1" id="mk-maxmarks-input" placeholder="e.g. 100"></div>
+            <button class="btn" id="mk-maxmarks-save" style="margin-top:10px">Save and continue</button>
+          </div>
+        </div>`;
+      gridEl.querySelector('#mk-maxmarks-save').onclick = async () => {
+        const val = gridEl.querySelector('#mk-maxmarks-input').value;
+        if (!val || Number(val) <= 0) { toast('Enter a positive Maximum Marks value.', 'err'); return; }
+        const r = await Db.results.setMaxMarks(examId, classId, subject.id, val);
+        if (!r.ok) { toast(r.message, 'err'); return; }
+        toast('Maximum Marks set.', 'ok');
+        renderGridForPaper();
+      };
+      return;
+    }
+    const maxMarksHint = (!papers.length && !res.max_marks_set && hasAnyMarks) ? `
+      <div class="card-b" style="padding-top:0;padding-bottom:12px">
+        <p class="hint" style="color:var(--danger)">⚠️ No Maximum Marks has been confirmed for this subject yet — marks below are currently treated as out of ${res.out_of} (the exam default).
+        <a href="#" id="mk-maxmarks-fix">Set it now</a></p>
+      </div>` : '';
+
+    const canEdit = isAdmin || status === 'draft';
     const paperPicker = papers.length ? `<select id="mk-paper" style="margin-left:10px">${options(papers, 'id', 'name', paperId)}</select>` : '';
     const statusNote = status === 'draft' ? '' : `<div class="card-b" style="padding-top:0;padding-bottom:12px">
         <p class="hint">This subject's results are <b>${esc(SUBMISSION_STATUS_LABELS[status] || status)}</b> for this class.
-        ${isAdmin ? 'You can save corrected marks here, or reopen it below to let the workflow run again.' : 'You can still save corrected marks here, but ask an admin to reopen it (in Publish Results) so the review can happen again.'}</p>
+        ${isAdmin ? 'You can save corrected marks here, or reopen it below to let the workflow run again.' : 'Editing is locked now that this has been submitted — ask an admin to reopen it (in Publish Results) if a correction is needed.'}</p>
       </div>`;
-    const hasAnyMarks = rows.some((r) => r.score !== '' && r.score !== null && r.score !== undefined);
 
     gridEl.innerHTML = `
       <div class="card">
         <div class="card-h"><h3>${esc(subject.name)} — marks (out of ${res.out_of})</h3>${paperPicker}
           <span class="badge ${STATUS_BADGE_CLASS[status] || 'grey'}" style="margin-left:10px">${esc(SUBMISSION_STATUS_LABELS[status] || status)}</span>
           <div class="spacer"></div>
-          ${status === 'draft' ? '<button class="btn secondary" id="mk-submit">Submit for approval</button>' : ''}
+          ${status === 'draft' && canEdit ? '<button class="btn secondary" id="mk-submit">Submit for approval</button>' : ''}
           ${status !== 'draft' && isAdmin ? '<button class="btn secondary" id="mk-reopen">Reopen</button>' : ''}
-          ${hasAnyMarks && status !== 'published' ? '<button class="btn danger sm" id="mk-delete-all">🗑️ Delete All Results</button>' : ''}
-          <button class="btn" id="mk-save">Save marks</button></div>
+          ${hasAnyMarks && status !== 'published' && canEdit ? '<button class="btn danger sm" id="mk-delete-all">🗑️ Delete All Results</button>' : ''}
+          ${canEdit ? '<button class="btn" id="mk-save">Save marks</button>' : ''}</div>
         ${statusNote}
+        ${maxMarksHint}
         <div class="card-b table-wrap"><table class="data">
           <thead><tr><th class="num">#</th><th>Admission No.</th><th>Name</th><th class="num" style="width:120px">Score</th><th>Grade</th></tr></thead>
           <tbody>${rows.map((r, i) => `<tr>
             <td class="num">${i + 1}</td><td>${esc(r.admission_no)}</td><td>${esc(r.full_name)}</td>
-            <td><input type="number" min="0" max="${res.out_of}" step="0.5" value="${esc(r.score)}" data-student="${r.student_id}" style="text-align:center"></td>
+            <td><input type="number" min="0" max="${res.out_of}" step="0.5" value="${esc(r.score)}" data-student="${r.student_id}" style="text-align:center" ${canEdit ? '' : 'disabled'}></td>
             <td><span class="badge blue" data-grade="${r.student_id}">${esc(r.grade_label || '—')}</span></td>
           </tr>`).join('')}</tbody>
         </table></div>
@@ -187,8 +275,26 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
 
     const paperSel = gridEl.querySelector('#mk-paper');
     if (paperSel) paperSel.onchange = (e) => { paperId = e.target.value; renderGridForPaper(); };
+    const maxMarksFixLink = gridEl.querySelector('#mk-maxmarks-fix');
+    if (maxMarksFixLink) maxMarksFixLink.onclick = (e) => {
+      e.preventDefault();
+      modal({
+        title: 'Set Maximum Marks',
+        body: `<div class="field"><label>Maximum Marks for ${esc(subject.name)}</label><input type="number" min="1" step="1" id="mk-maxmarks-input2" value="${res.out_of}"></div>`,
+        okLabel: 'Save',
+        onOk: async () => {
+          const val = document.getElementById('mk-maxmarks-input2').value;
+          if (!val || Number(val) <= 0) { toast('Enter a positive Maximum Marks value.', 'err'); return; }
+          const r = await Db.results.setMaxMarks(examId, classId, subject.id, val);
+          if (!r.ok) { toast(r.message, 'err'); return; }
+          closeModal();
+          toast('Maximum Marks set.', 'ok');
+          renderGridForPaper();
+        }
+      });
+    };
 
-    gridEl.querySelector('#mk-save').onclick = async () => {
+    if (canEdit) gridEl.querySelector('#mk-save').onclick = async () => {
       const inputs = [...gridEl.querySelectorAll('input[data-student]')];
       const invalid = inputs.filter((i) => i.value !== '' && (isNaN(Number(i.value)) || Number(i.value) < 0 || Number(i.value) > res.out_of));
       if (invalid.length) { toast(`${invalid.length} score(s) are out of range (0–${res.out_of}).`, 'err'); return; }
@@ -202,13 +308,25 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
     };
 
     const submitBtn = gridEl.querySelector('#mk-submit');
-    if (submitBtn) submitBtn.onclick = () => confirmAction(
-      'Submit this subject\'s marks for approval? The class teacher (or an admin) will review before they can be published to parents.',
-      async () => {
-        const r = await Db.results.submitForApproval(examId, classId, subject.id);
-        if (r.ok) { toast('Submitted for approval.', 'ok'); renderGridForPaper(); } else toast(r.message, 'err');
-      }
-    );
+    if (submitBtn) submitBtn.onclick = () => {
+      const inputs = [...gridEl.querySelectorAll('input[data-student]')];
+      const previewRows = inputs.map((inp, i) => ({ admission_no: rows[i].admission_no, full_name: rows[i].full_name, score: inp.value }));
+      modal({
+        title: `Preview — ${subject.name}`,
+        body: `
+          <p class="hint" style="margin-top:0">This is what will be submitted for approval. Use Edit to go back and change anything first — once this is confirmed, editing locks until an admin reopens it.</p>
+          <div class="table-wrap" style="max-height:360px;overflow:auto"><table class="data">
+            <thead><tr><th class="num">#</th><th>Admission No.</th><th>Name</th><th class="num">Score</th></tr></thead>
+            <tbody>${previewRows.map((r, i) => `<tr><td class="num">${i + 1}</td><td>${esc(r.admission_no)}</td><td>${esc(r.full_name)}</td><td class="num">${esc(r.score === '' ? '—' : r.score)}</td></tr>`).join('')}</tbody>
+          </table></div>`,
+        okLabel: 'Confirm and submit',
+        cancelLabel: 'Edit',
+        onOk: async () => {
+          const r = await Db.results.submitForApproval(examId, classId, subject.id);
+          if (r.ok) { closeModal(); toast('Submitted for approval.', 'ok'); renderGridForPaper(); } else { toast(r.message, 'err'); }
+        }
+      });
+    };
     const reopenBtn = gridEl.querySelector('#mk-reopen');
     if (reopenBtn) reopenBtn.onclick = () => confirmAction(
       'Reopen this subject? It goes back to "not submitted" so it can be corrected, resubmitted and re-approved.',
