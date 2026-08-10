@@ -27,6 +27,23 @@
  * a publish-time override scale different from the school default passed
  * in here) is still counted, just appended after the known bands rather
  * than silently dropped.
+ *
+ * Round 3 §20 fix: `students` is the class's FULL active roster (getBroadsheet()
+ * includes every active student whether or not they have any marks yet), but
+ * a student with literally zero subject scores recorded gets `overall_grade:
+ * ''` (falsy) from getBroadsheet() — NOT the same as the 'X' a below-minimum
+ * (but >0-subject) student gets. That '' student used to just silently
+ * vanish from every count here (the reported bug: "Class Grade Summary
+ * reports 13 when 14 actually sat the exam" — the 14th had no marks in yet).
+ * Rather than guess whether such a student should count as having "sat" the
+ * exam, both numbers are now returned explicitly — `totalStudents` (the
+ * full roster) and `totalGraded` (how many of them have a computed grade,
+ * `totalRanked` kept as an alias for backward compatibility) — so the
+ * discrepancy is visible and auditable instead of silently wrong. The
+ * per-grade percentages are still of the GRADED population (totalGraded),
+ * which is the correct denominator for a grade distribution — an ungraded
+ * student can't be "89% A, 11% ungraded" against a grade scale that has no
+ * "ungraded" band.
  */
 export function computeGradeSummaries(students, subjects, bands) {
   students = students || []; subjects = subjects || []; bands = bands || [];
@@ -41,6 +58,9 @@ export function computeGradeSummaries(students, subjects, bands) {
 
   const ranked = students.filter((s) => s.overall_grade);
   const totalRanked = ranked.length;
+  const totalStudents = students.length;
+  const totalGraded = totalRanked;
+  const ungraded = totalStudents - totalGraded;
 
   const classSummary = gradeOrder.map((grade) => {
     const count = ranked.filter((s) => s.overall_grade === grade).length;
@@ -64,5 +84,5 @@ export function computeGradeSummaries(students, subjects, bands) {
     return { subject_id: sub.id, subject_name: sub.name, counts };
   });
 
-  return { gradeOrder, totalRanked, classSummary, genderSummary, subjectBreakdown };
+  return { gradeOrder, totalRanked, totalStudents, totalGraded, ungraded, classSummary, genderSummary, subjectBreakdown };
 }

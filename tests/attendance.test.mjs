@@ -113,6 +113,47 @@ async function run() {
     check('saveStaffAttendance wrote to staff_attendance, not student_attendance', sb._tables.staff_attendance.length === 1);
   }
 
+  // ---- Round 3 §19: staff sign-in / sign-out --------------------------------------
+  {
+    const sb = createMockSupabase({
+      staff: [{ id: 'st1', full_name: 'Mr Teacher', role: 'teacher', status: 'active' }]
+    });
+    const api = createAttendanceApi(sb);
+
+    const empty = await api.saveStaffSignInOut({ date: '2026-08-01', records: [] });
+    check('saveStaffSignInOut rejects an empty record list', empty.ok === false);
+
+    const nothingToSave = await api.saveStaffSignInOut({ date: '2026-08-01', records: [{ staff_id: 'st1' }] });
+    check('saveStaffSignInOut skips a staff member with neither time given', nothingToSave.ok === false);
+
+    const saved = await api.saveStaffSignInOut({ date: '2026-08-01', records: [{ staff_id: 'st1', sign_in_time: '08:10', sign_out_time: '16:05' }] });
+    check('saveStaffSignInOut saves sign-in/out times', saved.ok === true && saved.saved === 1);
+
+    const roster = await api.getStaffRosterForDate({ date: '2026-08-01' });
+    const row = roster.data.find((r) => r.staff_id === 'st1');
+    check('getStaffRosterForDate returns the saved sign-in time', row.sign_in_time === '08:10');
+    check('getStaffRosterForDate returns the saved sign-out time', row.sign_out_time === '16:05');
+
+    // The screen re-sends BOTH fields every save, pre-filled from whatever
+    // was last loaded (see saveStaffSignInOut's doc comment — PostgREST's
+    // bulk upsert requires a consistent key set across the whole batch, so
+    // the caller carries an untouched field forward rather than omitting
+    // it) — correcting just the sign-in time still includes the
+    // already-known sign-out time and doesn't lose it.
+    await api.saveStaffSignInOut({ date: '2026-08-01', records: [{ staff_id: 'st1', sign_in_time: '08:20', sign_out_time: '16:05' }] });
+    const rosterAfter = await api.getStaffRosterForDate({ date: '2026-08-01' });
+    const rowAfter = rosterAfter.data.find((r) => r.staff_id === 'st1');
+    check('saveStaffSignInOut updates sign-in while the caller carries the sign-out value forward unchanged', rowAfter.sign_in_time === '08:20' && rowAfter.sign_out_time === '16:05');
+  }
+  {
+    // A staff member with no attendance row yet for this date should show
+    // blank times, not crash or show undefined.
+    const sb = createMockSupabase({ staff: [{ id: 'st1', full_name: 'New Teacher', role: 'teacher', status: 'active' }] });
+    const api = createAttendanceApi(sb);
+    const roster = await api.getStaffRosterForDate({ date: '2026-08-02' });
+    check('a staff member with no attendance row yet shows blank sign-in/out, not undefined', roster.data[0].sign_in_time === '' && roster.data[0].sign_out_time === '');
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

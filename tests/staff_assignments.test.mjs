@@ -14,7 +14,10 @@ async function run() {
     // Email is now optional — sign-in uses a username/phone assigned at
     // login-provisioning time, not this contact-only field.
     const noEmail = await api.save({ full_name: 'Mr Teacher' });
-    check('save succeeds without an email', noEmail.ok === true && noEmail.data.email === '');
+    // Round 3 §5: stored as NULL, not '' — see staff.mjs's save()/bulkCreate()
+    // comments. Two blank-email staff must never collide on a real
+    // `unique (school_id, email)` constraint the way two '' values would.
+    check('save succeeds without an email, stored as null (not empty string)', noEmail.ok === true && noEmail.data.email === null);
     const created = await api.save({ full_name: 'Mrs Teacher', email: 'Teacher@Test.School' });
     check('save succeeds and lowercases the email when one is given', created.ok === true && created.data.email === 'teacher@test.school');
   }

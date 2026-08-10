@@ -92,6 +92,24 @@ async function run() {
       ]
     });
     check('bulkCreate does not treat two blank emails as duplicates of each other', res.created === 2);
+    // Round 3 §5 regression: a blank email must be stored as NULL, never ''.
+    // Postgres's `unique (school_id, email)` constraint treats every NULL as
+    // distinct but treats repeated '' values as real duplicates — storing ''
+    // here was the actual root cause of "duplicate key value violates
+    // unique constraint staff_school_email_key" on a real database even
+    // though the preview showed no duplicate emails at all.
+    check('bulkCreate stores a blank email as null, not empty string (would collide on a real unique constraint)',
+      sb._tables.staff.every((r) => r.email === null || r.email === undefined));
+  }
+  {
+    // Same fix, single-add path (save()) — two staff saved one at a time
+    // with no email must not collide either.
+    const sb = createMockSupabase({});
+    const api = createStaffApi(sb);
+    const r1 = await api.save({ full_name: 'Solo One', role: 'Teacher' });
+    const r2 = await api.save({ full_name: 'Solo Two', role: 'Teacher' });
+    check('save() creates two blank-email staff without colliding', r1.ok === true && r2.ok === true);
+    check('save() stores a blank email as null, not empty string', r1.data.email === null && r2.data.email === null);
   }
   {
     // Index alignment: is_admin flags must land on the RIGHT created row even

@@ -83,7 +83,7 @@ async function run() {
   {
     const sb = createMockSupabase({ classes: [{ id: 'c1', name: 'Grade 7', level_order: 7 }] });
     const api = createAcademicsApi(sb);
-    const dup = await api.classes.save({ name: 'Grade 7' });
+    const dup = await api.classes.save({ name: 'Grade 7', streams: ['Main'] });
     check('classes.save rejects a duplicate class name', dup.ok === false);
   }
   {
@@ -149,6 +149,49 @@ async function run() {
     const res = await api.streams.remove('st1');
     check('streams.remove is blocked when students are assigned', res.ok === false);
   }
+
+  // ---- Round 3 §17: a class must always have at least one stream (arm) ------------
+  {
+    const sb = createMockSupabase({});
+    const api = createAcademicsApi(sb);
+    const noStreams = await api.classes.save({ name: 'Grade 7' });
+    check('classes.save rejects a brand-new class with no streams at all', noStreams.ok === false && /at least one arm/i.test(noStreams.message));
+    const blankOnly = await api.classes.save({ name: 'Grade 7', streams: ['   ', ''] });
+    check('classes.save treats blank/whitespace-only stream names as none given', blankOnly.ok === false);
+    const withOne = await api.classes.save({ name: 'Grade 7', streams: ['Main'] });
+    check('classes.save succeeds once at least one real stream name is given', withOne.ok === true && withOne.streamsAdded === 1);
+  }
+  {
+    // Editing an EXISTING class never requires re-supplying streams — the
+    // ones it already has are untouched either way.
+    const sb = createMockSupabase({ classes: [{ id: 'c1', name: 'Grade 7' }], streams: [{ id: 'st1', class_id: 'c1', name: 'North' }] });
+    const api = createAcademicsApi(sb);
+    const edited = await api.classes.save({ id: 'c1', name: 'Grade 7', description: 'updated' });
+    check('classes.save on an EXISTING class does not require streams to be re-supplied', edited.ok === true);
+  }
+  {
+    // A class's only stream can never be deleted down to zero — the exact
+    // "no class should ever exist without at least one stream" invariant,
+    // independent of the student-assignment check above.
+    const sb = createMockSupabase({
+      classes: [{ id: 'c1', name: 'Grade 7' }],
+      streams: [{ id: 'st1', class_id: 'c1', name: 'North' }]
+    });
+    const api = createAcademicsApi(sb);
+    const blocked = await api.streams.remove('st1');
+    check('streams.remove refuses to delete a class\'s LAST remaining stream', blocked.ok === false && /at least one arm/i.test(blocked.message));
+  }
+  {
+    // With a sibling stream present, deleting one is fine — the class still
+    // ends up with at least one afterwards.
+    const sb = createMockSupabase({
+      classes: [{ id: 'c1', name: 'Grade 7' }],
+      streams: [{ id: 'st1', class_id: 'c1', name: 'North' }, { id: 'st2', class_id: 'c1', name: 'South' }]
+    });
+    const api = createAcademicsApi(sb);
+    const allowed = await api.streams.remove('st1');
+    check('streams.remove still allows deleting one of SEVERAL streams', allowed.ok === true);
+  }
   // Round 2 §2 (BUG): a stream name like "Blue,Red" was accepted with no
   // validation. Round 2 §4: renaming an existing stream reuses save().
   {
@@ -185,11 +228,11 @@ async function run() {
 
     const sb = createMockSupabase({});
     const api = createAcademicsApi(sb);
-    const g1 = await api.classes.save({ name: 'Grade 1' });
+    const g1 = await api.classes.save({ name: 'Grade 1', streams: ['Main'] });
     check('classes.save auto-derives level_order for a standard class name', g1.data.level_order === 4);
-    const daycare = await api.classes.save({ name: 'daycare' });
+    const daycare = await api.classes.save({ name: 'daycare', streams: ['Main'] });
     check('classes.save matches standard names case-insensitively', daycare.data.level_order === 1);
-    const g9 = await api.classes.save({ name: 'Grade 9' });
+    const g9 = await api.classes.save({ name: 'Grade 9', streams: ['Main'] });
     check('classes.save orders the last standard level correctly', g9.data.level_order === 12);
   }
   {
@@ -203,7 +246,7 @@ async function run() {
   {
     const sb = createMockSupabase({ staff: [{ id: 'st1', full_name: 'Mr. Otieno' }] });
     const api = createAcademicsApi(sb);
-    const saved = await api.classes.save({ name: 'Grade 7', class_teacher_staff_id: 'st1' });
+    const saved = await api.classes.save({ name: 'Grade 7', class_teacher_staff_id: 'st1', streams: ['Main'] });
     check('classes.save persists a class_teacher_staff_id', saved.data.class_teacher_staff_id === 'st1');
     const cleared = await api.classes.save({ id: saved.data.id, name: 'Grade 7' });
     check('classes.save clears class_teacher_staff_id when omitted', cleared.data.class_teacher_staff_id === null);

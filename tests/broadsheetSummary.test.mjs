@@ -18,9 +18,19 @@ function run() {
   ];
 
   // ---- grade order: best-to-worst by band, not alphabetical ----------------------
-  const { gradeOrder, totalRanked, classSummary, genderSummary, subjectBreakdown } = computeGradeSummaries(students, subjects, bands);
+  const { gradeOrder, totalRanked, totalStudents, totalGraded, ungraded, classSummary, genderSummary, subjectBreakdown } = computeGradeSummaries(students, subjects, bands);
   check('grade order follows the bands, best first', gradeOrder.join(',') === 'A,B');
   check('an unranked student (empty overall_grade) is excluded from the ranked total', totalRanked === 3);
+
+  // ---- Round 3 §20 regression: the roster total and the ungraded count are now
+  // both explicit, so an admin can see WHY a "3 graded" figure doesn't match a
+  // "4 students sat the exam" headcount, instead of the ungraded student just
+  // silently vanishing from every number (the reported bug: "Class Grade
+  // Summary reports 13 when 14 actually sat the exam"). ----
+  check('totalStudents reflects the FULL roster passed in, not just graded ones', totalStudents === 4);
+  check('totalGraded matches totalRanked', totalGraded === totalRanked && totalGraded === 3);
+  check('ungraded accounts for exactly the missing student', ungraded === 1);
+  check('totalGraded + ungraded always reconciles to totalStudents', totalGraded + ungraded === totalStudents);
 
   // ---- Class Grade Summary ---------------------------------------------------------
   const aRow = classSummary.find((r) => r.grade === 'A');

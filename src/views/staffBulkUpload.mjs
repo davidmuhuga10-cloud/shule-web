@@ -173,9 +173,13 @@ function renderPreview(root, state) {
       setProgress(Math.min(i + CHUNK, rows.length));
     }
 
+    // Round 3 §1 (same fix applied to Staff bulk upload for consistency):
+    // only show the green success tick when at least one staff member was
+    // genuinely created.
+    const succeeded = res.created > 0;
     area.innerHTML = `<div class="card"><div class="card-b">
       <div class="empty">
-        <div class="e-ico">✅</div><h3>Import complete</h3>
+        <div class="e-ico">${succeeded ? '✅' : '❌'}</div><h3>${succeeded ? 'Import complete' : 'Import failed — nothing was created'}</h3>
         <p>${res.created} staff member(s) created${rows.length ? ` and ${provisioned} login(s) provisioned (default password: <b>teacher123</b>, username is their first name)` : ''}.
         ${res.skipped.length ? `${res.skipped.length} row(s) were skipped.` : ''}</p>
       </div>
@@ -184,6 +188,7 @@ function renderPreview(root, state) {
         <tbody>${res.skipped.map((s) => `<tr><td class="num">${s.line}</td><td>${esc(s.full_name)}</td><td>${esc(s.reason)}</td></tr>`).join('')}</tbody>
       </table></div>` : ''}
     </div></div>`;
-    toast(`Imported ${res.created} staff member(s).`, 'ok');
+    if (succeeded) toast(`Imported ${res.created} staff member(s).`, 'ok');
+    else toast('Import failed — no staff were created.', 'err');
   };
 }

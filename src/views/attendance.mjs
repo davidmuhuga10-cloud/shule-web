@@ -6,6 +6,7 @@
  */
 import { esc, options, toast, renderPrereq, loader, state, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
+import { computeAttendanceFlags } from '../lib/staffAttendance.mjs';
 
 const STATUSES = [
   { key: 'present', label: 'Present', cls: 'green' },
@@ -29,9 +30,10 @@ export async function viewAttendance(root) {
 function render(root, classes, sel) {
   root.innerHTML = `
     <div class="page-head"><div><h2>Attendance</h2><p>Mark daily attendance and review class summaries.</p></div></div>
-    <div class="tabs" style="max-width:520px">
+    <div class="tabs" style="max-width:640px">
       <button data-tab="mark-students" class="${sel.tab === 'mark-students' ? 'active' : ''}">Mark Students</button>
       <button data-tab="mark-staff" class="${sel.tab === 'mark-staff' ? 'active' : ''}">Mark Staff</button>
+      <button data-tab="staff-sign-in-out" class="${sel.tab === 'staff-sign-in-out' ? 'active' : ''}">Staff Sign In/Out</button>
       <button data-tab="summary" class="${sel.tab === 'summary' ? 'active' : ''}">Class Summary</button>
     </div>
     <div id="att-body"></div>
@@ -41,6 +43,7 @@ function render(root, classes, sel) {
   const body = root.querySelector('#att-body');
   if (sel.tab === 'mark-students') renderMarkStudents(body, classes, sel);
   else if (sel.tab === 'mark-staff') renderMarkStaff(body, sel);
+  else if (sel.tab === 'staff-sign-in-out') renderStaffSignInOut(body, sel);
   else renderSummary(body, classes, sel);
 }
 
@@ -136,6 +139,115 @@ async function renderMarkStaff(body, sel) {
     const r = await Db.attendance.saveStaffAttendance({ date: sel.date, records, marked_by: state.profile.staff_id });
     if (r.ok) toast(`Attendance saved for ${r.saved} staff member(s).`, 'ok'); else toast(r.message, 'err');
   }, 'Saving…');
+}
+
+/** Round 3 §19: "Add a new feature under the Attendance module for staff
+ *  sign-in and sign-out, capturing the actual time of each... automatically
+ *  flag staff who signed in late or left early, based on [admin-]set
+ *  [expected] times." A separate tab from "Mark Staff" — that one is the
+ *  existing coarse present/absent/late/excused status; this is the actual
+ *  clock time each person arrived/left, with the late/early flag computed
+ *  (not stored — see staffAttendance.mjs) against the two settings rows
+ *  below. Settings are admin-only to CHANGE (the `settings` table's own
+ *  RLS enforces that — see reportForms.mjs's term-dates card for the same
+ *  pattern), but any staff member can read them and record times. */
+async function renderStaffSignInOut(body, sel) {
+  body.innerHTML = `
+    <div class="card" style="margin-bottom:16px"><div class="card-b" style="max-width:280px">
+      <div class="field"><label>Date</label><input id="att-sio-date" type="date" value="${esc(sel.date)}"></div>
+    </div></div>
+    <div class="card" style="margin-bottom:16px"><div id="att-sio-expected">${loader()}</div></div>
+    <div class="card"><div id="att-sio-roster">${loader()}</div></div>
+  `;
+  body.querySelector('#att-sio-date').onchange = (e) => renderStaffSignInOut(body, { ...sel, date: e.target.value });
+
+  const settingsRes = await Db.settings.get();
+  const settings = settingsRes.ok ? settingsRes.data : {};
+  const expectedEl = body.querySelector('#att-sio-expected');
+  expectedEl.innerHTML = `
+    <div class="card-b">
+      <p class="hint" style="margin:0 0 10px">Expected times — staff signing in after arrival or out before departure are flagged below.</p>
+      <div class="grid2">
+        <div class="field"><label>Expected arrival time</label><input id="att-sio-arrival" type="time" value="${esc(settings.staff_expected_arrival_time || '')}"></div>
+        <div class="field"><label>Expected departure time</label><input id="att-sio-departure" type="time" value="${esc(settings.staff_expected_departure_time || '')}"></div>
+      </div>
+    </div>
+    <div class="modal-f" style="border-top:1px solid var(--line)"><button class="btn secondary sm" id="att-sio-expected-save">Save expected times</button></div>
+  `;
+  expectedEl.querySelector('#att-sio-expected-save').onclick = (e) => withBusy(e.currentTarget, async () => {
+    const payload = {
+      staff_expected_arrival_time: expectedEl.querySelector('#att-sio-arrival').value,
+      staff_expected_departure_time: expectedEl.querySelector('#att-sio-departure').value
+    };
+    const res = await Db.settings.save(payload);
+    if (!res.ok) { toast(res.message, 'err'); return; }
+    toast('Expected times saved.', 'ok');
+    settings.staff_expected_arrival_time = payload.staff_expected_arrival_time;
+    settings.staff_expected_departure_time = payload.staff_expected_departure_time;
+    renderSignInOutRoster();
+  }, 'Saving…');
+
+  const rosterEl = body.querySelector('#att-sio-roster');
+  const res = await Db.attendance.getStaffRosterForDate({ date: sel.date });
+  const roster = res.ok ? res.data : [];
+  if (!res.ok) { rosterEl.innerHTML = `<div class="card-b">⚠️ ${esc(res.message)}</div>`; return; }
+  if (!roster.length) { rosterEl.innerHTML = `<div class="card-b"><div class="empty"><div class="e-ico">👨‍🏫</div><h3>No staff</h3><p>No active staff members yet.</p></div></div>`; return; }
+
+  const expected = () => ({
+    expected_arrival: expectedEl.querySelector('#att-sio-arrival').value,
+    expected_departure: expectedEl.querySelector('#att-sio-departure').value
+  });
+  function flagHtml(signIn, signOut) {
+    const { isLate, leftEarly } = computeAttendanceFlags({ sign_in_time: signIn, sign_out_time: signOut }, expected());
+    const badges = [];
+    if (isLate) badges.push('<span class="badge red">Late</span>');
+    if (leftEarly) badges.push('<span class="badge amber">Left early</span>');
+    if (!badges.length && (signIn || signOut)) badges.push('<span class="badge green">On time</span>');
+    return badges.join(' ') || '<span class="muted">—</span>';
+  }
+
+  function renderSignInOutRoster() {
+    rosterEl.innerHTML = `<div class="table-wrap"><table class="data">
+      <thead><tr><th>Name</th><th>Role</th><th>Sign In</th><th>Sign Out</th><th>Flag</th></tr></thead>
+      <tbody>${roster.map((r) => `<tr data-row="${r.staff_id}">
+        <td>${esc(r.full_name)}</td><td>${esc(r.role || '—')}</td>
+        <td><input type="time" data-signin="${r.staff_id}" value="${esc(r.sign_in_time || '')}" style="max-width:130px"></td>
+        <td><input type="time" data-signout="${r.staff_id}" value="${esc(r.sign_out_time || '')}" style="max-width:130px"></td>
+        <td class="flag-cell" data-flag="${r.staff_id}">${flagHtml(r.sign_in_time, r.sign_out_time)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+    <div class="card-b" style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line)">
+      <button class="btn" id="att-sio-save">Save sign-in/out times</button>
+    </div>`;
+
+    const refreshFlag = (staffId) => {
+      const signIn = rosterEl.querySelector(`[data-signin="${staffId}"]`).value;
+      const signOut = rosterEl.querySelector(`[data-signout="${staffId}"]`).value;
+      rosterEl.querySelector(`[data-flag="${staffId}"]`).innerHTML = flagHtml(signIn, signOut);
+    };
+    rosterEl.querySelectorAll('[data-signin]').forEach((inp) => inp.onchange = () => refreshFlag(inp.dataset.signin));
+    rosterEl.querySelectorAll('[data-signout]').forEach((inp) => inp.onchange = () => refreshFlag(inp.dataset.signout));
+
+    const saveBtn = rosterEl.querySelector('#att-sio-save');
+    saveBtn.onclick = () => withBusy(saveBtn, async () => {
+      // Round 3 §19 / see saveStaffSignInOut's doc comment: every row
+      // re-sends BOTH the sign-in and sign-out time currently showing in
+      // its inputs (pre-filled from the roster load above), so leaving one
+      // field untouched carries its existing value forward instead of
+      // clearing it — required anyway since PostgREST's bulk upsert needs
+      // a consistent column set across the whole batch.
+      const records = roster.map((r) => ({
+        staff_id: r.staff_id,
+        sign_in_time: rosterEl.querySelector(`[data-signin="${r.staff_id}"]`).value,
+        sign_out_time: rosterEl.querySelector(`[data-signout="${r.staff_id}"]`).value
+      })).filter((r) => r.sign_in_time || r.sign_out_time);
+      if (!records.length) { toast('Record at least one sign-in or sign-out time first.', 'err'); return; }
+      const r = await Db.attendance.saveStaffSignInOut({ date: sel.date, records, marked_by: state.profile.staff_id });
+      if (r.ok) toast(`Sign-in/out saved for ${r.saved} staff member(s).`, 'ok'); else toast(r.message, 'err');
+    }, 'Saving…');
+  }
+
+  renderSignInOutRoster();
 }
 
 async function renderSummary(body, classes, sel) {

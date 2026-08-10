@@ -43,7 +43,7 @@ async function render(root, query) {
         </div>
         <div class="teacher-card-actions">
           <button class="btn sm secondary" data-edit="${t.id}">Edit</button>
-          <button class="icon-btn" data-assign="${t.id}" title="Subject assignments (in Classes &amp; Streams)">🔗</button>
+          <button class="icon-btn" data-assign="${t.id}" title="Subject assignments (in Classes &amp; Arms)">🔗</button>
           <button class="icon-btn" data-msg="${t.id}" title="Message">💬</button>
         </div>
       </div>

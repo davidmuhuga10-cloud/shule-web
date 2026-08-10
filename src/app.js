@@ -277,7 +277,7 @@ const ROLE_LABEL = { admin: 'Administrator', teacher: 'Teacher', parent: 'Parent
 export function renderAuth(errorMsg) {
   const name = (state.settings && state.settings.school_name) || (window.SHULE_CONFIG && window.SHULE_CONFIG.SCHOOL_BRAND_NAME) || 'Shule';
   const features = [
-    ['🎒', 'Students', 'Classes, streams & enrollment'],
+    ['🎒', 'Students', 'Classes, arms & enrollment'],
     ['🧑‍🏫', 'Teachers', 'Subjects & teacher assignment'],
     ['📝', 'Exams', 'Marks with automatic grading'],
     ['🧾', 'Reports', 'Mark lists & report forms']
@@ -642,7 +642,7 @@ const NAV = {
   admin: [
     { route: 'dashboard', label: 'Dashboard', ico: '🏠' },
     { section: 'Academics' },
-    { route: 'classes', label: 'Classes & Streams', ico: '🏫' },
+    { route: 'classes', label: 'Classes & Arms', ico: '🏫' },
     { section: 'People' },
     { route: 'students', label: 'Students', ico: '🎒' },
     { route: 'staff-teachers', label: 'Teachers and Staff', ico: '👨‍🏫' },

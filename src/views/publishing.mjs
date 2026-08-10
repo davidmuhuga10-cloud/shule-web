@@ -17,7 +17,20 @@ import { setNavIntent } from '../lib/navIntent.mjs';
  *  reaches "published" — see result_submissions in
  *  migrations/0005_exam_workflow.sql. Every button below just attempts the
  *  move; the database itself is what enforces who is allowed to do it, so
- *  a rejected action simply shows the server's explanation as a toast. */
+ *  a rejected action simply shows the server's explanation as a toast.
+ *
+ *  Round 3 §18: this screen's per-subject row actions used to also surface
+ *  a separate "Approve" button/step (draft -> submitted -> approved ->
+ *  published) — simplified here to just "Publish" (+ "Edit Marks"/
+ *  "Reopen"), since the DB trigger already lets an admin publish directly
+ *  from any prior status without requiring the intermediate "approved"
+ *  state first (check_result_submission_transition() in schema.sql only
+ *  enforces going through "approved" for a non-admin publisher). The
+ *  underlying draft/submitted/approved states and approveSubmission() API
+ *  still exist for that non-admin case — only the redundant admin-facing
+ *  button is gone. The Grant Access / Withdraw Results action card also
+ *  moved back to the BOTTOM of this screen (Round 2 §9 had moved it to the
+ *  top; direct follow-up feedback said the original position was better). */
 const STATUS_BADGE_CLASS = { draft: 'grey', submitted: 'blue', approved: 'blue', published: 'green' };
 
 /** Mounts the panel into `container` for one (exam, class). `onEditSubject`
@@ -88,11 +101,11 @@ async function openPublishSettingsModal(root, sel, onEditSubject) {
   });
 }
 
-/** Step 11: "Grant Teacher Access" — under an Action card at the TOP of the
- *  publish screen (Round 2 §9: this and Withdraw Results used to sit at the
- *  bottom, easy to miss — moved to the top, immediately visible), an admin
- *  can let specific teachers edit their results again after publishing.
- *  Reuses the existing admin-only
+/** Step 11: "Grant Teacher Access" — under an Action card at the BOTTOM of
+ *  the publish screen (Round 2 §9 moved this and Withdraw Results to the
+ *  top; Round 3 §18 moved them back down — the original position was
+ *  preferred after all), an admin can let specific teachers edit their
+ *  results again after publishing. Reuses the existing admin-only
  *  reopenSubmission() (draft-reopen) mechanism per-subject rather than a
  *  new parallel "still published but editable" state — simpler and already
  *  covered by the same DB trigger rules. Selectable per learning area, with
@@ -181,13 +194,6 @@ async function loadList(root, sel, onEditSubject) {
   const noResultsYet = rows.filter((r) => r.entered_count === 0);
 
   listEl.innerHTML = `
-    ${isAdmin ? `<div class="card" style="margin-bottom:16px">
-      <div class="card-h"><h3>Action</h3></div>
-      <div class="card-b" style="display:flex;gap:10px;flex-wrap:wrap">
-        <button class="btn secondary sm" id="pb-grant-access">🔓 Grant teacher edit access</button>
-        <button class="btn secondary sm" id="pb-withdraw">↩️ Withdraw Results</button>
-      </div>
-    </div>` : ''}
     ${allPublished ? `<div class="card" style="margin-bottom:16px;border-color:var(--ok)"><div class="card-b" style="display:flex;align-items:center;gap:12px">
       <p class="hint" style="margin:0;flex:1"><b>✅ Every subject is published</b> for this class — report cards and analyses are ready to print, nothing further to do here.</p>
       <button class="btn" id="pb-go-reports">🖨️ Go to Report Forms</button>
@@ -217,14 +223,19 @@ async function loadList(root, sel, onEditSubject) {
           <td>${r.complete ? `<span class="badge green">${r.entered_count}/${r.expected_count}</span>` : `<span class="badge amber">${r.entered_count}/${r.expected_count || '?'} — incomplete</span>`}</td>
           <td><span class="badge ${STATUS_BADGE_CLASS[r.status] || 'grey'}">${esc(SUBMISSION_STATUS_LABELS[r.status] || r.status)}</span></td>
           <td class="row-actions">
-            ${r.status === 'submitted' ? `<button class="btn ghost sm" data-approve="${r.subject_id}">Approve</button>` : ''}
-            ${r.status === 'approved' ? `<button class="btn ghost sm" data-publish="${r.subject_id}">Publish</button>` : ''}
-            ${r.status === 'draft' ? `<button class="btn ghost sm" data-approve="${r.subject_id}">Approve</button><button class="btn ghost sm" data-publish="${r.subject_id}">Publish</button>` : ''}
+            ${r.status !== 'published' ? `<button class="btn ghost sm" data-publish="${r.subject_id}">Publish</button>` : ''}
             ${r.status === 'published' ? `<button class="btn ghost sm" data-reopen="${r.subject_id}">Reopen</button>` : ''}
             ${isAdmin ? `<button class="btn ghost sm" data-edit="${r.subject_id}">✏️ Edit Marks</button>` : ''}
           </td></tr>`).join('')}</tbody>
       </table></div>
-    </div>`;
+    </div>
+    ${isAdmin ? `<div class="card" style="margin-top:16px">
+      <div class="card-h"><h3>Action</h3></div>
+      <div class="card-b" style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn secondary sm" id="pb-grant-access">🔓 Grant teacher edit access</button>
+        <button class="btn secondary sm" id="pb-withdraw">↩️ Withdraw Results</button>
+      </div>
+    </div>` : ''}`;
 
   const goReportsBtn = listEl.querySelector('#pb-go-reports');
   if (goReportsBtn) goReportsBtn.onclick = () => {
@@ -254,13 +265,6 @@ async function loadList(root, sel, onEditSubject) {
   listEl.querySelectorAll('[data-upload]').forEach((b) => b.onclick = () => onEditSubject(b.dataset.upload));
   listEl.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => onEditSubject(b.dataset.edit));
 
-  listEl.querySelectorAll('[data-approve]').forEach((b) => b.onclick = () => confirmAction(
-    'Approve this subject\'s results? This confirms the class teacher has reviewed them.',
-    async () => {
-      const r = await Db.results.approveSubmission(sel.exam_id, sel.class_id, b.dataset.approve);
-      if (r.ok) { toast('Approved.', 'ok'); loadList(root, sel, onEditSubject); } else toast(r.message, 'err');
-    }
-  ));
   listEl.querySelectorAll('[data-publish]').forEach((b) => b.onclick = () => confirmAction(
     'Publish this subject\'s results? Parents will be able to see them immediately.',
     async () => {

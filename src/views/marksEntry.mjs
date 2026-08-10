@@ -57,7 +57,7 @@ export async function renderMarksPanel(container, sel) {
   container.innerHTML = '<div id="mk-panel"></div>';
   if (!subjects.length) {
     container.innerHTML = `<div class="card"><div class="card-b"><div class="empty">
-      <div class="e-ico">📚</div><h3>No subjects found</h3><p>Open a class's stream and assign it some subjects first.</p>
+      <div class="e-ico">📚</div><h3>No subjects found</h3><p>Open a class's arm and assign it some subjects first.</p>
     </div></div></div>`;
     return;
   }
@@ -85,7 +85,7 @@ export async function renderMarksBulkPanel(container, sel) {
   const subjects = subjectsRes.ok ? subjectsRes.data : [];
   if (!subjects.length) {
     container.innerHTML = `<div class="card"><div class="card-b"><div class="empty">
-      <div class="e-ico">📚</div><h3>No subjects found</h3><p>Open a class's stream and assign it some subjects first.</p>
+      <div class="e-ico">📚</div><h3>No subjects found</h3><p>Open a class's arm and assign it some subjects first.</p>
     </div></div></div>`;
     return;
   }
@@ -203,7 +203,7 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
 
     if (!rows.length) {
       gridEl.innerHTML = `<div class="card"><div class="card-b"><div class="empty">
-        <div class="e-ico">🎒</div><h3>No students found</h3><p>No active students match this class/stream yet.</p>
+        <div class="e-ico">🎒</div><h3>No students found</h3><p>No active students match this class/arm yet.</p>
       </div></div></div>`;
       return;
     }
@@ -368,7 +368,7 @@ async function renderBulkUpload(area, sel, subjectTabs) {
 
   if (!students.length) {
     area.innerHTML = `<div class="card" style="margin-bottom:16px"><div class="card-b"><div class="empty">
-      <div class="e-ico">🎒</div><h3>No students found</h3><p>No active students match this class/stream yet.</p>
+      <div class="e-ico">🎒</div><h3>No students found</h3><p>No active students match this class/arm yet.</p>
     </div></div></div>`;
     return;
   }
@@ -398,7 +398,7 @@ async function renderBulkUpload(area, sel, subjectTabs) {
       <div class="card-b">
         <p class="hint" style="margin-top:0">One row per student, one column per subject${columns.some((c) => c.paper_id) ? ' (or subject/paper)' : ''} — download, fill in the marks in Excel/Sheets, then upload the same file back. Any marks already entered are pre-filled.</p>
         <input id="bm-file" type="file" accept=".csv,text/csv">
-        <button class="btn" id="bm-preview" style="margin-top:10px">Preview</button>
+        <button class="btn" id="bm-preview" style="margin-top:10px" disabled>Preview</button>
       </div>
     </div>
     <div id="bm-preview-area"></div>
@@ -413,15 +413,26 @@ async function renderBulkUpload(area, sel, subjectTabs) {
     URL.revokeObjectURL(url);
   };
 
-  area.querySelector('#bm-file').onchange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const text = await file.text();
+  // Round 3 §7: matches the same two-step "select file, then click Preview"
+  // pattern the student/staff bulk uploads already use, with real busy
+  // feedback on the Preview click — previously the file's onchange fired
+  // the read+parse+match work immediately with the "Preview" button doing
+  // nothing at all (a dead button) and zero processing feedback in between.
+  const previewBtn = area.querySelector('#bm-preview');
+  let pendingFile = null;
+  area.querySelector('#bm-file').onchange = (e) => {
+    pendingFile = e.target.files[0] || null;
+    previewBtn.disabled = !pendingFile;
+  };
+
+  previewBtn.onclick = () => withBusy(previewBtn, async () => {
+    if (!pendingFile) { toast('Choose a filled-in spreadsheet first.', 'err'); return; }
+    const text = await pendingFile.text();
     const parsed = parseMarksCsv(text, columns);
-    if (!parsed.length) { toast('No rows found in that file.', 'err'); return; }
+    if (!parsed.length) { toast("No rows found — make sure you're uploading the downloaded template with its header row intact (columns are matched by name, not position).", 'err'); return; }
     const { matched, unmatched } = matchAndValidate(parsed, students, columns);
     renderBulkPreview(area, sel, columns, matched, unmatched);
-  };
+  }, 'Reading…');
 }
 
 function renderBulkPreview(area, sel, columns, matched, unmatched) {

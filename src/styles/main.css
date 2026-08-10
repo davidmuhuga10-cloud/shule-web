@@ -130,6 +130,9 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .field{margin-bottom:15px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+/* Round 3 §12: Report Forms gained a Stream filter alongside its existing
+   Exam/Class/Student pickers, making four fields in one row. */
+.grid4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px}
 .hint{font-size:12px;color:var(--muted);margin-top:5px}
 
 /* ---------- Layout ---------- */
@@ -458,36 +461,87 @@ table.data td.num,table.data th.num{text-align:center}
    bespoke left-aligned layout — .print-header (main.css:261) supplies the
    flex/border/padding, this just adds the report card's own outer inset. */
 .report .r-head{padding:16px 22px 0}
+/* Follow-up polish: drop the divider line the shared .print-header normally
+   draws under the address block (main.css ~line 300) — on the Report Form
+   specifically it just reads as a stray line sitting above the title bar.
+   Scoped to .report only, so Mark List/Class List/Score Sheet/Exam
+   Analysis (which also use .print-header) keep their divider unchanged. */
+.report .print-header{border-bottom:none;padding-bottom:4px;margin-bottom:0}
 .report .r-title-bar{background:var(--brand);color:#fff;text-align:center;font-weight:750;letter-spacing:.2px;padding:9px 14px;font-size:13.5px;margin-top:12px}
-.report .r-student-row{display:flex;gap:18px;align-items:flex-start;padding:16px 22px;border-bottom:1px solid var(--line)}
-.report .r-avatar{width:56px;height:56px;border-radius:50%;background:var(--brand);color:#fff;display:grid;place-items:center;font-weight:750;font-size:18px;flex:none}
-.report .r-meta{display:grid;grid-template-columns:1fr 1fr;gap:6px 22px;font-size:12.5px;flex:1;min-width:200px}
-.report .r-meta div{display:flex;justify-content:space-between;border-bottom:1px dotted var(--line);padding:3px 0}
-.report .r-chart{flex:none;width:220px}
-.report .r-chart .r-chart-title{font-size:10px;color:var(--muted);text-align:center;margin-bottom:2px}
-.report .r-summary{display:grid;grid-template-columns:repeat(5,1fr);gap:0;border-bottom:1px solid var(--line)}
-.report .r-summary .box{padding:9px 8px;text-align:center;border-right:1px solid var(--line)}
-.report .r-summary .box:last-child{border-right:none}
+.report .r-student-row{display:flex;gap:20px;align-items:stretch;padding:16px 22px;border-bottom:1px solid var(--grid-ink)}
+/* Follow-up polish: the row got noticeably taller once the chart grew, and
+   the (untouched, per instruction) avatar was left stranded at the very
+   top of that extra height. align-self:center only repositions the avatar
+   itself within the row — r-meta/r-chart keep their own existing alignment
+   (still align-items:stretch on the row itself), so nothing else shifts. */
+.report .r-avatar{width:78px;height:78px;border-radius:10px;background:linear-gradient(160deg,var(--brand),var(--brand-2));color:#fff;display:grid;place-items:center;font-weight:750;font-size:24px;flex:none;align-self:center}
+/* Round 3 follow-up (visual parity pass): r-meta used to be flex:1 (grow)
+   while r-chart was pinned to a fixed 220px box — backwards from the Zeraki
+   reference, where the compact name/admno/grade block stays a fixed width
+   on the left and the chart stretches to fill the rest of the row. That
+   mismatch is exactly why the chart used to read as a small, isolated box
+   with dead space around it instead of a wide, integrated graph. Swapped:
+   r-meta is now a fixed-ish column, r-chart is the one that grows. */
+.report .r-meta{display:flex;flex-direction:column;justify-content:center;gap:4px;font-size:12.5px;flex:0 0 auto;width:230px;color:var(--grid-text)}
+.report .r-meta div{display:flex;justify-content:space-between;gap:10px;border-bottom:1px dotted var(--grid-ink);padding:3px 0}
+/* Reference-layout pass: the chart needed "significantly more visual room",
+   not just full width — taller too. r-chart no longer stretches to match
+   the (fixed-size, untouched-per-instruction) avatar's height; it sets its
+   own comfortable height via the SVG's viewBox aspect ratio instead, and the
+   title/legend now share one row (title left, legend right) the way the
+   reference does, instead of a centered legend line eating vertical space
+   below the plot. */
+.report .r-chart{flex:1;min-width:0;display:flex;flex-direction:column}
+.report .r-chart .r-chart-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
+.report .r-chart .r-chart-title{font-size:11px;font-weight:700;color:var(--grid-text)}
+.report .r-chart svg{width:100%;height:auto;flex:1}
+.report .r-chart-legend{display:flex;gap:12px;font-size:9.5px;color:var(--grid-text)}
+.report .r-chart-legend span{display:inline-flex;align-items:center;gap:5px}
+.report .r-chart-legend i{width:12px;height:12px;border-radius:3px;background:var(--brand);display:inline-block}
+.report .r-chart-legend i.avg{background:#cfd6de}
+/* §2: dropped the 5th "Position" tile (large circular badge) — Position is
+   still shown, just up in the r-meta panel next to Name/Class/Arm, so no
+   information is lost, only the redundant/oversized badge. Four equal
+   columns now: Performance Level / Total Marks / Total Points / Mean
+   Points, matching the reference exactly. */
+/* Follow-up polish: these read as one flat bordered strip with dividers —
+   changed to actual tiles (own grey background, rounded corners, gap
+   between them) instead of cells "just hanging there in a rectangle". */
+.report .r-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:14px 22px}
+.report .r-summary .box{padding:12px 8px;text-align:center;background:#f7f9fb;border-radius:9px}
 .report .r-summary .box .v{font-size:18px;font-weight:750;color:var(--brand)}
-.report .r-summary .box .l{font-size:10px;color:var(--muted);margin-top:2px}
-.report .r-body{padding:14px 22px}
-.report .report-grid{width:100%;border-collapse:collapse;font-size:12px}
-.report .report-grid th,.report .report-grid td{border:1px solid var(--line);padding:7px 8px}
+.report .r-summary .box .l{font-size:10px;color:var(--grid-text);margin-top:2px}
+.report .r-body{padding:14px 22px;color:var(--grid-text)}
+.report .report-grid{width:100%;border-collapse:collapse;font-size:12px;color:var(--grid-text)}
+/* Fixed layout (so the <colgroup> above actually controls column widths)
+   only on the main learning-areas grid — NOT on .r-descriptors-grid, which
+   shares the .report-grid class but has its own 9-column shape (label +
+   however many grade bands) and needs the browser's normal auto-sizing,
+   not the subjects grid's proportions forced onto it. */
+.report .report-grid:not(.r-descriptors-grid){table-layout:fixed}
+.report .report-grid th,.report .report-grid td{border:1.3px solid var(--grid-ink);padding:7px 8px;overflow-wrap:break-word}
 /* Brief §11: match the header treatment Mark List/Class List already use
    (.mark-list-grid th, main.css:243) — uppercase, letter-spaced, bold —
    instead of a slightly different plain-case style just on this report. */
 .report .report-grid th{font-size:10.5px;font-weight:800;background:#f7f9fb;text-transform:uppercase;letter-spacing:.3px}
-.pos-pill{background:var(--accent);color:#fff;font-weight:750;padding:2px 9px;border-radius:14px;font-size:12px}
+/* §4: subject-cluster summary (STEM / Social Sciences / Arts and Sport
+   Science) — same table look as the main grid, just centered cells and no
+   fixed layout (only 3 columns, no need to constrain widths). */
+.report .r-clusters{margin-top:10px}
+.report .r-cluster-grid{width:100%;border-collapse:collapse;font-size:12px}
+.report .r-cluster-grid th,.report .r-cluster-grid td{border:1.3px solid var(--grid-ink);padding:8px;text-align:center}
+.report .r-cluster-grid th{font-size:10.5px;font-weight:800;background:#f7f9fb;text-transform:uppercase;letter-spacing:.3px;color:var(--grid-text)}
+.report .r-cluster-grid td{font-weight:700;color:var(--brand)}
 /* Class Teacher's / Principal's remarks + Grade Descriptors, at the bottom
    of the report form (feature brief: "remarks are a must" — always
    auto-generated from the learner's overall performance band, not a blank
    free-text box; a signature line is printed instead). */
 .report .r-remarks{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px}
-.report .r-remark-box{border:1px solid var(--line);border-radius:8px;padding:10px 14px;background:#f7f9fb}
+.report .r-remark-box{border:1px solid var(--grid-ink);border-radius:8px;padding:10px 14px;background:#f7f9fb}
 .report .r-remark-h{font-weight:700;font-size:12px;margin-bottom:6px}
-.report .r-remark-box p{margin:0;font-size:12.5px;line-height:1.45}
-.report .r-sig{margin-top:10px;font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
-.report .r-sig-line{flex:1;border-bottom:1px dashed var(--line);height:1px}
+.report .r-remark-box p{margin:0;font-size:12.5px;line-height:1.45;color:var(--grid-text)}
+.report .r-sig{margin-top:10px;font-size:11.5px;color:var(--grid-text);display:flex;align-items:center;gap:6px}
+.report .r-sig-line{flex:1;border-bottom:1px dashed var(--grid-ink);height:1px}
 .report .r-descriptors{margin-top:12px}
 .report .r-descriptors-h{font-weight:700;font-size:13px;margin-bottom:6px}
 /* System Fixes brief §10: transposed Grade Descriptors table (bands as
@@ -495,11 +549,35 @@ table.data td.num,table.data th.num{text-align:center}
    each grade label, since a scale with many bands (e.g. CBC's 8) now needs
    many narrow columns instead of a handful of wide rows. */
 .report .r-descriptors-grid th,.report .r-descriptors-grid td{padding:5px 6px}
-.report .r-descriptor-remark{font-weight:400;font-size:8.5px;color:var(--muted);margin-top:2px;white-space:normal}
-/* System Fixes brief §16: optional parent-facing "School closed on" / "Next
-   term begins on" lines, printed only when set — small, unobtrusive, right
-   above the signatures. */
-.report .r-term-dates{display:flex;gap:22px;margin-top:10px;font-size:11px;color:var(--muted)}
+.report .r-descriptor-remark{font-weight:400;font-size:8.5px;color:var(--grid-text);margin-top:2px;white-space:normal}
+/* System Fixes brief §16, reference-layout pass (§5): "Term Dates" used to
+   be one easy-to-miss inline text line — now its own clearly labeled
+   section (heading + a small 2-column table), matching the reference.
+   Still only rendered when at least one date is actually set. */
+.report .r-term-dates-h{font-weight:700;font-size:13px;margin-top:14px;margin-bottom:6px}
+.report .r-term-dates-grid{width:100%;border-collapse:collapse;font-size:12px}
+.report .r-term-dates-grid th,.report .r-term-dates-grid td{border:1.3px solid var(--grid-ink);padding:8px;text-align:center}
+.report .r-term-dates-grid th{font-size:10.5px;font-weight:800;background:#f7f9fb;text-transform:uppercase;letter-spacing:.3px;color:var(--grid-text)}
+.report .r-term-dates-grid td{font-weight:700;color:var(--grid-text)}
+/* §6: a branded finishing strip at the very bottom of the report — the
+   school's motto (Settings already has this field; it just wasn't shown
+   anywhere printable before now). Full-bleed edge to edge, so it sits
+   OUTSIDE .r-body's padding as its own sibling — see renderReportCard(). */
+.report .r-motto{background:linear-gradient(100deg,var(--brand),var(--brand-2));color:#fff;text-align:right;font-weight:700;font-style:italic;font-size:11.5px;padding:8px 22px;letter-spacing:.2px}
+/* Round 3 §14/§15: the report form previously used the app's light on-screen
+   chrome tokens (--line/--muted) for its table borders and secondary text —
+   fine for UI chrome, but washed-out grey once printed/saved as a PDF,
+   instead of the crisp deep-black grid Mark List/Class List/Score Sheet/Exam
+   Analysis already use (--grid-ink/--grid-text, defined at the top of this
+   file). Reusing those same tokens here fixes the grey-borders-and-text bug
+   and brings the report in line with the rest of the app's printables. Only
+   the --brand teal accents (title bar, avatar, summary figures) are left
+   untouched — those are intentional brand color, not part of
+   the grey/black complaint. Preview/print/download all render from this
+   same CSS (see app.js's printWithOptions — Download is just window.print()
+   with no separate PDF pipeline), so this one change keeps all three
+   consistent, per §14. No QR/verification code was added — none exists in
+   _reportCard.mjs and none was requested; §14 explicitly excludes it. */
 /* Column-selection checkboxes (class list print options) */
 .chk-row{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:2px}
 .chk{display:flex;align-items:center;gap:7px;font-weight:500;font-size:13px;cursor:pointer;color:var(--ink)}
@@ -541,6 +619,15 @@ table.data td.num,table.data th.num{text-align:center}
   .print-header{break-inside:avoid;page-break-inside:avoid}
   .print-grid{font-size:10.5px}
   .print-grid th,.print-grid td{padding:5px 7px}
+  /* Round 3 §11: the Mark List's Class Grade Summary (+ Gender Grade
+     Summary / Grade Breakdown by Subject, part of the same .bs-summary
+     block) must always start on its own fresh page on print, even when the
+     student grid above it technically leaves enough room on the same page
+     — mixing "some of the summary" onto the tail end of the grid's last
+     page reads as a cut-off, unfinished-looking printout. break-before is
+     the modern property; page-break-before is the same rule for older
+     print engines that don't understand break-before yet. */
+  .bs-summary{break-before:page;page-break-before:always}
 }
 
 /* ---------- Loader ---------- */
@@ -553,7 +640,13 @@ table.data td.num,table.data th.num{text-align:center}
 @keyframes sk{to{background-position:-200% 0}}
 
 /* ---------- Responsive ---------- */
-@media(max-width:960px){
+/* "screen and" matters here: without it, this block also matches at PRINT
+   time, because an A4 page's content width (~700-750px after margins) is
+   under 960px too — so a phone-only breakpoint was silently reshaping the
+   Report Form on actual printouts (e.g. the 4 summary tiles collapsing to
+   2x2) even though nothing here is meant for print. Found while verifying
+   the summary-tile redesign against a real print render. */
+@media screen and (max-width:960px){
   .sidebar{transform:translateX(-100%)}
   .sidebar.open{transform:none}
   .main{margin-left:0}
@@ -561,7 +654,7 @@ table.data td.num,table.data th.num{text-align:center}
   .auth{grid-template-columns:1fr}.auth .promo{display:none}
   .auth .formside{min-height:100vh}
   .auth .formcard{border-radius:0;box-shadow:none;border:none;max-width:none;padding:0}
-  .grid2,.grid3{grid-template-columns:1fr}
+  .grid2,.grid3,.grid4{grid-template-columns:1fr}
   .report .r-summary{grid-template-columns:1fr 1fr}
   .report .r-student-row{flex-wrap:wrap}
   .report .r-chart{width:100%}

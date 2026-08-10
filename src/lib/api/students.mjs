@@ -81,6 +81,18 @@ export function createStudentsApi(supabase) {
       return ok(withN);
     },
 
+    /** Round 3 §2: lets the bulk-upload PREVIEW step catch a duplicate
+     *  admission number up front — same "already in use" check save() does
+     *  for a single student — instead of only finding out at import time.
+     *  Deliberately unfiltered by status (matches save()'s own duplicate
+     *  check), since an admission number stays reserved even for an
+     *  archived/left student. */
+    async existingAdmissionNumbers() {
+      const { data, error } = await supabase.from('students').select('admission_no');
+      if (error) return err(error.message);
+      return ok((data || []).map((r) => String(r.admission_no || '').trim().toLowerCase()).filter(Boolean));
+    },
+
     async save(payload) {
       payload = payload || {};
       const admissionNo = String(payload.admission_no || '').trim();
@@ -91,7 +103,7 @@ export function createStudentsApi(supabase) {
       if (VALID_GENDERS.indexOf(gender) === -1) return err('Please choose a gender (Male or Female).');
       if (!payload.class_id) return err('Please choose a class.');
       if (!payload.stream_id && await classHasStreams(supabase, payload.class_id)) {
-        return err('Please choose a stream — this class has streams set up.');
+        return err('Please choose an arm — this class has arms set up.');
       }
 
       const rec = {
@@ -234,7 +246,7 @@ export function createStudentsApi(supabase) {
         if (streamText) {
           streamId = streamByName[streamText.toLowerCase()] || null;
           if (!streamId) {
-            skipped.push({ line, admission_no: admissionNo, full_name: fullName, reason: `Stream "${streamText}" was not found for this class.` });
+            skipped.push({ line, admission_no: admissionNo, full_name: fullName, reason: `Arm "${streamText}" was not found for this class.` });
             return;
           }
         }

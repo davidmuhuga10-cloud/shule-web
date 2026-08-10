@@ -6,10 +6,15 @@
 import { ok, err, gradeScore } from './_util.mjs';
 
 /** The official 8-band CBC competency scale (Below/Approaching/Meeting/Exceeding
- *  Expectation, split 1/2). Offered as a loadable preset alongside a school's
- *  default letter-grade scale — schools pick whichever they report with via
- *  the existing "Make default" mechanism; loading this one never touches or
- *  removes the letter-grade scale. */
+ *  Expectation, split 1/2) — Round 3 §8: this is now the scale every new
+ *  school is seeded with (see seed_school_defaults() in schema.sql), in
+ *  place of the old auto-created 8-4-4 letter-grade scale. It's seeded
+ *  present-but-not-default ("do not auto-set a grading scale for a
+ *  school"); an admin still has to explicitly click "Activate" (
+ *  loadCbcCompetencyScale() below) before it's actually used for grading.
+ *  A school can still build its own custom scale from scratch instead (or
+ *  as well) via "+ Add scale" — activating the CBC scale never touches or
+ *  removes any other scale. */
 export const CBC_COMPETENCY_SCALE_NAME = 'CBC Competency Scale';
 export const CBC_COMPETENCY_BANDS = [
   { min_score: 0, max_score: 12, grade_label: 'BE2', points: 1, remark: 'Below Expectation' },
@@ -110,26 +115,38 @@ export function createGradingApi(supabase) {
       return ok(true);
     },
 
-    /** (Re)load the CBC competency scale preset. Safe to click more than once —
-     *  if the scale already exists this is a no-op rather than a duplicate. */
+    /** "Activate the CBC competency scale" (Round 3 §8 — replaces the old
+     *  "Load" button/behaviour). Creates the scale + its 8 bands if they
+     *  don't exist yet (safe to click more than once — no duplicate is ever
+     *  created), then ALWAYS makes it the school's active/default scale,
+     *  demoting whatever was default before. This is the one deliberate
+     *  exception to "never auto-set a grading scale" below: it's an
+     *  explicit admin click, by definition, not something that happens on
+     *  its own. */
     async loadCbcCompetencyScale() {
       const { data: existing } = await supabase.from('grading_scales').select('id')
         .ilike('name', CBC_COMPETENCY_SCALE_NAME).maybeSingle();
-      if (existing) return ok(null, { added: false });
+      let scaleId = existing && existing.id;
+      let added = false;
 
-      const { count } = await supabase.from('grading_scales').select('id', { count: 'exact', head: true });
-      const { data: scale, error } = await supabase.from('grading_scales')
-        .insert({
-          name: CBC_COMPETENCY_SCALE_NAME,
-          description: 'The 8-band CBC competency-based scale (Below/Approaching/Meeting/Exceeding Expectation).',
-          is_default: (count || 0) === 0
-        }).select().single();
-      if (error) return err(error.message);
+      if (!scaleId) {
+        const { data: scale, error } = await supabase.from('grading_scales')
+          .insert({
+            name: CBC_COMPETENCY_SCALE_NAME,
+            description: 'The 8-band CBC competency-based scale (Below/Approaching/Meeting/Exceeding Expectation).',
+            is_default: false
+          }).select().single();
+        if (error) return err(error.message);
+        scaleId = scale.id;
+        added = true;
 
-      const { error: bandErr } = await supabase.from('grade_ranges')
-        .insert(CBC_COMPETENCY_BANDS.map((b) => ({ ...b, grading_scale_id: scale.id })));
-      if (bandErr) return err(bandErr.message);
-      return ok(null, { added: true });
+        const { error: bandErr } = await supabase.from('grade_ranges')
+          .insert(CBC_COMPETENCY_BANDS.map((b) => ({ ...b, grading_scale_id: scaleId })));
+        if (bandErr) return err(bandErr.message);
+      }
+
+      await api.setDefaultScale(scaleId);
+      return ok(null, { added });
     },
 
     /** The default scale's bands — used internally by results.mjs to grade a score. */

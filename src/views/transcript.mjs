@@ -92,7 +92,7 @@ async function load(root, studentId) {
           <div><span>Name</span><b>${esc(student.full_name)}</b></div>
           <div><span>Admission No.</span><b>${esc(student.admission_no)}</b></div>
           <div><span>Class</span><b>${esc(student.class_name)}</b></div>
-          <div><span>Stream</span><b>${esc(student.stream_name || '—')}</b></div>
+          <div><span>Arm</span><b>${esc(student.stream_name || '—')}</b></div>
           <div><span>Gender</span><b>${esc(student.gender)}</b></div>
           <div><span>UPI Number</span><b>${esc(student.upi_number || '—')}</b></div>
         </div>

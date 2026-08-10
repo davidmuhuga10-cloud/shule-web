@@ -57,7 +57,7 @@ async function run() {
     const listed = await api.listScales();
     const cbc = listed.data.find((s) => s.name === 'CBC Competency Scale');
     check('the CBC scale was created', !!cbc);
-    check('it becomes the default when it is the only scale', cbc.is_default === true);
+    check('activating it makes it the default', cbc.is_default === true);
     check('it has all 8 competency bands', cbc.bands.length === 8);
     check('the top band is EE1 with 8 points', cbc.bands[0].grade_label === 'EE1' && cbc.bands[0].points === 8);
     check('the bottom band is BE2 with 1 point', cbc.bands[cbc.bands.length - 1].grade_label === 'BE2' && cbc.bands[cbc.bands.length - 1].points === 1);
@@ -65,22 +65,44 @@ async function run() {
     check('gradeScore maps a score of 5 to BE2 on the CBC scale', api.gradeScore(5, cbc.bands).grade_label === 'BE2');
 
     const second = await api.loadCbcCompetencyScale();
-    check('loading it again is a no-op, not a duplicate', second.ok === true && second.added === false);
+    check('activating it again is a no-op re-creation, not a duplicate', second.ok === true && second.added === false);
     const listed2 = await api.listScales();
     check('no duplicate CBC scale was created', listed2.data.filter((s) => s.name === 'CBC Competency Scale').length === 1);
   }
 
-  // ---- alongside an existing default letter-grade scale --------------------------
+  // ---- Round 3 §8: activating CBC alongside an existing default scale demotes it ----
   {
     const sb = createMockSupabase({ grading_scales: [{ id: 'letter1', name: 'Default Grading Scale', is_default: true }] });
     const api = createGradingApi(sb);
     const res = await api.loadCbcCompetencyScale();
-    check('loading the CBC scale succeeds alongside an existing scale', res.ok === true && res.added === true);
+    check('activating the CBC scale succeeds alongside an existing scale', res.ok === true && res.added === true);
     const listed = await api.listScales();
     const letter = listed.data.find((s) => s.id === 'letter1');
     const cbc = listed.data.find((s) => s.name === 'CBC Competency Scale');
-    check('the existing letter-grade scale stays the default', letter.is_default === true);
-    check('the newly-loaded CBC scale is NOT auto-made default', cbc.is_default === false);
+    // "Activate" is an explicit admin action, so — unlike a school being
+    // auto-seeded with a scale nobody asked for — it's correct and expected
+    // for it to actually take over as the default, exactly like clicking
+    // "Make default" on any other scale would.
+    check('activating CBC demotes the previously-default scale', letter.is_default === false);
+    check('the CBC scale becomes the new default', cbc.is_default === true);
+  }
+  // ---- Round 3 §8: activating an ALREADY-EXISTING (not-yet-default) CBC scale ----
+  {
+    const sb = createMockSupabase({
+      grading_scales: [
+        { id: 'letter1', name: 'Default Grading Scale', is_default: true },
+        { id: 'cbc1', name: 'CBC Competency Scale', is_default: false }
+      ],
+      grade_ranges: [{ id: 'gr1', grading_scale_id: 'cbc1', min_score: 85, max_score: 100, grade_label: 'EE1', points: 8 }]
+    });
+    const api = createGradingApi(sb);
+    const res = await api.loadCbcCompetencyScale();
+    check('activating an already-seeded CBC scale succeeds', res.ok === true);
+    check('does not re-create it (already existed)', res.added === false);
+    const listed = await api.listScales();
+    const letter = listed.data.find((s) => s.id === 'letter1');
+    const cbc = listed.data.find((s) => s.id === 'cbc1');
+    check('the pre-seeded CBC scale becomes the default without duplicating bands', letter.is_default === false && cbc.is_default === true && cbc.bands.length === 1);
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

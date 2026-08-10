@@ -32,7 +32,7 @@ export function buildBroadsheetAoa({ settings, exam, cls, streamName, subjects, 
   aoa.push([]);
 
   const subjHeader = subjects.map((s) => s.code || s.name);
-  aoa.push(['Adm. No.', 'Name', 'Str', ...subjHeader, 'SBJ', 'TT MKS', 'MN MKS', 'PL', 'TT PTS', 'MN PTS', 'DEV', 'STR POS', 'OVR POS']);
+  aoa.push(['Adm. No.', 'Name', 'Arm', ...subjHeader, 'SBJ', 'TT MKS', 'MN MKS', 'PL', 'TT PTS', 'MN PTS', 'DEV', 'ARM POS', 'OVR POS']);
 
   students.forEach((s) => {
     const subjCells = subjects.map((sub) => {

@@ -65,7 +65,7 @@ export async function viewDashboard(root) {
     <div class="stats-mobile">${[
       statTileSkeleton('🎒', 'Students', 't-blue', 'students'),
       statTileSkeleton('🏫', 'Classes', 't-amber', 'classes'),
-      statTileSkeleton('🔀', 'Streams', 't-purple', 'classes'),
+      statTileSkeleton('🔀', 'Arms', 't-purple', 'classes'),
       statTileSkeleton('👨‍🏫', 'Teachers', 't-green', 'staff-teachers'),
       statTileSkeleton('💬', 'Bulk SMS Balance', 't-teal'),
       `<div class="stat gender-tile"><div class="s-ico t-blue">🚻</div><div class="skeleton" style="width:100%;height:32px"></div></div>`
@@ -74,7 +74,7 @@ export async function viewDashboard(root) {
       <div class="stats-desktop">${[
         statTileSkeleton('🎒', 'Students', 't-blue', 'students'),
         statTileSkeleton('🏫', 'Classes', 't-amber', 'classes'),
-        statTileSkeleton('🔀', 'Streams', 't-purple', 'classes'),
+        statTileSkeleton('🔀', 'Arms', 't-purple', 'classes'),
         statTileSkeleton('👨‍🏫', 'Teachers', 't-green', 'staff-teachers')
       ].join('')}</div>
       <div class="card dash-gender-desktop">
@@ -103,7 +103,7 @@ export async function viewDashboard(root) {
   const desktopTiles = [
     statTile('🎒', counts.students, 'Students', 't-blue', 'students'),
     statTile('🏫', counts.classes, 'Classes', 't-amber', 'classes'),
-    statTile('🔀', counts.streams, 'Streams', 't-purple', 'classes'),
+    statTile('🔀', counts.streams, 'Arms', 't-purple', 'classes'),
     statTile('👨‍🏫', counts.teachers, 'Teachers', 't-green', 'staff-teachers')
   ].join('');
 
@@ -111,7 +111,7 @@ export async function viewDashboard(root) {
   const mobileTiles = [
     statTile('🎒', counts.students, 'Students', 't-blue', 'students'),
     statTile('🏫', counts.classes, 'Classes', 't-amber', 'classes'),
-    statTile('🔀', counts.streams, 'Streams', 't-purple', 'classes'),
+    statTile('🔀', counts.streams, 'Arms', 't-purple', 'classes'),
     statTile('👨‍🏫', counts.teachers, 'Teachers', 't-green', 'staff-teachers'),
     statTile('💬', smsLabel, 'Bulk SMS Balance', 't-teal'),
     genderTile(gender)

@@ -31,12 +31,12 @@ export async function viewBroadsheet(root) {
 
 function render(root, exams, classes, sel) {
   root.innerHTML = `
-    <div class="page-head no-print"><div><h2>Mark List</h2><p>Students &times; subjects, with grades, points and position — stream and overall.</p></div></div>
+    <div class="page-head no-print"><div><h2>Mark List</h2><p>Students &times; subjects, with grades, points and position — arm and overall.</p></div></div>
     <div class="card no-print" style="margin-bottom:16px">
       <div class="card-b grid3">
         <div class="field"><label>Exam</label><select id="bs-exam">${options(exams, 'id', 'name', sel.exam_id, 'Choose an exam')}</select></div>
         <div class="field"><label>Class</label><select id="bs-class">${options(classes, 'id', 'name', sel.class_id, 'Choose a class')}</select></div>
-        <div class="field"><label>Stream (optional)</label><select id="bs-stream" ${sel.class_id ? '' : 'disabled'}><option value="">Whole class</option></select></div>
+        <div class="field"><label>Arm (optional)</label><select id="bs-stream" ${sel.class_id ? '' : 'disabled'}><option value="">Whole class</option></select></div>
       </div>
     </div>
     <div id="bs-sheet"></div>
@@ -81,7 +81,7 @@ async function load(root, classes, sel) {
   if (!isContactInfoComplete(settings)) { renderMissingContactInfo(sheetEl, () => go('settings')); return; }
 
   if (!res.students.length) {
-    sheetEl.innerHTML = `<div class="card"><div class="card-b"><div class="empty"><div class="e-ico">🎒</div><h3>No students found</h3><p>No active students match this class/stream yet.</p></div></div></div>`;
+    sheetEl.innerHTML = `<div class="card"><div class="card-b"><div class="empty"><div class="e-ico">🎒</div><h3>No students found</h3><p>No active students match this class/arm yet.</p></div></div></div>`;
     return;
   }
   if (!res.subjects.length) {
@@ -99,10 +99,10 @@ async function load(root, classes, sel) {
         ${printHeaderHtml(settings, `${res.exam.name} — Mark List — ${cls ? cls.name : ''}`)}
       </div>
       <div class="card-b table-wrap"><table class="mark-list-grid">
-        <thead><tr><th class="id-col">Adm. No.</th><th class="name-col">Name</th><th class="str-col">Str</th>
+        <thead><tr><th class="id-col">Adm. No.</th><th class="name-col">Name</th><th class="str-col">Arm</th>
           ${res.subjects.map((s) => `<th class="num subj-col">${esc(s.code || s.name)}</th>`).join('')}
           <th class="num sum-col">SBJ</th><th class="num sum-col">TT MKS</th><th class="num sum-col">MN MKS</th><th class="num sum-col">PL</th>
-          <th class="num sum-col">TT PTS</th><th class="num sum-col">MN PTS</th><th class="num sum-col">DEV</th><th class="num sum-col">STR POS</th><th class="num sum-col">OVR POS</th></tr></thead>
+          <th class="num sum-col">TT PTS</th><th class="num sum-col">MN PTS</th><th class="num sum-col">DEV</th><th class="num sum-col">ARM POS</th><th class="num sum-col">OVR POS</th></tr></thead>
         <tbody>${res.students.map((s) => `<tr>
           <td class="id-col">${esc(s.admission_no)}</td><td class="name-col">${esc(s.full_name)}</td><td class="str-col">${esc(s.stream_name || '—')}</td>
           ${res.subjects.map((sub) => cell(s.scores[sub.id], s.grades[sub.id])).join('')}
@@ -136,7 +136,7 @@ async function load(root, classes, sel) {
  *  tables end up in a different orientation than the grid above them within
  *  one printout. */
 function summaryTablesHtml(students, subjects, bands) {
-  const { gradeOrder, classSummary, genderSummary, subjectBreakdown } = computeGradeSummaries(students, subjects, bands);
+  const { gradeOrder, totalStudents, totalGraded, ungraded, classSummary, genderSummary, subjectBreakdown } = computeGradeSummaries(students, subjects, bands);
   if (!gradeOrder.length) return '';
 
   return `
@@ -144,6 +144,7 @@ function summaryTablesHtml(students, subjects, bands) {
       <div class="bs-summary-grid">
         <div>
           <div class="bs-summary-h">Class Grade Summary</div>
+          ${ungraded > 0 ? `<p class="hint" style="margin:0 0 6px">${totalGraded} of ${totalStudents} student(s) graded — ${ungraded} still has${ungraded === 1 ? '' : 've'} no marks entered for this exam yet, so ${ungraded === 1 ? "isn't" : "aren't"} in the breakdown below.</p>` : ''}
           <div class="table-wrap"><table class="data">
             <thead><tr><th>Grade</th><th class="num">Students</th><th class="num">%</th></tr></thead>
             <tbody>${classSummary.map((r) => `<tr>

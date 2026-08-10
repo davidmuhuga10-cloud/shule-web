@@ -49,19 +49,44 @@ function looksLikeHeader(line) {
 }
 
 /** Parses the uploaded file back into one row per student: {admission_no,
- *  full_name, scores: {columnKey: rawString}}. Silently tolerates a
- *  reordered/removed header row (skips ONE leading line if it looks like
- *  the template header) but expects the same column order as the template —
- *  same expectation the student bulk upload already sets. */
+ *  full_name, scores: {columnKey: rawString}}.
+ *
+ *  Round 3 §6 CRITICAL FIX: marks used to be matched to a subject/paper
+ *  column purely by POSITION (`parts[2 + i]`) — deleting a column in the
+ *  source spreadsheet (e.g. "Religious Education") silently shifted every
+ *  column after it left by one, so the next subject's marks ("Social
+ *  Studies") were imported under the WRONG subject. Columns are now
+ *  matched by their HEADER TEXT instead: the first line is read as a real
+ *  header row and each known column is located by name wherever it
+ *  actually sits, so a deleted, inserted, or reordered column can never
+ *  silently shift marks into a neighboring subject. A file with no
+ *  recognizable header row is rejected outright (returns []) rather than
+ *  falling back to a positional guess — matching by position is exactly
+ *  the bug being fixed, so there is no safe positional fallback left. */
 export function parseMarksCsv(text, columns) {
   const lines = String(text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   if (!lines.length) return [];
-  const dataLines = looksLikeHeader(lines[0]) ? lines.slice(1) : lines;
-  return dataLines.map((line) => {
+  if (!looksLikeHeader(lines[0])) return [];
+
+  const headerCells = lines[0].split(',').map((h) => h.trim().toLowerCase());
+  const admIdx = headerCells.findIndex((h) => h.indexOf('admission') !== -1);
+  const nameIdx = headerCells.findIndex((h) => h.indexOf('name') !== -1 && h.indexOf('admission') === -1);
+  // For each of our known columns, find where its header text actually
+  // landed in THIS file — not where the template originally put it.
+  const indexForColumn = columns.map((c) => headerCells.indexOf(String(c.header).trim().toLowerCase()));
+
+  return lines.slice(1).map((line) => {
     const parts = line.split(',').map((p) => p.trim());
     const scores = {};
-    columns.forEach((c, i) => { scores[c.key] = parts[2 + i] !== undefined ? parts[2 + i] : ''; });
-    return { admission_no: parts[0] || '', full_name: parts[1] || '', scores };
+    columns.forEach((c, i) => {
+      const idx = indexForColumn[i];
+      scores[c.key] = (idx !== -1 && parts[idx] !== undefined) ? parts[idx] : '';
+    });
+    return {
+      admission_no: (admIdx !== -1 && parts[admIdx] !== undefined) ? parts[admIdx] : '',
+      full_name: (nameIdx !== -1 && parts[nameIdx] !== undefined) ? parts[nameIdx] : '',
+      scores
+    };
   });
 }
 

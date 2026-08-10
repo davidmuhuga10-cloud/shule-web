@@ -165,9 +165,9 @@ export function createAssignmentsApi(supabase) {
      *  (brief §4.2/§4.3). `inherited: true` means this stream hasn't been
      *  customized yet — it's showing the class-wide default (or nothing). */
     async getStreamSubjects(streamId) {
-      if (!streamId) return err('Please choose a stream.');
+      if (!streamId) return err('Please choose an arm.');
       const { data: stream } = await supabase.from('streams').select('id, class_id, name').eq('id', streamId).maybeSingle();
-      if (!stream) return err('Stream not found.');
+      if (!stream) return err('Arm not found.');
       const { ids: subjectIds, inherited } = await effectiveSubjectIdsForStream(streamId, stream.class_id);
 
       const [{ data: subjects }, { data: teacherRows }, { data: staffAll }, { data: cls }] = await Promise.all([
@@ -193,7 +193,7 @@ export function createAssignmentsApi(supabase) {
      *  Removing a subject here also clears any teacher assigned to it in
      *  this stream, so a stale assignment can't linger unassigned-but-set. */
     async setStreamSubjects(streamId, classId, subjectIds) {
-      if (!streamId) return err('Please choose a stream.');
+      if (!streamId) return err('Please choose an arm.');
       if (!classId) return err('Missing class.');
       subjectIds = (subjectIds || []).map(String);
       const { data: existing } = await supabase.from('subject_class_assignments').select('id, subject_id').eq('stream_id', streamId);
@@ -218,7 +218,7 @@ export function createAssignmentsApi(supabase) {
     /** Remove a single subject from a stream (the inline "✕ remove" action —
      *  no need to reopen the full tick-list for a mistake). */
     async removeStreamSubject(streamId, subjectId) {
-      if (!streamId || !subjectId) return err('Missing stream or subject.');
+      if (!streamId || !subjectId) return err('Missing arm or subject.');
       const { data: existing } = await supabase.from('subject_class_assignments').select('id').eq('stream_id', streamId).eq('subject_id', subjectId);
       for (const a of existing || []) await supabase.from('subject_class_assignments').delete().eq('id', a.id);
       await supabase.from('subject_teacher_assignments').delete().eq('stream_id', streamId).eq('subject_id', subjectId);
@@ -230,7 +230,7 @@ export function createAssignmentsApi(supabase) {
      *  stream+subject pair rather than allowing duplicates. */
     async setStreamSubjectTeacher(payload) {
       payload = payload || {};
-      if (!payload.stream_id) return err('Missing stream.');
+      if (!payload.stream_id) return err('Missing arm.');
       if (!payload.subject_id) return err('Missing subject.');
       if (!payload.class_id) return err('Missing class.');
       const { data: existing } = await supabase.from('subject_teacher_assignments').select('id')
@@ -288,7 +288,7 @@ export function createAssignmentsApi(supabase) {
       const { data: existing } = await supabase.from('subject_teacher_assignments').select('*')
         .eq('subject_id', payload.subject_id).eq('class_id', payload.class_id).eq('staff_id', payload.staff_id);
       const dup = (existing || []).find((a) => String(a.stream_id || '') === String(payload.stream_id || ''));
-      if (dup) return err('That teacher is already assigned to this subject and stream.');
+      if (dup) return err('That teacher is already assigned to this subject and arm.');
 
       const { data, error } = await supabase.from('subject_teacher_assignments').insert({
         subject_id: payload.subject_id,

@@ -1,6 +1,9 @@
 /**
  * settings.mjs — Supabase equivalent of Dashboard.gs's getSettings/saveSettings.
- * Key/value pairs: school_name, school_motto, po_box, phone, email, logo.
+ * Key/value pairs: school_name, school_motto, po_box, phone, email, logo,
+ * show_pathway_summary ('true'/'false' — School Settings toggle gating the
+ * Report Form's STEM/Social Sciences/Arts & Sport Science cluster row, off
+ * by default; see _reportCard.mjs's clusterSummaryHtml()).
  */
 import { ok, err, titleCase } from './_util.mjs';
 
@@ -21,14 +24,15 @@ export function createSettingsApi(supabase) {
 
     // System Fixes brief §12/§13 (performance): this used to be one SELECT
     // then one UPDATE-or-INSERT PER KEY, all sequential — School Settings
-    // alone now saves ~10 keys (school_name/motto/po_box/postal_code/town/
-    // phone/email/logo, plus §16's two new date fields), so a single "Save
-    // Settings" click was up to 20 network round trips back to back. That's
-    // very likely the real cause behind brief §2's "no feedback... users
-    // click repeatedly" complaint — withBusy() (app.js) fixes the missing
-    // feedback, this fixes the slow save that provoked it in the first
-    // place. One query to see which keys already exist, then every
-    // insert/update fired together instead of one at a time.
+    // alone saves ~8 keys (school_name/motto/po_box/postal_code/town/phone/
+    // email/logo), and Report Forms separately saves school_closed_on/
+    // next_term_begins_on (Round 3 §4 — moved out of Settings) through this
+    // same save(), so a single click could still be many round trips back
+    // to back. That's very likely the real cause behind brief §2's "no
+    // feedback... users click repeatedly" complaint — withBusy() (app.js)
+    // fixes the missing feedback, this fixes the slow save that provoked it
+    // in the first place. One query to see which keys already exist, then
+    // every insert/update fired together instead of one at a time.
     async save(payload) {
       payload = payload || {};
       const keys = Object.keys(payload);

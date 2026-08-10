@@ -5,7 +5,7 @@
  * renders from.
  */
 function topTableRows(title, rows) {
-  const out = [[title], ['Admno', 'Name', 'Stream', 'Strm Rank', 'Ovrl Rank', 'Score', 'Performance Level', 'Gender']];
+  const out = [[title], ['Admno', 'Name', 'Arm', 'Arm Rank', 'Ovrl Rank', 'Score', 'Performance Level', 'Gender']];
   rows.forEach((r) => {
     out.push([
       r.admission_no, r.full_name, r.stream_name,

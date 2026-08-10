@@ -8,7 +8,7 @@
  * standard as the Mark List/Class List/Score Sheet (shared header, paper
  * size/orientation controls, mandatory contact info before printing).
  */
-import { esc, options, renderPrereq, loader, go, printOptionsHtml, wirePrintOptions } from '../app.js';
+import { esc, options, renderPrereq, loader, go, printOptionsHtml, wirePrintOptions, toast, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { downloadXlsxAOA } from '../lib/xlsxUtil.mjs';
 import { buildExamAnalysis } from '../lib/examAnalysis.mjs';
@@ -57,7 +57,7 @@ function topTable(title, rows) {
   return `<div style="margin-top:14px">
     <div style="font-weight:700;font-size:12.5px;margin-bottom:6px">${esc(title)}</div>
     <div class="table-wrap"><table class="print-grid"><thead><tr>
-      <th>Admno</th><th>Name</th><th>Stream</th><th class="num">Strm Rank</th><th class="num">Ovrl Rank</th><th class="num">Score</th><th>Performance Level</th><th>Gender</th>
+      <th>Admno</th><th>Name</th><th>Arm</th><th class="num">Arm Rank</th><th class="num">Ovrl Rank</th><th class="num">Score</th><th>Performance Level</th><th>Gender</th>
     </tr></thead><tbody>${rows.map((r) => `<tr>
       <td>${esc(r.admission_no)}</td><td>${esc(r.full_name)}</td><td>${esc(r.stream_name || '—')}</td>
       <td class="num">${r.stream_rank} / ${r.stream_total}</td><td class="num">${r.overall_rank} / ${r.overall_total}</td>
@@ -82,10 +82,21 @@ function gradeSummaryTable(title, rows, bandLabels) {
 async function load(root, classes, sel) {
   const sheetEl = root.querySelector('#ea-sheet');
   sheetEl.innerHTML = loader();
-  const [bsRes, settingsRes, bands] = await Promise.all([
-    Db.results.getBroadsheet(sel), Db.settings.get(), Db.grading.defaultScaleBands()
+  // Round 3 §16: "explicitly ask which specific exam should be used as the
+  // deviation comparison" — this was previously only settable buried inside
+  // Publish Results' "Save and Publish" modal (which also republishes the
+  // exam every time just to change it); listDeviationExamChoices()/
+  // savePublishSettings() already existed for that, so they're reused here
+  // to let it be picked directly from Exam Analysis instead.
+  const [bsRes, settingsRes, bands, deviationChoicesRes] = await Promise.all([
+    Db.results.getBroadsheet(sel), Db.settings.get(), Db.grading.defaultScaleBands(), Db.results.listDeviationExamChoices(sel.exam_id, sel.class_id)
   ]);
   if (!bsRes.ok) { sheetEl.innerHTML = `<div class="card pad">⚠️ ${esc(bsRes.message)}</div>`; return; }
+  const deviationChoices = deviationChoicesRes.ok ? deviationChoicesRes.data : [];
+  // getBroadsheet() already resolves the currently-configured comparison
+  // (if any) into bsRes.deviation_exam — reused here as the picker's
+  // current selection rather than a second lookup of exam_classes.
+  const currentDeviationExamId = bsRes.deviation_exam ? bsRes.deviation_exam.exam_id : '';
   const settings = settingsRes.ok ? settingsRes.data : {};
   const cls = classes.find((c) => c.id === sel.class_id);
 
@@ -104,6 +115,16 @@ async function load(root, classes, sel) {
   const suggestedName = `${cls ? cls.name : 'Class'} Exam Analysis — ${bsRes.exam.name}`.replace(/[\\/:*?"<>|]+/g, '');
 
   sheetEl.innerHTML = `
+    <div class="card no-print" style="margin-bottom:16px">
+      <div class="card-b" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div class="field" style="flex:1;min-width:240px;margin:0">
+          <label>Deviation Exam — compare this class's performance against</label>
+          <select id="ea-deviation"><option value="">None</option>${options(deviationChoices, 'id', 'name', currentDeviationExamId)}</select>
+        </div>
+        <button class="btn secondary" id="ea-deviation-save">Save</button>
+      </div>
+      ${!deviationChoices.length ? `<div class="card-b" style="padding-top:0"><p class="hint" style="margin:0">No qualifying prior exam yet for this class — a Deviation Exam becomes selectable once another exam has at least one published subject here.</p></div>` : ''}
+    </div>
     <div class="report-toolbar no-print">
       <button class="btn secondary" id="ea-download">⬇️ Download Excel</button>
       ${printOptionsHtml('ea', 'portrait')}
@@ -119,6 +140,10 @@ async function load(root, classes, sel) {
           <div><div class="muted" style="font-size:11px">MEAN POINTS</div><div style="font-size:22px;font-weight:800">${analysis.mean_points}</div></div>
         </div>
         <div class="center" style="margin-top:8px"><span class="badge blue">${esc(analysis.performance_level || '—')}</span></div>
+        ${bsRes.deviation_exam ? `
+        <div class="center" style="margin-top:10px">
+          <span class="badge ${bsRes.deviation_exam.delta >= 0 ? 'green' : 'red'}">vs ${esc(bsRes.deviation_exam.exam_name)}: ${bsRes.deviation_exam.delta > 0 ? '+' : ''}${bsRes.deviation_exam.delta} mean marks (${bsRes.deviation_exam.class_average} then → ${analysis.mean_marks} now)</span>
+        </div>` : ''}
 
         <div style="margin-top:20px;font-weight:750;font-size:13.5px">LEARNING AREA STATISTICS</div>
         <div class="table-wrap"><table class="print-grid" style="margin-top:6px"><thead><tr><th>Name</th><th class="num">Mean Points</th><th>Performance Level</th></tr></thead>
@@ -150,4 +175,11 @@ async function load(root, classes, sel) {
     const aoa = buildExamAnalysisAoa({ settings, exam: bsRes.exam, cls, analysis });
     downloadXlsxAOA(suggestedName, aoa, 'Exam Analysis');
   };
+  sheetEl.querySelector('#ea-deviation-save').onclick = (e) => withBusy(e.currentTarget, async () => {
+    const val = sheetEl.querySelector('#ea-deviation').value;
+    const r = await Db.results.savePublishSettings(sel.exam_id, sel.class_id, { deviation_exam_id: val });
+    if (!r.ok) { toast(r.message, 'err'); return; }
+    toast(val ? 'Deviation exam saved.' : 'Deviation exam cleared.', 'ok');
+    load(root, classes, sel);
+  }, 'Saving…');
 }

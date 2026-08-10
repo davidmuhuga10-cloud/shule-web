@@ -94,9 +94,8 @@ async function renderBoard(root, exams, classes, years, terms) {
     // Brief §14: these used to navigate away to separate Enter
     // Marks/Publish Results pages — now they open an in-page detail view
     // for this exam+class instead, with the matching tab pre-selected.
-    card.querySelectorAll('[data-continue]').forEach((b) => b.onclick = () => {
-      renderDetailScreen(root, years, terms, e, b.dataset.continue, { tab: 'marks' });
-    });
+    // (Round 3 §9 removed the separate data-continue action — every
+    // pre-publish state now shares this same data-review button.)
     card.querySelectorAll('[data-review]').forEach((b) => b.onclick = () => {
       renderDetailScreen(root, years, terms, e, b.dataset.review, { tab: 'publish' });
     });
@@ -135,7 +134,11 @@ const STATUS_META = {
   no_students: { label: 'No students enrolled', cls: 'grey' },
   no_subjects: { label: 'No subjects assigned', cls: 'grey' },
   not_started: { label: 'Results Not Uploaded', cls: 'red' },
-  in_progress: { label: 'Marks incomplete', cls: 'amber' },
+  // Round 3 §9: relabeled from "Marks incomplete" — at least one teacher
+  // has actually started uploading marks at this point, so "in progress"
+  // reads as the accurate, non-alarming description of where things stand,
+  // rather than something sounding like a problem to fix.
+  in_progress: { label: 'Marks entry in progress', cls: 'amber' },
   ready_to_publish: { label: 'Pending Publishing', cls: 'blue' },
   published: { label: 'Published', cls: 'green' },
   released: { label: 'Released', cls: 'green' }
@@ -159,18 +162,20 @@ function examCard(exam, classRows) {
       // losing data. A ticked class with no students now stays visible with
       // an honest "No students enrolled" status and no action, instead of
       // vanishing from the board entirely.
-      // Round 2 §8: the not_started row's action is now "Review and Publish"
-      // (was "Enter Marks") and routes to the SAME data-review handler as
-      // ready_to_publish — both land on the detail screen's now-first
-      // "Review and Publish" tab, matching the tabs being reordered so that
-      // tab comes before Marks Entry. in_progress keeps its own distinct
-      // "Continue marks entry" action straight into the marks grid, since
-      // someone mid-entry is better served landing back where they left off.
+      // Round 2 §8 + Round 3 §9: every actionable pre-publish state
+      // (not_started, in_progress, ready_to_publish) now shares the exact
+      // same "✅ Review and Publish" button, landing on the same first tab —
+      // Round 3 §9 explicitly asked to stop introducing alternate wording
+      // like "Continue to marks entry" at different states, since a
+      // different label made it look like a different, unrelated action.
+      // The Review and Publish tab already surfaces per-subject "Edit
+      // Marks" shortcuts for anyone who just wants to jump straight into
+      // entering marks for one subject.
       if (r.status === 'no_students') action = `<span class="muted" style="font-size:12px">Enrol students in this class first</span>`;
       else if (r.status === 'no_subjects') action = `<span class="muted" style="font-size:12px">Assign subjects to this class first</span>`;
-      else if (r.status === 'not_started') action = `<button class="btn ghost sm" data-review="${r.class_id}">✅ Review and Publish</button>`;
-      else if (r.status === 'in_progress') action = `<button class="btn ghost sm" data-continue="${r.class_id}">📝 Continue marks entry</button>`;
-      else if (r.status === 'ready_to_publish') action = `<button class="btn ghost sm" data-review="${r.class_id}">✅ Review and Publish</button>`;
+      else if (r.status === 'not_started' || r.status === 'in_progress' || r.status === 'ready_to_publish') {
+        action = `<button class="btn ghost sm" data-review="${r.class_id}">✅ Review and Publish</button>`;
+      }
       else {
         // Step 13: published/released classes get the full set of
         // post-publish actions instead of just "Print Reports".

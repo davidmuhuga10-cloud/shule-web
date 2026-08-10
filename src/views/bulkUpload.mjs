@@ -29,7 +29,7 @@ const TEMPLATE_COLUMNS = [
   { key: 'admission_no', label: 'Admission Number' },
   { key: 'full_name', label: 'Student Name' },
   { key: 'gender', label: 'Gender (Male/Female)' },
-  { key: 'stream', label: 'Stream (leave blank if none / not applicable)' },
+  { key: 'stream', label: 'Arm (leave blank if none / not applicable)' },
   { key: 'guardian_name', label: 'Guardian Name' },
   { key: 'guardian_contact', label: 'Guardian Contact' },
   { key: 'guardian_relationship', label: 'Guardian Relationship' },
@@ -81,13 +81,37 @@ function rowsFromSheet(sheetRows) {
 
 /** streamNames: lowercased set of the chosen class's real stream names, used
  *  to catch a typo'd stream before import rather than silently dropping it
- *  server-side. A blank stream is always fine — never required (Round 2 §6). */
-function validateRow(row, streamNames) {
+ *  server-side. A blank stream is always fine — never required (Round 2 §6).
+ *  existingAdmissionSet: lowercased set of admission numbers already in use
+ *  school-wide (Round 3 §2) — a duplicate now fails clearly AT PREVIEW time,
+ *  matching how Add Student already blocks a duplicate immediately, instead
+ *  of quietly slipping through to a same-looking-as-success import summary.
+ *  seenInBatch: a Set the caller reuses across rows to also catch two rows
+ *  in the SAME spreadsheet sharing an admission number. */
+function validateRow(row, streamNames, existingAdmissionSet, seenInBatch) {
   if (!row.admission_no || !row.full_name) return 'Missing admission number or name.';
   if (VALID_GENDERS.indexOf(row.gender) === -1) return 'Gender must be exactly "Male" or "Female".';
+  // Round 3 §1 root-cause fix: previously this only checked when the class
+  // had at least one KNOWN stream (`streamNames.size`), so a class with zero
+  // streams let any garbage Stream text sail through preview as "Ready" —
+  // then failed server-side in bulkCreate(), which has never had that
+  // exemption. Matching the server exactly here means preview never again
+  // approves a row that's actually doomed to be skipped.
   const streamText = String(row.stream || '').trim();
-  if (streamText && streamNames && streamNames.size && !streamNames.has(streamText.toLowerCase())) {
-    return `Stream "${streamText}" was not found for this class.`;
+  if (streamText && (!streamNames || !streamNames.has(streamText.toLowerCase()))) {
+    return `Arm "${streamText}" was not found for this class.`;
+  }
+  const admissionKey = String(row.admission_no || '').trim().toLowerCase();
+  if (admissionKey) {
+    if (existingAdmissionSet && existingAdmissionSet.has(admissionKey)) {
+      return `A student with admission number "${row.admission_no}" already exists.`;
+    }
+    if (seenInBatch) {
+      if (seenInBatch.has(admissionKey)) {
+        return `Admission number "${row.admission_no}" is used by more than one row in this file.`;
+      }
+      seenInBatch.add(admissionKey);
+    }
   }
   return null;
 }
@@ -104,13 +128,13 @@ function render(root, classes, state) {
         <div class="field"><label>Class</label><select id="bu-class">${options(classes, 'id', 'name', state.class_id, 'Choose a class')}</select></div>
       </div>
       <div class="card-b" style="padding-top:0"><p class="hint">Every row you import will be enrolled into this class — the spreadsheet itself never sets the class.
-        ${state.streams.length ? `This class has streams set up (${state.streams.map((s) => esc(s.name)).join(', ')}) — use the "Stream" column in the template to place each student into one, or leave it blank if you'd rather assign streams later.` : ''}</p></div>
+        ${state.streams.length ? `This class has arms set up (${state.streams.map((s) => esc(s.name)).join(', ')}) — use the "Arm" column in the template to place each student into one, or leave it blank if you'd rather assign arms later.` : ''}</p></div>
     </div>
 
     <div class="card" style="margin-bottom:16px">
       <div class="card-h"><h3>2. Download template, fill it in, upload it back</h3></div>
       <div class="card-b">
-        <p class="hint" style="margin-top:0">Only Admission Number, Student Name and Gender are required — every other column, including Stream, is optional, but filling them in now means you won't need to go back and edit each student afterward.</p>
+        <p class="hint" style="margin-top:0">Only Admission Number, Student Name and Gender are required — every other column, including Arm, is optional, but filling them in now means you won't need to go back and edit each student afterward.</p>
         <button class="btn secondary" id="bu-template">⬇ Download template (.xlsx)</button>
         <div class="field" style="margin-top:14px"><label>Upload the filled-in spreadsheet</label><input id="bu-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></div>
         <button class="btn" id="bu-preview" style="margin-top:6px" disabled>Preview</button>
@@ -144,19 +168,27 @@ function render(root, classes, state) {
     }
   };
 
-  previewBtn.onclick = () => {
+  previewBtn.onclick = async () => {
     if (!root.querySelector('#bu-class').value) { toast('Please choose a class first.', 'err'); return; }
     if (!pendingRows || !pendingRows.length) { toast('Upload a filled-in template first.', 'err'); return; }
+    previewBtn.disabled = true;
+    const previewLabel = previewBtn.textContent;
+    previewBtn.textContent = 'Checking…';
+    const existingRes = await Db.students.existingAdmissionNumbers();
+    previewBtn.disabled = false;
+    previewBtn.textContent = previewLabel;
     renderPreview(root, classes, {
       class_id: root.querySelector('#bu-class').value,
       streamNames,
+      existingAdmissionSet: new Set(existingRes.ok ? existingRes.data : []),
       rows: pendingRows
     });
   };
 }
 
 function renderPreview(root, classes, state) {
-  const withStatus = state.rows.map((r) => ({ ...r, error: validateRow(r, state.streamNames) }));
+  const seenInBatch = new Set();
+  const withStatus = state.rows.map((r) => ({ ...r, error: validateRow(r, state.streamNames, state.existingAdmissionSet, seenInBatch) }));
   const validCount = withStatus.filter((r) => !r.error).length;
   const invalidCount = withStatus.length - validCount;
   const blocked = invalidCount > 0;
@@ -172,7 +204,7 @@ function renderPreview(root, classes, state) {
         ${invalidCount} row(s) have an error — fix them in the spreadsheet and re-upload. Nothing will be imported until every row is valid.</p></div>`
         : `<div class="card-b" style="padding-bottom:0"><p class="hint" style="color:var(--ok,#1a7f4b)">All ${validCount} row(s) look good — ready to import.</p></div>`}
       <div class="card-b table-wrap"><table class="data">
-        <thead><tr><th class="num">Row</th><th>Admission No.</th><th>Name</th><th>Gender</th><th>Stream</th><th>Guardian</th><th>Status</th></tr></thead>
+        <thead><tr><th class="num">Row</th><th>Admission No.</th><th>Name</th><th>Gender</th><th>Arm</th><th>Guardian</th><th>Status</th></tr></thead>
         <tbody>${withStatus.map((r, i) => `<tr style="${r.error ? 'background:var(--danger-bg)' : ''}">
           <td class="num">${i + 1}</td><td>${esc(r.admission_no)}</td><td>${esc(r.full_name)}</td><td>${esc(r.gender)}</td>
           <td>${esc(r.stream || '—')}</td>
@@ -215,9 +247,15 @@ function renderPreview(root, classes, state) {
       setProgress(Math.min(i + CHUNK, rows.length));
     }
 
+    // Round 3 §1: a green tick only ever appears when at least one student
+    // was genuinely created — 0 created (every row skipped, e.g. because
+    // every admission number turned out to already exist between preview
+    // and import) is a clear red-X failure state instead, never disguised
+    // as "Import complete".
+    const succeeded = res.created > 0;
     area.innerHTML = `<div class="card"><div class="card-b">
       <div class="empty">
-        <div class="e-ico">✅</div><h3>Import complete</h3>
+        <div class="e-ico">${succeeded ? '✅' : '❌'}</div><h3>${succeeded ? 'Import complete' : 'Import failed — nothing was created'}</h3>
         <p>${res.created} student(s) created${rows.length ? ` and ${provisioned} login(s) provisioned (default password: <b>student-&lt;admission number&gt;</b>)` : ''}.
         ${res.skipped.length ? `${res.skipped.length} row(s) were skipped — see the reasons below.` : ''}</p>
       </div>
@@ -226,6 +264,7 @@ function renderPreview(root, classes, state) {
         <tbody>${res.skipped.map((s) => `<tr><td class="num">${s.line}</td><td>${esc(s.admission_no)}</td><td>${esc(s.full_name)}</td><td>${esc(s.reason)}</td></tr>`).join('')}</tbody>
       </table></div>` : ''}
     </div></div>`;
-    toast(`Imported ${res.created} student(s).`, 'ok');
+    if (succeeded) toast(`Imported ${res.created} student(s).`, 'ok');
+    else toast('Import failed — no students were created.', 'err');
   };
 }

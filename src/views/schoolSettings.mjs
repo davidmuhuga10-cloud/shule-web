@@ -2,6 +2,13 @@ import { esc, toast, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { isContactInfoComplete } from '../lib/printHeader.mjs';
 
+// Round 3 §4: "School Closed On"/"Next Term Begins On" used to live here —
+// moved out entirely, into the Report Forms module itself (reportForms.mjs),
+// inline with report generation, per direct follow-up feedback that
+// acknowledging Settings as the wrong place wasn't enough; they needed to
+// actually move. Both are still plain `settings` rows (school_closed_on /
+// next_term_begins_on, read by _reportCard.mjs's termDatesHtml()) — only
+// WHERE they're edited changed, not the underlying data model.
 const MAX_DIM = 160;
 const MAX_LEN = 45000;
 // System Fixes brief §1: "Reduce the accepted maximum logo size from 5MB to
@@ -64,11 +71,6 @@ function render(root, settings) {
           <div class="field"><label>Phone${req}</label><input id="set-phone" value="${esc(settings.phone || '')}" placeholder="e.g. 0712 345 678"></div>
           <div class="field"><label>Email (optional)</label><input id="set-email" type="email" value="${esc(settings.email || '')}" placeholder="e.g. info@yourschool.ac.ke"></div>
         </div>
-        <p class="hint" style="margin:14px 0 4px">Parent-facing report form dates (optional)</p>
-        <div class="grid2">
-          <div class="field"><label>School closed on</label><input id="set-closed-on" type="date" value="${esc(String(settings.school_closed_on || '').slice(0, 10))}"></div>
-          <div class="field"><label>Next term begins on</label><input id="set-next-term" type="date" value="${esc(String(settings.next_term_begins_on || '').slice(0, 10))}"></div>
-        </div>
         <div class="field">
           <label>Logo (optional)</label>
           <div style="display:flex;align-items:center;gap:14px">
@@ -79,6 +81,13 @@ function render(root, settings) {
             </div>
           </div>
           <p class="hint">Automatically shrunk to a small thumbnail for fast loading on report forms and class lists. Files over 1 MB are rejected outright — compress your image and try again.</p>
+        </div>
+        <div class="field">
+          <label class="chk" style="font-weight:600">
+            <input type="checkbox" id="set-pathways" ${settings.show_pathway_summary === 'true' ? 'checked' : ''}>
+            Show a STEM / Social Sciences / Arts &amp; Sport Science pathway summary on Report Forms
+          </label>
+          <p class="hint">CBC "pathways" are a Senior School (Grade 10-12) concept — leave this off for schools/classes that don't use them yet. Off by default; tick it if your school wants that row added to the Report Form.</p>
         </div>
       </div>
       <div class="modal-f" style="border-top:1px solid var(--line)"><button class="btn" id="set-save">Save settings</button></div>
@@ -122,9 +131,8 @@ function render(root, settings) {
       town: root.querySelector('#set-town').value,
       phone: root.querySelector('#set-phone').value,
       email: root.querySelector('#set-email').value,
-      school_closed_on: root.querySelector('#set-closed-on').value,
-      next_term_begins_on: root.querySelector('#set-next-term').value,
-      logo: pendingLogo
+      logo: pendingLogo,
+      show_pathway_summary: root.querySelector('#set-pathways').checked ? 'true' : 'false'
     };
     // Brief §3: "Block saving of changes until all mandatory fields are
     // filled in" — same 4 fields the red asterisks above flag, checked with

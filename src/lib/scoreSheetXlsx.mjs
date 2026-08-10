@@ -26,7 +26,7 @@ export function buildScoreSheetAoa({ settings, className, streamName, learningAr
   const titleBits = [className || '', learningArea || ''].filter(Boolean);
   aoa.push([[...titleBits, 'SCORE SHEET'].join(' - ').toUpperCase()]);
   const detailBits = [];
-  if (streamName) detailBits.push('Stream: ' + streamName);
+  if (streamName) detailBits.push('Arm: ' + streamName);
   if (strand) detailBits.push('Strand: ' + strand);
   if (subStrand) detailBits.push('Sub Strand: ' + subStrand);
   if (indicator) detailBits.push('Indicator: ' + indicator);
@@ -34,7 +34,7 @@ export function buildScoreSheetAoa({ settings, className, streamName, learningAr
   aoa.push(['Exam name: ______________________________']);
   aoa.push([]);
 
-  aoa.push(['Adm No.', 'Name', 'Stream', 'Score']);
+  aoa.push(['Adm No.', 'Name', 'Arm', 'Score']);
   students.forEach((s) => {
     aoa.push([s.admission_no, s.full_name, s.stream_name || '—', '']);
   });

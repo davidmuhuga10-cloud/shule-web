@@ -48,14 +48,14 @@ async function renderList(root) {
     : '';
 
   root.innerHTML = `
-    <div class="page-head"><div><h2>Classes &amp; Streams</h2><p>Click a class to manage its streams, subjects and teachers.</p></div>
+    <div class="page-head"><div><h2>Classes &amp; Arms</h2><p>Click a class to manage its arms, subjects and teachers.</p></div>
       <div class="spacer"></div><button class="btn" id="add-class">+ Add class</button></div>
     <div class="card">
       ${classes.length ? `<div class="table-wrap"><table class="data">
-        <thead><tr><th>Class</th><th class="num">Streams</th><th class="num">Students</th><th>Class Teacher</th><th></th></tr></thead>
+        <thead><tr><th>Class</th><th class="num">Arms</th><th class="num">Students</th><th>Class Teacher</th><th></th></tr></thead>
         <tbody>${rows}</tbody></table></div>` : `<div class="card-b"><div class="empty">
           <div class="e-ico">🏫</div><h3>No classes yet</h3>
-          <p>Add your first class from the standard list (e.g. "Grade 7") — you can add its streams next.</p>
+          <p>Add your first class from the standard list (e.g. "Grade 7") — you can add its arms next.</p>
           <button class="btn" id="empty-add-class">+ Add class</button>
         </div></div>`}
     </div>`;
@@ -65,7 +65,7 @@ async function renderList(root) {
   if (emptyBtn) emptyBtn.onclick = () => openClassModal(root, undefined, staff, classes);
   root.querySelectorAll('[data-open]').forEach((tr) => tr.onclick = (e) => {
     if (e.target.closest('[data-edit],[data-del]')) return;
-    renderLoading(root, 'Loading streams, please wait…');
+    renderLoading(root, 'Loading arms, please wait…');
     renderClassDetail(root, classes.find((c) => c.id === tr.dataset.open), staff);
   });
   root.querySelectorAll('[data-edit]').forEach((b) => b.onclick = (e) => {
@@ -74,7 +74,7 @@ async function renderList(root) {
   });
   root.querySelectorAll('[data-del]').forEach((b) => b.onclick = (e) => {
     e.stopPropagation();
-    confirmAction('Delete this class? This also removes its streams.', async () => {
+    confirmAction('Delete this class? This also removes its arms.', async () => {
       const r = await Db.classes.remove(b.dataset.del);
       if (r.ok) { toast('Class deleted.', 'ok'); renderList(root); } else toast(r.message, 'err');
     }, true);
@@ -110,20 +110,24 @@ function openClassModal(root, existing, staff, allClasses) {
         </div>
         ${!existing ? `
         <div class="field">
-          <label>Streams (class arms)</label>
-          <div class="chips" id="pending-chips" style="margin-bottom:10px">${pendingChips || '<span class="muted" style="font-size:13px">No streams added yet.</span>'}</div>
-          <button type="button" class="btn ghost sm" id="cl-add-stream">+ Add a stream</button>
-          <p class="hint">Click to add a stream (e.g. "North", "East") — you can also add more later from the class page.</p>
-        </div>` : `<p class="hint">Manage this class's streams, subjects and teachers from its page after saving.</p>`}
+          <label>Arms<span style="color:var(--danger)"> *</span></label>
+          <div class="chips" id="pending-chips" style="margin-bottom:10px">${pendingChips || '<span class="muted" style="font-size:13px">No arms added yet — add at least one to continue.</span>'}</div>
+          <button type="button" class="btn ghost sm" id="cl-add-stream">+ Add an arm</button>
+          <p class="hint">Every class needs at least one arm — if this class only has one group, add a single arm for it (e.g. "Main"). You can add more later from the class page.</p>
+        </div>` : `<p class="hint">Manage this class's arms, subjects and teachers from its page after saving.</p>`}
       `,
       okLabel: 'Save',
       busyLabel: existing ? 'Saving changes, please wait…' : 'Adding class, please wait…',
       onOk: async () => {
         const name = document.getElementById('cl-name').value;
         const class_teacher_staff_id = document.getElementById('cl-teacher').value || null;
+        // Round 3 §17: caught here for immediate feedback (no round trip) —
+        // academics.mjs's classes.save() enforces the same rule server-side
+        // regardless, since the client-side check alone is never trusted.
+        if (!existing && !pendingStreams.length) { toast('Add at least one arm before saving — e.g. "Main" if this class only has one group.', 'err'); return; }
         const res = await Db.classes.save({ id: existing ? existing.id : undefined, name, class_teacher_staff_id, streams: pendingStreams });
         if (!res.ok) { toast(res.message, 'err'); return; }
-        if (res.streamsAdded) toast(`Class saved — ${res.streamsAdded} stream(s) added.`, 'ok');
+        if (res.streamsAdded) toast(`Class saved — ${res.streamsAdded} arm(s) added.`, 'ok');
         else toast('Class saved.', 'ok');
         closeModal();
         renderList(root);
@@ -159,12 +163,12 @@ function openClassModal(root, existing, staff, allClasses) {
 function promptAddStream(onAdd, existingName) {
   const isRename = existingName !== undefined && existingName !== null;
   modal({
-    title: isRename ? 'Rename stream' : 'Add a stream',
-    body: `<div class="field"><label>Stream name</label><input id="stream-name-input" value="${esc(isRename ? existingName : '')}" placeholder="e.g. North, East, Blue"></div>`,
+    title: isRename ? 'Rename arm' : 'Add an arm',
+    body: `<div class="field"><label>Arm name</label><input id="stream-name-input" value="${esc(isRename ? existingName : '')}" placeholder="e.g. North, East, Blue"></div>`,
     okLabel: isRename ? 'Save' : 'Add',
     onOk: () => {
       const val = document.getElementById('stream-name-input').value.trim();
-      const error = plainNameError(val, 'Stream name');
+      const error = plainNameError(val, 'Arm name');
       if (error) { toast(error, 'err'); return; }
       closeModal();
       onAdd(val);
@@ -195,14 +199,14 @@ async function renderClassDetail(root, cls, staff) {
         </div>
       </div>`).join('')
     : `<div class="card"><div class="card-b"><div class="empty">
-        <div class="e-ico">🔀</div><h3>No streams yet</h3>
-        <p>Add this class's first stream (arm) to start assigning subjects and teachers.</p>
+        <div class="e-ico">🔀</div><h3>No arms yet</h3>
+        <p>Add this class's first arm to start assigning subjects and teachers.</p>
       </div></div></div>`;
 
   root.innerHTML = `
     <div class="page-head">
-      <div><a class="back-link" id="back-to-classes">← All classes</a><h2>${esc(cls.name)}</h2><p>Streams for this class — click one to manage its subjects and teachers.</p></div>
-      <div class="spacer"></div><button class="btn" id="add-stream">+ Add a stream</button>
+      <div><a class="back-link" id="back-to-classes">← All classes</a><h2>${esc(cls.name)}</h2><p>Arms for this class — click one to manage its subjects and teachers.</p></div>
+      <div class="spacer"></div><button class="btn" id="add-stream">+ Add an arm</button>
     </div>
     ${rows}
   `;
@@ -211,7 +215,7 @@ async function renderClassDetail(root, cls, staff) {
   root.querySelector('#add-stream').onclick = () => promptAddStream(async (name) => {
     const res = await Db.streams.save({ class_id: cls.id, name });
     if (!res.ok) { toast(res.message, 'err'); return; }
-    toast('Stream added.', 'ok');
+    toast('Arm added.', 'ok');
     renderClassDetail(root, cls, staff);
   });
   root.querySelectorAll('[data-open-stream]').forEach((el) => el.onclick = (e) => {
@@ -226,16 +230,16 @@ async function renderClassDetail(root, cls, staff) {
     promptAddStream(async (name) => {
       const res = await Db.streams.save({ id: stream.id, class_id: cls.id, name });
       if (!res.ok) { toast(res.message, 'err'); return; }
-      toast('Stream renamed.', 'ok');
+      toast('Arm renamed.', 'ok');
       renderClassDetail(root, cls, staff);
     }, stream.name);
   });
   root.querySelectorAll('[data-del-stream]').forEach((b) => b.onclick = (e) => {
     e.stopPropagation();
-    confirmAction('Delete this stream?', async () => {
+    confirmAction('Delete this arm?', async () => {
       const r = await Db.streams.remove(b.dataset.delStream);
       if (!r.ok) { toast(r.message, 'err'); return; }
-      toast('Stream deleted.', 'ok');
+      toast('Arm deleted.', 'ok');
       renderClassDetail(root, cls, staff);
     }, true);
   });
@@ -260,7 +264,7 @@ async function renderStreamSubjects(root, cls, stream, staff) {
   root.innerHTML = `
     <div class="page-head">
       <div><a class="back-link" id="back-to-class">← ${esc(cls.name)}</a><h2>${esc(stream.name)} — Subjects &amp; Teachers</h2>
-      <p>${rows.length ? (inherited ? 'Currently using the class-wide default set — customizing here only changes this stream.' : 'Only these subjects appear in marks entry for this stream.') : 'This is exactly what teachers will see in marks entry for this stream.'}</p></div>
+      <p>${rows.length ? (inherited ? 'Currently using the class-wide default set — customizing here only changes this arm.' : 'Only these subjects appear in marks entry for this arm.') : 'This is exactly what teachers will see in marks entry for this arm.'}</p></div>
       <div class="spacer"></div><button class="btn" id="add-subject">+ Add subject</button>
     </div>
     <div class="card"><div class="table-wrap"><table class="data">
@@ -269,14 +273,14 @@ async function renderStreamSubjects(root, cls, stream, staff) {
     </table></div></div>
   `;
 
-  root.querySelector('#back-to-class').onclick = () => { renderLoading(root, 'Loading streams, please wait…'); renderClassDetail(root, cls, staff); };
+  root.querySelector('#back-to-class').onclick = () => { renderLoading(root, 'Loading arms, please wait…'); renderClassDetail(root, cls, staff); };
   root.querySelector('#add-subject').onclick = () => openAddSubjectModal(root, cls, stream, staff, rows.map((r) => r.subject_id));
   root.querySelectorAll('[data-teacher-for]').forEach((sel) => sel.onchange = async () => {
     const r2 = await Db.assignments.setStreamSubjectTeacher({ stream_id: stream.id, class_id: cls.id, subject_id: sel.dataset.teacherFor, staff_id: sel.value || null });
     if (!r2.ok) { toast(r2.message, 'err'); return; }
     toast('Teacher updated.', 'ok');
   });
-  root.querySelectorAll('[data-remove-subject]').forEach((b) => b.onclick = () => confirmAction('Remove this subject from the stream?', async () => {
+  root.querySelectorAll('[data-remove-subject]').forEach((b) => b.onclick = () => confirmAction('Remove this subject from the arm?', async () => {
     const r = await Db.assignments.removeStreamSubject(stream.id, b.dataset.removeSubject);
     if (!r.ok) { toast(r.message, 'err'); return; }
     toast('Subject removed.', 'ok');

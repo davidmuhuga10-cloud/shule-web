@@ -93,12 +93,16 @@ export function createAttendanceApi(supabase) {
       if (!date) return err('Choose a date.');
       const { data: staffList, error } = await supabase.from('staff').select('id, full_name, role').eq('status', 'active').order('full_name');
       if (error) return err(error.message);
-      const { data: marks, error: mErr } = await supabase.from('staff_attendance').select('staff_id, status, notes').eq('date', date);
+      // Round 3 §19: sign_in_time/sign_out_time are read alongside the
+      // existing status/notes — same row, one query, no separate fetch.
+      const { data: marks, error: mErr } = await supabase.from('staff_attendance').select('staff_id, status, notes, sign_in_time, sign_out_time').eq('date', date);
       if (mErr) return err(mErr.message);
       const markMap = {}; (marks || []).forEach((m) => { markMap[m.staff_id] = m; });
       return ok((staffList || []).map((s) => ({
         staff_id: s.id, full_name: s.full_name, role: s.role,
-        status: markMap[s.id] ? markMap[s.id].status : '', notes: markMap[s.id] ? (markMap[s.id].notes || '') : ''
+        status: markMap[s.id] ? markMap[s.id].status : '', notes: markMap[s.id] ? (markMap[s.id].notes || '') : '',
+        sign_in_time: markMap[s.id] ? (markMap[s.id].sign_in_time || '') : '',
+        sign_out_time: markMap[s.id] ? (markMap[s.id].sign_out_time || '') : ''
       })));
     },
 
@@ -107,6 +111,40 @@ export function createAttendanceApi(supabase) {
       const rows = (Array.isArray(records) ? records : []).filter((r) => r.staff_id && VALID_STATUSES.includes(r.status));
       if (!rows.length) return err('No valid attendance marks to save.');
       const payload = rows.map((r) => ({ staff_id: r.staff_id, date, status: r.status, notes: r.notes || null, marked_by: marked_by || null }));
+      const { error } = await supabase.from('staff_attendance').upsert(payload, { onConflict: 'staff_id,date' });
+      if (error) return err(error.message);
+      return ok(null, { saved: payload.length });
+    },
+
+    /** Round 3 §19: "Add a new feature under the Attendance module for
+     *  staff sign-in and sign-out, capturing the actual time of each."
+     *  records: [{ staff_id, sign_in_time, sign_out_time }] — every row
+     *  MUST carry both fields (blank means "not recorded", saved as null),
+     *  same consistent-columns-across-the-whole-batch upsert every other
+     *  attendance save() here already does — PostgREST's bulk upsert
+     *  requires every object in the array to have the same key set, so
+     *  callers can't send a partial {sign_in_time only} row for one staff
+     *  member and a partial {sign_out_time only} row for another in the
+     *  SAME call. The screen that calls this (attendance.mjs) always
+     *  re-sends both values sourced from whatever's currently in each time
+     *  input (pre-filled from the last saved roster on load), so an untouched
+     *  field naturally carries its existing value forward rather than being
+     *  blanked — the same "resend the whole current state" pattern the
+     *  Mark Staff status buttons above already rely on. A staff member with
+     *  neither time given is skipped entirely (nothing to save for them).
+     *  This leaves status (set via the separate "Mark Staff" screen)
+     *  untouched on an existing row — Supabase upsert only overwrites
+     *  columns actually present in the payload — and defaults it to
+     *  'present' via the table's own default for a brand-new row. */
+    async saveStaffSignInOut({ date, records, marked_by }) {
+      if (!date) return err('Missing date.');
+      const rows = (Array.isArray(records) ? records : []).filter((r) => r.staff_id && (r.sign_in_time || r.sign_out_time));
+      if (!rows.length) return err('Record at least one sign-in or sign-out time first.');
+      const payload = rows.map((r) => ({
+        staff_id: r.staff_id, date,
+        sign_in_time: r.sign_in_time || null, sign_out_time: r.sign_out_time || null,
+        marked_by: marked_by || null
+      }));
       const { error } = await supabase.from('staff_attendance').upsert(payload, { onConflict: 'staff_id,date' });
       if (error) return err(error.message);
       return ok(null, { saved: payload.length });

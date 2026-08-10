@@ -468,6 +468,17 @@ export function createResultsApi(supabase, gradingApi) {
         getEffectiveClassSubjectIds(supabase, q.class_id)
       ]);
       if (!exam) return err('Exam not found.');
+      // Round 3 §12: an admin picking a class/exam combo that was never
+      // actually assigned together (exam_classes is the source of truth for
+      // "which classes sit this exam" — see save()'s class_ids sync above)
+      // used to just fall through into an empty, marks-less Mark
+      // List/Report Form instead of saying so. exam_classes rows are never
+      // deleted while results exist for that pairing (see the toRemove
+      // guard in save()), so "no exam_classes row" reliably means this
+      // class genuinely never sat this exam, not just "hasn't published
+      // yet" (which already has its own "No published subjects yet"
+      // message further down).
+      if (!examClass) return err('No exams found — this class was not selected to sit this exam.');
       const examOutOf = Number(exam.out_of) || 100;
 
       let subjectIds = subjectIdsFromAssignments;
@@ -831,10 +842,25 @@ export function createResultsApi(supabase, gradingApi) {
         // Results" (exam_classes.released_at — see releaseExam() below) —
         // distinct from "Published" (visible on request) since parents
         // haven't necessarily been proactively notified yet.
+        // Round 3 §9 bug fix: this used to require EVERY currently-assigned
+        // subject to be published (subjectsPublished >= subjectsTotal)
+        // before showing 'published' at all — but publishExam() only ever
+        // publishes the subjects that actually HAVE marks (Round 2 §10's
+        // min-subjects gate deliberately allows publishing without every
+        // subject covered), and subjectsTotal can also grow afterwards if a
+        // new subject gets assigned to the class later. Either case left a
+        // genuinely-published class stuck showing "Marks incomplete"
+        // forever, even though publishing was a deliberate, completed admin
+        // action (e.g. the brief's own example: 8/9 subjects published,
+        // permanently amber). A class counts as published as soon as it has
+        // AT LEAST ONE published subject — publishExam() is one atomic
+        // "Publish" action, so any publish at all reflects that decision;
+        // getting it back to "in progress" now requires an explicit
+        // Withdraw, never an implicit recomputation.
         let status;
         if (!classIdsWithStudents.has(cid)) status = 'no_students';
         else if (subjectsTotal === 0) status = 'no_subjects';
-        else if (subjectsPublished >= subjectsTotal) status = ec.released_at ? 'released' : 'published';
+        else if (subjectsPublished > 0) status = ec.released_at ? 'released' : 'published';
         else if (subjectsWithMarks >= subjectsTotal) status = 'ready_to_publish';
         else if (subjectsWithMarks > 0) status = 'in_progress';
         else status = 'not_started';
@@ -899,6 +925,21 @@ export function createResultsApi(supabase, gradingApi) {
     async publishExam(examId, classId) {
       if (!examId) return err('Please choose an exam.');
       if (!classId) return err('Please choose a class.');
+
+      // Round 3 §8: never publish results that can't actually be graded.
+      // A per-(exam,class) "Overall Grading System" override (Step 10, set
+      // via Publish Settings) counts as having one; otherwise the school
+      // needs an active (is_default) grading scale — no grading scale is
+      // ever auto-selected for a school, so without an explicit admin
+      // choice here there is nothing to grade against at all.
+      const { data: examClassRow } = await supabase.from('exam_classes').select('grading_scale_id').eq('exam_id', examId).eq('class_id', classId).maybeSingle();
+      if (!(examClassRow && examClassRow.grading_scale_id)) {
+        const { data: defaultScale } = await supabase.from('grading_scales').select('id').eq('is_default', true).maybeSingle();
+        if (!defaultScale) {
+          return err('No grading scale is active yet — add or activate one under Grading Scales before you can publish results.');
+        }
+      }
+
       const { data: examResults } = await supabase.from('results').select('subject_id').eq('exam_id', examId).eq('class_id', classId);
       const subjectIds = [...new Set((examResults || []).map((r) => r.subject_id))];
       if (!subjectIds.length) return err('No marks have been entered for this class yet.');

@@ -32,7 +32,7 @@ const EXPORT_COLS = [
   { key: 'full_name', label: 'Name', on: true },
   { key: 'gender', label: 'Gender', on: true },
   { key: 'class_name', label: 'Class', on: true },
-  { key: 'stream_name', label: 'Stream', on: true },
+  { key: 'stream_name', label: 'Arm', on: true },
   { key: 'guardian_name', label: 'Guardian Name', on: false },
   { key: 'guardian_contact', label: 'Guardian Contact', on: false },
   { key: 'date_of_birth', label: 'Date of Birth', on: false },
@@ -105,7 +105,7 @@ function wireSearch(root, classes) {
       const matches = res.ok ? res.data : [];
       resultsEl.innerHTML = `<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>Search results</h3></div>
         <div class="table-wrap"><table class="data">
-          <thead><tr><th>Admission No.</th><th>Name</th><th>Class</th><th>Stream</th><th></th></tr></thead>
+          <thead><tr><th>Admission No.</th><th>Name</th><th>Class</th><th>Arm</th><th></th></tr></thead>
           <tbody>${matches.length ? matches.map((s) => `<tr class="clickable-row" data-open-profile="${s.id}">
             <td>${esc(s.admission_no)}</td><td>${esc(s.full_name)}</td><td>${esc(s.class_name)}</td><td>${esc(s.stream_name || '—')}</td>
             <td class="muted" style="font-size:12.5px">View profile →</td></tr>`).join('') : `<tr><td colspan="5" class="muted center">No matching students.</td></tr>`}</tbody>
@@ -188,10 +188,10 @@ async function renderClassStudents(root, classes, cls) {
   async function load(filters) {
     root.innerHTML = `
       <div class="page-head">
-        <div><a class="back-link" id="back-to-students">← Students</a><h2>${esc(cls.name)}</h2><p>All active students in this class — filter by stream or gender, print, or download as Excel.</p></div>
+        <div><a class="back-link" id="back-to-students">← Students</a><h2>${esc(cls.name)}</h2><p>All active students in this class — filter by arm or gender, print, or download as Excel.</p></div>
       </div>
       <div class="toolbar">
-        <select id="f-stream" class="grow">${streams.length ? `<option value="">All streams</option>${options(streams, 'id', 'name', filters.stream_id)}` : '<option value="">No streams on this class</option>'}</select>
+        <select id="f-stream" class="grow">${streams.length ? `<option value="">All arms</option>${options(streams, 'id', 'name', filters.stream_id)}` : '<option value="">No arms on this class</option>'}</select>
         <select id="f-gender"><option value="">All genders</option><option value="Male" ${filters.gender === 'Male' ? 'selected' : ''}>Male</option><option value="Female" ${filters.gender === 'Female' ? 'selected' : ''}>Female</option></select>
         <button class="btn secondary" id="print-class">🖨️ Print</button>
         <button class="btn secondary" id="download-class">⬇️ Download Excel</button>
@@ -223,7 +223,7 @@ async function renderClassStudents(root, classes, cls) {
     }
 
     rosterEl.innerHTML = `<div class="table-wrap"><table class="data">
-      <thead><tr><th>Admission No.</th><th>Name</th><th>Gender</th><th>Stream</th><th></th></tr></thead>
+      <thead><tr><th>Admission No.</th><th>Name</th><th>Gender</th><th>Arm</th><th></th></tr></thead>
       <tbody>${list.map((s) => `<tr class="clickable-row" data-open-profile="${s.id}">
         <td>${esc(s.admission_no)}</td><td>${esc(s.full_name)}</td>
         <td>${genderBadge(s.gender)}</td><td>${esc(s.stream_name || '—')}</td>
@@ -308,7 +308,7 @@ async function openStudentModal(root, classes, filters, existing, onSaved) {
         <div class="field"><label>Student Name ${req}</label><input id="st-name" value="${esc(existing ? existing.full_name : '')}"></div>
         <div class="grid2">
           <div class="field"><label>Class ${req}</label><select id="st-class">${options(classes, 'id', 'name', selectedClass, 'Choose a class')}</select></div>
-          <div class="field"><label>Stream ${currentStreams.length ? req : '<span class="muted">(none for this class)</span>'}</label><select id="st-stream" ${currentStreams.length ? '' : 'disabled'}>${options(currentStreams, 'id', 'name', selectedStream, currentStreams.length ? 'Choose a stream' : 'No streams on this class')}</select></div>
+          <div class="field"><label>Arm ${currentStreams.length ? req : '<span class="muted">(none for this class)</span>'}</label><select id="st-stream" ${currentStreams.length ? '' : 'disabled'}>${options(currentStreams, 'id', 'name', selectedStream, currentStreams.length ? 'Choose an arm' : 'No arms on this class')}</select></div>
         </div>
         <div class="field"><label>Parent/Guardian Name or Contact</label><input id="st-guardian" value="${esc(existing ? existing.guardian_name || existing.guardian_contact || '' : '')}" placeholder="Name or phone number"></div>
         <details style="margin-top:8px">
@@ -344,7 +344,7 @@ async function openStudentModal(root, classes, filters, existing, onSaved) {
         if (!fullName) { toast('Student name is required.', 'err'); return; }
         if (!gender) { toast('Please choose a gender.', 'err'); return; }
         if (!classId) { toast('Please choose a class.', 'err'); return; }
-        if (currentStreams.length && !streamId) { toast('Please choose a stream — this class has streams set up.', 'err'); return; }
+        if (currentStreams.length && !streamId) { toast('Please choose an arm — this class has arms set up.', 'err'); return; }
 
         const payload = {
           id: existing ? existing.id : undefined,
@@ -425,6 +425,28 @@ function openArchiveModal(root, studentId, onDone) {
  *  move"). Everything — source class/stream, destination class/stream, and
  *  which students — happens inside this one guided modal; no more
  *  pre-selecting checkboxes on a visible table first. */
+/** Round 3 §3: "Apply the same clean redesign already delivered for the
+ *  exam class-selection screen to this Move Students list — it currently
+ *  looks disjointed the same way that screen did before." Reuses the exact
+ *  same card-grid markup/CSS classes (.ex-class-grid/.ex-class-card/
+ *  .ex-class-top/.ex-class-check/.ex-class-name — main.css, built for
+ *  examDesk.mjs's "which classes are sitting this exam?" picker) rather
+ *  than introducing a second, similar-but-different card style — one
+ *  student per card, tap-anywhere-on-the-card to toggle, same search +
+ *  Select all/Clear toolbar and live count. */
+function studentCardHtml(s, selected) {
+  const isSelected = selected.has(s.id);
+  const searchKey = `${s.admission_no} ${s.full_name}`.toLowerCase();
+  return `
+    <div class="ex-class-card${isSelected ? ' on' : ''}" data-mv-student-card="${s.id}" data-student-name="${esc(searchKey)}">
+      <div class="ex-class-top">
+        <span class="ex-class-check">✓</span>
+        <input type="checkbox" data-mv-student value="${s.id}" ${isSelected ? 'checked' : ''} style="position:absolute;opacity:0;width:0;height:0">
+        <span class="ex-class-name">${esc(s.admission_no)} — ${esc(s.full_name)}${s.stream_name ? ` <span class="muted" style="font-weight:500">(${esc(s.stream_name)})</span>` : ''}</span>
+      </div>
+    </div>`;
+}
+
 function openMoveStudentsModal(root, classes, onDone) {
   let fromClassId = '', fromStreamId = '', toClassId = '', toStreamId = '';
   let fromStreams = [], toStreams = [];
@@ -449,30 +471,29 @@ function openMoveStudentsModal(root, classes, onDone) {
       title: 'Move students',
       wide: true,
       body: `
-        <p class="hint" style="margin-top:0">Choose which class/stream to move students from, then tick which ones — same idea as Add Student, everything happens right here.</p>
+        <p class="hint" style="margin-top:0">Choose which class/arm to move students from, then tick which ones — same idea as Add Student, everything happens right here.</p>
         <div class="grid2">
           <div class="field"><label>Move from — Class</label><select id="mv-from-class">${options(classes, 'id', 'name', fromClassId, 'Choose a class')}</select></div>
-          <div class="field"><label>Stream</label><select id="mv-from-stream" ${fromClassId ? '' : 'disabled'}><option value="">Whole class</option>${options(fromStreams, 'id', 'name', fromStreamId)}</select></div>
+          <div class="field"><label>Arm</label><select id="mv-from-stream" ${fromClassId ? '' : 'disabled'}><option value="">Whole class</option>${options(fromStreams, 'id', 'name', fromStreamId)}</select></div>
         </div>
         <div class="grid2">
           <div class="field"><label>Move to — Class</label><select id="mv-to-class">${options(classes, 'id', 'name', toClassId, 'Choose a class')}</select></div>
-          <div class="field"><label>Stream</label><select id="mv-to-stream" ${toClassId ? '' : 'disabled'}><option value="">No stream</option>${options(toStreams, 'id', 'name', toStreamId)}</select></div>
+          <div class="field"><label>Arm</label><select id="mv-to-stream" ${toClassId ? '' : 'disabled'}><option value="">No arm</option>${options(toStreams, 'id', 'name', toStreamId)}</select></div>
         </div>
         <div class="field">
           <label id="mv-count-label">Students to move${students.length ? ` (${selected.size} of ${students.length} selected)` : ''}</label>
-          <div style="max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px">
-            ${!fromClassId ? '<p class="muted" style="margin:0">Choose a class above to see its students.</p>'
-              : loadingStudents ? loader()
-              : students.length ? `
-                <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-weight:650;border-bottom:1px solid var(--line);margin-bottom:4px">
-                  <input type="checkbox" id="mv-select-all" ${selected.size === students.length ? 'checked' : ''}> Select all
-                </label>
-                ${students.map((s) => `<label style="display:flex;align-items:center;gap:8px;padding:3px 0">
-                  <input type="checkbox" data-mv-student="${s.id}" ${selected.has(s.id) ? 'checked' : ''}>
-                  <span>${esc(s.admission_no)} — ${esc(s.full_name)}${s.stream_name ? ' (' + esc(s.stream_name) + ')' : ''}</span>
-                </label>`).join('')}
-              ` : '<p class="muted" style="margin:0">No students in this class/stream.</p>'}
-          </div>
+          ${!fromClassId ? '<p class="muted" style="margin:0">Choose a class above to see its students.</p>'
+            : loadingStudents ? loader()
+            : students.length ? `
+              <div class="ex-class-toolbar">
+                <div class="field" style="flex:1;margin:0"><input type="text" id="mv-student-search" placeholder="Search students…"></div>
+                <button type="button" class="btn secondary sm" id="mv-select-all-btn">Select all</button>
+                <button type="button" class="btn secondary sm" id="mv-clear-all-btn">Clear</button>
+              </div>
+              <div class="ex-class-scroll">
+                <div class="ex-class-grid">${students.map((s) => studentCardHtml(s, selected)).join('')}</div>
+              </div>
+            ` : '<p class="muted" style="margin:0">No students in this class/arm.</p>'}
         </div>
       `,
       okLabel: 'Move',
@@ -502,19 +523,53 @@ function openMoveStudentsModal(root, classes, onDone) {
     };
     document.getElementById('mv-to-stream').onchange = (e) => { toStreamId = e.target.value; };
 
-    const selAll = document.getElementById('mv-select-all');
+    if (!students.length) return;
+
     const countLabel = document.getElementById('mv-count-label');
-    const refreshCount = () => { if (countLabel) countLabel.textContent = `Students to move (${selected.size} of ${students.length} selected)`; };
-    if (selAll) selAll.onclick = () => {
-      if (selAll.checked) students.forEach((s) => selected.add(s.id)); else selected.clear();
-      document.querySelectorAll('[data-mv-student]').forEach((cb) => { cb.checked = selected.has(cb.dataset.mvStudent); });
+    const refreshCount = () => { countLabel.textContent = `Students to move (${selected.size} of ${students.length} selected)`; };
+    const syncCardState = (card, cb) => card.classList.toggle('on', cb.checked);
+
+    // Tap anywhere on the card to toggle it, same as the exam
+    // class-selection cards this pattern is reused from.
+    document.querySelectorAll('[data-mv-student-card]').forEach((card) => {
+      const cb = card.querySelector('[data-mv-student]');
+      cb.onchange = () => {
+        if (cb.checked) selected.add(cb.value); else selected.delete(cb.value);
+        syncCardState(card, cb);
+        refreshCount();
+      };
+      card.onclick = (e) => {
+        if (e.target.tagName === 'INPUT') return; // native checkbox click already toggles + fires onchange
+        cb.checked = !cb.checked;
+        cb.dispatchEvent(new Event('change'));
+      };
+    });
+
+    document.getElementById('mv-select-all-btn').onclick = () => {
+      document.querySelectorAll('[data-mv-student-card]').forEach((card) => {
+        if (card.style.display === 'none') return; // respect the active search filter
+        const cb = card.querySelector('[data-mv-student]');
+        cb.checked = true; selected.add(cb.value);
+        syncCardState(card, cb);
+      });
       refreshCount();
     };
-    document.querySelectorAll('[data-mv-student]').forEach((cb) => cb.onclick = () => {
-      if (cb.checked) selected.add(cb.dataset.mvStudent); else selected.delete(cb.dataset.mvStudent);
-      if (selAll) selAll.checked = selected.size === students.length;
+    document.getElementById('mv-clear-all-btn').onclick = () => {
+      document.querySelectorAll('[data-mv-student-card]').forEach((card) => {
+        if (card.style.display === 'none') return;
+        const cb = card.querySelector('[data-mv-student]');
+        cb.checked = false; selected.delete(cb.value);
+        syncCardState(card, cb);
+      });
       refreshCount();
-    });
+    };
+
+    document.getElementById('mv-student-search').oninput = (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      document.querySelectorAll('[data-mv-student-card]').forEach((card) => {
+        card.style.display = !q || card.dataset.studentName.indexOf(q) !== -1 ? '' : 'none';
+      });
+    };
   }
 }
 
@@ -546,7 +601,7 @@ async function renderStudentProfile(root, classes, student, onBack) {
         <div class="card-b">
           <div class="profile-meta">
             <div><span>Gender</span><span>${esc(student.gender)}</span></div>
-            <div><span>Class / Stream</span><span>${esc(student.class_name)}${student.stream_name ? ' — ' + esc(student.stream_name) : ''}</span></div>
+            <div><span>Class / Arm</span><span>${esc(student.class_name)}${student.stream_name ? ' — ' + esc(student.stream_name) : ''}</span></div>
             <div><span>Guardian</span><span>${esc(student.guardian_name || student.guardian_contact || '—')}</span></div>
             <div><span>Date of birth</span><span>${esc(student.date_of_birth || '—')}</span></div>
             <div><span>Admission date</span><span>${esc(student.admission_date || '—')}</span></div>

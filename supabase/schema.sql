@@ -1142,27 +1142,47 @@ begin
     (p_school_id, 'Creative Arts and Sports', 'Junior Secondary', '', '')
   on conflict (school_id, name, level) do nothing;
 
-  insert into public.grading_scales (id, school_id, name, description, is_default)
-  values (gen_random_uuid(), p_school_id, 'Default Grading Scale',
-          'Standard scale — edit the bands to match your school.', true)
-  returning id into v_scale_id;
+  -- Round 3 §8: "Do not auto-set a grading scale for a school... the
+  -- default grading scale should be CBC, not the current 8-4-4 default...
+  -- the CBC scale should already exist in the system, ready to use." The
+  -- old 8-4-4 letter-grade scale (A/A-/B+/.../E) used to be created here AND
+  -- immediately marked is_default — i.e. a school got a scale nobody chose,
+  -- silently governing every report card until someone noticed and changed
+  -- it. The CBC competency scale is now seeded instead, PRESENT but
+  -- deliberately NOT default — an admin must explicitly click "Activate"
+  -- (loadCbcCompetencyScale() in src/lib/api/grading.mjs, which now also
+  -- promotes it to default in that same click) before it's actually used.
+  -- publishExam() separately refuses to publish at all until some scale is
+  -- active, so a new school can't silently publish results with no real
+  -- grading behind them.
+  --
+  -- Guarded by an explicit existence check (grading_scales has no unique
+  -- constraint to hang an ON CONFLICT off) — school-seed.js's own doc
+  -- comment promises this whole function is safe to call more than once for
+  -- the same school (a legitimate retry after a timeout), and a duplicate
+  -- "CBC Competency Scale" would actively confuse the new one-click
+  -- Activate flow (two same-named scales, one arbitrarily becoming
+  -- default). Every other insert in this function already had this
+  -- protection (on conflict do nothing); this one just never did.
+  if not exists (select 1 from public.grading_scales where school_id = p_school_id and name = 'CBC Competency Scale') then
+    insert into public.grading_scales (id, school_id, name, description, is_default)
+    values (gen_random_uuid(), p_school_id, 'CBC Competency Scale',
+            'The 8-band CBC competency-based scale (Below/Approaching/Meeting/Exceeding Expectation).', false)
+    returning id into v_scale_id;
 
-  insert into public.grade_ranges (school_id, grading_scale_id, min_score, max_score, grade_label, points, remark)
-  select p_school_id, v_scale_id, b.min_score, b.max_score, b.grade_label, b.points, b.remark
-  from (values
-    (80, 100, 'A',  12, 'Excellent'),
-    (75, 79,  'A-', 11, 'Excellent'),
-    (70, 74,  'B+', 10, 'Very Good'),
-    (65, 69,  'B',   9, 'Very Good'),
-    (60, 64,  'B-',  8, 'Good'),
-    (55, 59,  'C+',  7, 'Good'),
-    (50, 54,  'C',   6, 'Credit'),
-    (45, 49,  'C-',  5, 'Credit'),
-    (40, 44,  'D+',  4, 'Pass'),
-    (35, 39,  'D',   3, 'Pass'),
-    (30, 34,  'D-',  2, 'Weak'),
-    (0,  29,  'E',   1, 'Fail')
-  ) as b(min_score, max_score, grade_label, points, remark);
+    insert into public.grade_ranges (school_id, grading_scale_id, min_score, max_score, grade_label, points, remark)
+    select p_school_id, v_scale_id, b.min_score, b.max_score, b.grade_label, b.points, b.remark
+    from (values
+      (0,  12,  'BE2', 1, 'Below Expectation'),
+      (13, 24,  'BE1', 2, 'Below Expectation'),
+      (25, 36,  'AE2', 3, 'Approaching Expectation'),
+      (37, 49,  'AE1', 4, 'Approaching Expectation'),
+      (50, 60,  'ME2', 5, 'Meeting Expectation'),
+      (61, 72,  'ME1', 6, 'Meeting Expectation'),
+      (73, 84,  'EE2', 7, 'Exceeding Expectation'),
+      (85, 100, 'EE1', 8, 'Exceeding Expectation')
+    ) as b(min_score, max_score, grade_label, points, remark);
+  end if;
 
   insert into public.settings (school_id, key, value) values
     (p_school_id, 'school_name', (select name from public.schools where id = p_school_id)),
@@ -1371,12 +1391,28 @@ create index idx_student_attendance_student on public.student_attendance(student
 -- ----------------------------------------------------------------------------
 -- staff_attendance
 -- ----------------------------------------------------------------------------
+-- Round 3 §19: "Add a new feature under the Attendance module for staff
+-- sign-in and sign-out, capturing the actual time of each." sign_in_time/
+-- sign_out_time are plain nullable `time` columns on the SAME row this
+-- table already keyed by (staff_id, date) for present/absent/late/excused
+-- marking — a day's sign-in/out times and its coarse status are properties
+-- of the same "this staff member, this day" fact, not two separate
+-- concepts, so one row covers both rather than a new table. Whether a
+-- sign-in/out counts as "late"/"left early" is deliberately NOT stored here
+-- (no is_late/left_early column) — it's computed at read time in
+-- src/lib/staffAttendance.mjs against the school's CURRENT expected
+-- arrival/departure times (settings keys staff_expected_arrival_time/
+-- staff_expected_departure_time), so changing the expected times later
+-- reclassifies every past day consistently instead of leaving old rows
+-- stamped against a since-changed cutoff.
 create table public.staff_attendance (
   id uuid primary key default gen_random_uuid(),
   school_id uuid not null references public.schools(id) on delete cascade,
   staff_id uuid not null references public.staff(id) on delete cascade,
   date date not null,
   status text not null default 'present',
+  sign_in_time time,
+  sign_out_time time,
   marked_by uuid references public.staff(id) on delete set null,
   notes text,
   created_at timestamptz not null default now(),

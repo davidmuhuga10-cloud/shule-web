@@ -253,6 +253,21 @@ async function run() {
     check('the un-selected student stayed in the original class', stillInC1.data.length === 1 && stillInC1.data[0].id === 's3');
   }
 
+  // ---- existingAdmissionNumbers (Round 3 §2: preview-time duplicate check) ----
+  {
+    const sb = createMockSupabase({
+      students: [
+        { id: 's1', admission_no: '101', full_name: 'A', gender: 'Male', status: 'active' },
+        { id: 's2', admission_no: '102', full_name: 'B', gender: 'Female', status: 'left' }
+      ]
+    });
+    const api = createStudentsApi(sb);
+    const res = await api.existingAdmissionNumbers();
+    check('existingAdmissionNumbers returns ok', res.ok === true);
+    check('existingAdmissionNumbers returns every admission number, lowercased', res.data.length === 2 && res.data.indexOf('101') !== -1 && res.data.indexOf('102') !== -1);
+    check('existingAdmissionNumbers includes archived/left students (an admission number stays reserved)', res.data.indexOf('102') !== -1);
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

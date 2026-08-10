@@ -8,7 +8,7 @@ const CL_COLS = [
   { key: 'admission_no', label: 'Admission No.', on: true },
   { key: 'full_name', label: 'Name', on: true },
   { key: 'gender', label: 'Gender', on: true },
-  { key: 'stream_name', label: 'Stream', on: true },
+  { key: 'stream_name', label: 'Arm', on: true },
   { key: 'guardian_name', label: 'Guardian', on: false },
   { key: 'guardian_contact', label: 'Guardian Contact', on: false }
 ];
@@ -20,7 +20,7 @@ export async function viewClassList(root) {
   // A "🖨️ Print" click from the Students module hands off the class/stream
   // currently filtered there — see navIntent.mjs.
   const intent = takeNavIntent('class-list') || {};
-  render(root, classes, { class_id: intent.class_id || '', stream_id: intent.stream_id || '' });
+  render(root, classes, { class_id: intent.class_id || '', stream_id: intent.stream_id || '', blank_cols: 0 });
 }
 
 function render(root, classes, sel) {
@@ -29,11 +29,18 @@ function render(root, classes, sel) {
     <div class="card no-print" style="margin-bottom:16px">
       <div class="card-b grid2">
         <div class="field"><label>Class</label><select id="cl-class">${options(classes, 'id', 'name', sel.class_id, 'Choose a class')}</select></div>
-        <div class="field"><label>Stream (optional)</label><select id="cl-stream" ${sel.class_id ? '' : 'disabled'}><option value="">Whole class</option></select></div>
+        <div class="field"><label>Arm (optional)</label><select id="cl-stream" ${sel.class_id ? '' : 'disabled'}><option value="">Whole class</option></select></div>
       </div>
       <div class="card-b" style="padding-top:0">
         <label style="font-weight:600;font-size:12.5px;margin-bottom:6px;display:block">Columns to print</label>
         <div class="chk-row">${CL_COLS.map((c) => `<label class="chk"><input type="checkbox" data-col="${c.key}" ${c.on ? 'checked' : ''}> ${esc(c.label)}</label>`).join('')}</div>
+      </div>
+      <div class="card-b" style="padding-top:0">
+        <div class="field" style="max-width:260px">
+          <label>Extra blank columns</label>
+          <input type="number" id="cl-blank-cols" min="0" max="10" step="1" value="${sel.blank_cols || 0}">
+        </div>
+        <p class="hint" style="margin:6px 0 0">Adds this many empty printable columns after the ones above — handy for collecting information on paper (e.g. emails, phone numbers) that isn't in the system yet.</p>
       </div>
     </div>
     <div id="cl-list"></div>
@@ -48,12 +55,16 @@ function render(root, classes, sel) {
   }
   if (sel.class_id) refreshStreams(sel.class_id, sel.stream_id);
 
+  const blankColsInput = root.querySelector('#cl-blank-cols');
   const reload = () => {
-    const next = { class_id: classSel.value, stream_id: streamSel.value };
+    const rawBlank = parseInt(blankColsInput.value, 10);
+    const blankCols = isNaN(rawBlank) ? 0 : Math.max(0, Math.min(10, rawBlank));
+    const next = { class_id: classSel.value, stream_id: streamSel.value, blank_cols: blankCols };
     if (next.class_id) load(root, classes, next); else root.querySelector('#cl-list').innerHTML = '';
   };
   classSel.onchange = async (e) => { await refreshStreams(e.target.value); reload(); };
   streamSel.onchange = reload;
+  blankColsInput.onchange = reload;
   // Bug fix (feature brief §2): unticking a column (e.g. Guardian) only took
   // effect visually via this 'change' listener — but load() rebuilds
   // #cl-list's markup from scratch on every class/stream change, which reset
@@ -91,6 +102,14 @@ async function load(root, classes, sel) {
     ? root.querySelector('#cl-stream').options[root.querySelector('#cl-stream').selectedIndex].textContent : '';
   const titleBand = `${esc((cls ? cls.name : '').toUpperCase())}${streamName ? ' - ' + esc(streamName.toUpperCase()) : ''} - CLASS LIST`;
 
+  // Round 3 §10: "add a filter... to include extra blank columns of a
+  // chosen size" — purely a printable-paper convenience (collecting info
+  // not yet in the system), so these are only ever rendered into the table
+  // itself, never into the "Download Excel" export below.
+  const blankCols = Math.max(0, Math.min(10, Number(sel.blank_cols) || 0));
+  const blankHeaderCells = Array.from({ length: blankCols }, () => '<th class="cl-blank-col">&nbsp;</th>').join('');
+  const blankBodyCells = Array.from({ length: blankCols }, () => '<td class="cl-blank-col">&nbsp;</td>').join('');
+
   listEl.innerHTML = `
     <div class="report-toolbar no-print">
       <button class="btn secondary" id="cl-download">⬇️ Download Excel</button>
@@ -106,15 +125,15 @@ async function load(root, classes, sel) {
         <table class="print-grid">
           <thead><tr>
             <th class="col-admission_no">Admission No.</th><th class="col-full_name">Name</th>
-            <th class="col-gender">Gender</th><th class="col-stream_name">Stream</th>
-            <th class="col-guardian_name print-hide">Guardian</th><th class="col-guardian_contact print-hide">Guardian Contact</th>
+            <th class="col-gender">Gender</th><th class="col-stream_name">Arm</th>
+            <th class="col-guardian_name print-hide">Guardian</th><th class="col-guardian_contact print-hide">Guardian Contact</th>${blankHeaderCells}
           </tr></thead>
           <tbody>${students.map((s) => `<tr>
             <td class="col-admission_no">${esc(s.admission_no)}</td><td class="col-full_name">${esc(s.full_name)}</td>
             <td class="col-gender">${esc(s.gender)}</td><td class="col-stream_name">${esc(s.stream_name || '—')}</td>
-            <td class="col-guardian_name print-hide">${esc(s.guardian_name || '—')}</td><td class="col-guardian_contact print-hide">${esc(s.guardian_contact || '—')}</td>
+            <td class="col-guardian_name print-hide">${esc(s.guardian_name || '—')}</td><td class="col-guardian_contact print-hide">${esc(s.guardian_contact || '—')}</td>${blankBodyCells}
           </tr>`).join('')}</tbody>
-        </table>` : `<div class="empty"><div class="e-ico">🎒</div><h3>No students found</h3><p>No active students in this class/stream yet.</p></div>`}
+        </table>` : `<div class="empty"><div class="e-ico">🎒</div><h3>No students found</h3><p>No active students in this class/arm yet.</p></div>`}
       </div>
     </div>
   `;

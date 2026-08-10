@@ -42,7 +42,13 @@ export function createStaffApi(supabase) {
 
       const rec = {
         full_name: fullName,
-        email,
+        // Round 3 §5: store NULL (not '') when no email was given. The
+        // `unique (school_id, email)` constraint treats every NULL as
+        // distinct, so any number of email-less staff can coexist — but
+        // multiple '' (empty string) rows collide with each other on that
+        // same constraint, which is exactly what caused bulkCreate's false
+        // "duplicate key" failures below.
+        email: email || null,
         phone: payload.phone || '',
         role: payload.role || 'teacher',
         gender: payload.gender || null,
@@ -113,7 +119,10 @@ export function createStaffApi(supabase) {
         }
         toInsert.push({
           full_name: fullName,
-          email,
+          // Round 3 §5 fix — see the matching comment in save() above: NULL,
+          // never '', for a blank email, so any number of blank-email rows
+          // in one batch can coexist without tripping the unique constraint.
+          email: email || null,
           phone: row.phone || '',
           role: row.role || 'Teacher',
           gender: row.gender || null,

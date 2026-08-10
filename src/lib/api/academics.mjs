@@ -172,6 +172,21 @@ export function createAcademicsApi(supabase) {
           name, level_order, description: payload.description || '',
           class_teacher_staff_id: payload.class_teacher_staff_id || null
         };
+        // Round 3 §17: "no class should ever be allowed to exist without at
+        // least one stream (arm)... this removes the zero-stream state from
+        // the system entirely, rather than needing to handle it as an edge
+        // case." Checked BEFORE the class row itself is inserted (not
+        // after-the-fact cleanup), and only for a brand-new class — an
+        // existing class always already has at least one stream once this
+        // rule has been in force since its creation (see migration
+        // 0016_require_class_stream.sql for classes that predate it).
+        const pendingStreamNames = Array.isArray(payload.streams)
+          ? [...new Set(payload.streams.map((nm) => String(nm || '').trim()).filter(Boolean).map((nm) => nm))]
+          : [];
+        if (!payload.id && !pendingStreamNames.length) {
+          return err('Add at least one arm for this class — e.g. "Main" if it only has one group.');
+        }
+
         let saved;
         if (payload.id) {
           const { data, error } = await supabase.from('classes').update(rec).eq('id', payload.id).select().single();
@@ -207,6 +222,14 @@ export function createAcademicsApi(supabase) {
               for (const s of insertedStreams || []) {
                 await seedDefaultSubjectsForNewStream(supabase, s.id, saved.id, saved.name);
               }
+            } else if (!payload.id) {
+              // Round 3 §17: for a brand-new class the required stream(s)
+              // failing to insert would otherwise leave exactly the
+              // zero-stream state this fix exists to prevent, silently
+              // (the class row itself already succeeded above) — surfaced
+              // as a real failure instead of a quiet no-op so the admin
+              // knows to retry rather than assuming the class is ready.
+              return err(`Class was created, but its arm(s) could not be added: ${streamErr.message}. Add one from the class page before using it.`);
             }
           }
         }
@@ -243,13 +266,13 @@ export function createAcademicsApi(supabase) {
       },
       async save(payload) {
         payload = payload || {};
-        if (!payload.class_id) return err('Please choose the class this stream belongs to.');
+        if (!payload.class_id) return err('Please choose the class this arm belongs to.');
         const name = String(payload.name || '').trim();
         // Round 2 brief §2 (BUG): "Blue,Red" was accepted as one stream
         // name — plain letters/digits/spaces only from here on, whether
         // this is a brand-new stream or a rename (§4) of an existing one.
-        const nameError = plainNameError(name, 'Stream name');
-        if (nameError) return err(name ? nameError : 'Stream name is required (e.g. "East", "North", "Blue").');
+        const nameError = plainNameError(name, 'Arm name');
+        if (nameError) return err(name ? nameError : 'Arm name is required (e.g. "East", "North", "Blue").');
         const rec = { class_id: payload.class_id, name, description: payload.description || '' };
         // Same-name-in-this-class dup check applies to a rename too now
         // (excluding the row being renamed) — previously only checked on
@@ -258,7 +281,7 @@ export function createAcademicsApi(supabase) {
         let dupQuery = supabase.from('streams').select('id').eq('class_id', payload.class_id).eq('name', name);
         if (payload.id) dupQuery = dupQuery.neq('id', payload.id);
         const { data: dup } = await dupQuery.maybeSingle();
-        if (dup) return err('That stream already exists for this class.');
+        if (dup) return err('That arm already exists for this class.');
         if (payload.id) {
           const { data, error } = await supabase.from('streams').update(rec).eq('id', payload.id).select().single();
           if (error) return err(error.message);
@@ -276,7 +299,17 @@ export function createAcademicsApi(supabase) {
       },
       async remove(id) {
         const { count } = await supabase.from('students').select('id', { count: 'exact', head: true }).eq('stream_id', id);
-        if (count > 0) return err('Students are assigned to this stream. Move them first.');
+        if (count > 0) return err('Students are assigned to this arm. Move them first.');
+        // Round 3 §17: a class must always have at least one stream (arm) —
+        // deleting an individual stream down to zero is refused; deleting
+        // the WHOLE class (classes.remove() above) still cascades and
+        // removes every one of its streams together, since that's an
+        // explicit, different action, not this one.
+        const { data: thisStream } = await supabase.from('streams').select('class_id').eq('id', id).maybeSingle();
+        if (thisStream) {
+          const { count: siblingCount } = await supabase.from('streams').select('id', { count: 'exact', head: true }).eq('class_id', thisStream.class_id).neq('id', id);
+          if (!siblingCount) return err('A class must always have at least one arm — rename this one instead, or delete the whole class if it\'s no longer needed.');
+        }
         const { error } = await supabase.from('streams').delete().eq('id', id);
         if (error) return err(error.message);
         return ok(true);

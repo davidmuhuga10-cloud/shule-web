@@ -129,7 +129,7 @@ async function run() {
         { id: 'p2', subject_id: 'su1', name: 'Paper 2', paper_no: 2, weight: 0.4, out_of: 50 }
       ]
     });
-    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100 })).data;
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100, class_ids: ['c1'] })).data;
 
     const entryP1 = await results.getResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', paper_id: 'p1' });
     check('getResultsEntry uses the paper\'s own out_of', entryP1.out_of === 100);
@@ -151,7 +151,7 @@ async function run() {
   // ---- broadsheet ranking with ties -----------------------------------------------
   {
     const { sb, results } = freshApis();
-    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100 })).data;
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100, class_ids: ['c1'] })).data;
     // Jane: 90 total. Amos: 70. Tie A & Tie B: both 60 (tie for 3rd).
     await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [
       { student_id: 's1', score: '90' }, { student_id: 's2', score: '70' }, { student_id: 's3', score: '60' }, { student_id: 's4', score: '60' }
@@ -187,7 +187,7 @@ async function run() {
         { id: 's3', admission_no: '3', full_name: 'South Only', gender: 'Male', class_id: 'c1', stream_id: 'str2', status: 'active' }
       ]
     });
-    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100 })).data;
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100, class_ids: ['c1'] })).data;
     // Class-wide order: South Only (95) > North Best (85) > North Worst (40).
     // Within North alone, North Best is #1 even though they're #2 class-wide.
     await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [
@@ -204,7 +204,7 @@ async function run() {
   // ---- broadsheet honours min-subjects-for-ranking --------------------------------
   {
     const { sb, results } = freshApis({ settings: [{ id: 'set1', key: 'min_subjects_for_ranking', value: '2' }] });
-    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100 })).data;
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100, class_ids: ['c1'] })).data;
     // Jane has both subjects; Amos only one -> Amos should be excluded from ranking.
     await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '80' }, { student_id: 's2', score: '90' }] });
     await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su2', scores: [{ student_id: 's1', score: '70' }] });
@@ -223,7 +223,7 @@ async function run() {
   // ---- getBroadsheet (Mark List) only shows PUBLISHED subjects (feature brief §5) ----
   {
     const { sb, results } = freshApis();
-    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100 })).data;
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100, class_ids: ['c1'] })).data;
     await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '85' }] });
     await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su2', scores: [{ student_id: 's1', score: '70' }] });
 
@@ -245,6 +245,21 @@ async function run() {
 
     const unfiltered = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1', includeUnpublished: true });
     check('includeUnpublished:true opts back into seeing every assigned subject regardless of status', unfiltered.subjects.length === 2);
+  }
+
+  // ---- Round 3 §12: getBroadsheet says "No exams found" for a class that was
+  // never actually selected to sit this exam, instead of quietly generating
+  // an empty, marks-less Mark List/Report Form. ----
+  {
+    const { results } = freshApis({ classes: [{ id: 'c1', name: 'Grade 7' }, { id: 'c2', name: 'Grade 8' }] });
+    // c2 deliberately left out of class_ids, exactly like the c3 case above.
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', class_ids: ['c1'] })).data;
+
+    const wrongClass = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c2' });
+    check('a class never selected for this exam gets a clear error, not an empty report', wrongClass.ok === false && /no exams found/i.test(wrongClass.message));
+
+    const rightClass = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1', includeUnpublished: true });
+    check('the actually-selected class still works normally', rightClass.ok === true);
   }
 
   // ---- getReportCard (via mocked RPC) ---------------------------------------------
@@ -316,6 +331,41 @@ async function run() {
 
     const empty = await results.publishExam(exam.id, 'c2');
     check('publishExam errors when the class has no marks at all', empty.ok === false);
+  }
+
+  // ---- publishExam: Round 3 §8 "no grading scale, no publish" gate ----------------
+  {
+    // No grading_scales table at all (no default scale exists for this
+    // school) -- publishing must be rejected outright, even with marks entered.
+    const { results } = freshApis({ grading_scales: [] });
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1' })).data;
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '50' }] });
+    const blocked = await results.publishExam(exam.id, 'c1');
+    check('publishExam refuses to publish with no active grading scale', blocked.ok === false);
+    check('publishExam explains a grading scale is needed', /grading scale/i.test(blocked.message));
+
+    const list = await results.listSubmissions(exam.id, 'c1');
+    check('nothing got published while blocked', list.data.every((r) => r.status !== 'published'));
+  }
+  {
+    // A scale exists but none is marked default (Round 3 §8's "do not
+    // auto-set a grading scale" — present-but-inactive) -- still blocked.
+    const { results } = freshApis({ grading_scales: [{ id: 'gs1', name: 'CBC Competency Scale', is_default: false }] });
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1' })).data;
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '50' }] });
+    const blocked = await results.publishExam(exam.id, 'c1');
+    check('publishExam refuses to publish when a scale exists but is not active', blocked.ok === false);
+  }
+  {
+    // A per-(exam,class) grading scale override (Step 10 / Publish Settings)
+    // counts as "having a scale" even with no school-wide default.
+    const { results } = freshApis({ grading_scales: [] });
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', class_ids: ['c1'] })).data;
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '50' }] });
+    const setRes = await results.savePublishSettings(exam.id, 'c1', { grading_scale_id: 'some-scale-id' });
+    check('savePublishSettings accepts a grading_scale_id override even with no school-wide scale', setRes.ok === true);
+    const allowed = await results.publishExam(exam.id, 'c1');
+    check('publishExam allows publishing when this exam+class has its own grading scale override', allowed.ok === true);
   }
 
   // ---- publishExam: Round 2 §10 minimum-subjects publish gate ---------------------
@@ -441,6 +491,46 @@ async function run() {
     check('saveExam keeps a class that already has recorded marks even if unticked', resaved.ok === true);
     const stillThere = await results.listExamClasses(exam.id);
     check('a class with marks is never silently dropped from the board', stillThere.data.length === 2);
+  }
+
+  // ---- Round 3 §9 regression: a class published with FEWER subjects than are
+  // currently assigned must still show 'published', never fall back to
+  // 'in_progress'/"Marks incomplete" — publishExam() only ever publishes the
+  // subjects that actually have marks (the min-subjects gate deliberately
+  // allows that), so requiring every assigned subject to be published before
+  // showing 'published' left a genuinely-published class stuck amber forever
+  // (the brief's own reported example: 8/9 subjects, permanently "incomplete"). ----
+  {
+    const { sb, results } = freshApis({
+      classes: [{ id: 'c1', name: 'Grade 8' }],
+      students: [{ id: 's1', admission_no: '1', full_name: 'A', gender: 'Male', class_id: 'c1', status: 'active' }],
+      // 3 subjects assigned; only 2 will ever get marks/be published — the
+      // 3rd (su3) never gets a single mark, mirroring a subject nobody
+      // teaches this term or simply hasn't started yet.
+      subject_class_assignments: [
+        { id: 'sca1', subject_id: 'su1', class_id: 'c1' },
+        { id: 'sca2', subject_id: 'su2', class_id: 'c1' },
+        { id: 'sca3', subject_id: 'su3', class_id: 'c1' }
+      ]
+    });
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', class_ids: ['c1'] })).data;
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '50' }] });
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su2', scores: [{ student_id: 's1', score: '60' }] });
+    const pub = await results.publishExam(exam.id, 'c1');
+    check('publishExam succeeds with only 2 of 3 assigned subjects having marks', pub.ok === true && pub.published === 2);
+
+    const afterPublish = await results.listExamClasses(exam.id);
+    const row = afterPublish.data.find((r) => r.class_id === 'c1');
+    check('a class published with fewer subjects than assigned still shows published, not in_progress', row.status === 'published');
+    check('subjects_published/subjects_total are still reported honestly for the UI (2 of 3)', row.subjects_published === 2 && row.subjects_total === 3);
+
+    // A new subject assigned to the class AFTER publishing must not flip a
+    // published class back to "incomplete" either — it stays published
+    // until the admin explicitly withdraws/republishes.
+    sb._tables.subject_class_assignments.push({ id: 'sca4', subject_id: 'su4', class_id: 'c1' });
+    const afterNewSubject = await results.listExamClasses(exam.id);
+    const row2 = afterNewSubject.data.find((r) => r.class_id === 'c1');
+    check('a newly-assigned subject after publishing does not revert a published class to in_progress', row2.status === 'published');
   }
 
   // ---- listExamClasses shows a class with ZERO enrolled students honestly, doesn't hide it (System Fixes brief §7) ----

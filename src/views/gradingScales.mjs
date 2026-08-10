@@ -20,16 +20,28 @@ async function render(root) {
   const scales = res.ok ? res.data : [];
   if (expandedIds === null) expandedIds = new Set(scales.length <= 1 ? scales.map((sc) => sc.id) : []);
 
-  const hasCbcScale = scales.some((sc) => sc.name === CBC_COMPETENCY_SCALE_NAME);
+  // Round 3 §8: "replace the current 'Add' button with 'Activate,' so the
+  // admin simply turns it on rather than building it from scratch" — the
+  // CBC scale is now pre-seeded for every new school (present but never
+  // auto-selected — "do not auto-set a grading scale for a school"), so the
+  // action needed is either creating it (older schools that predate this)
+  // or simply promoting it to default (new schools) — loadCbcCompetencyScale()
+  // now does both in one click, so one "Activate" button/label covers it.
+  const cbcScale = scales.find((sc) => sc.name === CBC_COMPETENCY_SCALE_NAME);
+  const showActivateCbc = !cbcScale || !cbcScale.is_default;
+  const hasAnyDefault = scales.some((sc) => sc.is_default);
 
   root.innerHTML = `
-    <div class="page-head"><div><h2>Grading Scales</h2><p>Configure how raw scores map to letter grades. One scale is used as the default for grading.</p></div>
+    <div class="page-head"><div><h2>Grading Scales</h2><p>Configure how raw scores map to letter grades. One scale is used as the default for grading — exams can't be published until one is active.</p></div>
       <div class="spacer"></div>
-      ${hasCbcScale ? '' : '<button class="btn secondary" id="load-cbc-scale">📥 Load CBC competency scale</button>'}
+      ${showActivateCbc ? '<button class="btn secondary" id="load-cbc-scale">✅ Activate CBC competency scale</button>' : ''}
       <button class="btn" id="add-scale">+ Add scale</button></div>
+    ${!hasAnyDefault && scales.length ? `<div class="card" style="margin-bottom:16px;border-color:var(--warn)"><div class="card-b">
+      <p class="hint" style="margin:0"><b>⚠️ No grading scale is active yet.</b> Exams can't be published until one is — activate the CBC scale above, or click "Make default" on one of the scales below.</p>
+    </div></div>` : ''}
     ${scales.length ? scales.map((sc) => scaleCard(sc, expandedIds.has(sc.id))).join('') : `<div class="card"><div class="card-b"><div class="empty">
-      <div class="e-ico">🎯</div><h3>No grading scales yet</h3><p>Add one to start grading exam results, or load the standard CBC competency scale below.</p>
-      <button class="btn secondary" id="empty-load-cbc-scale">📥 Load CBC competency scale</button>
+      <div class="e-ico">🎯</div><h3>No grading scales yet</h3><p>Activate the standard CBC competency scale below, or build your own from scratch.</p>
+      <button class="btn secondary" id="empty-load-cbc-scale">✅ Activate CBC competency scale</button>
       <button class="btn" id="empty-add-scale">+ Add scale</button>
     </div></div></div>`}
   `;
@@ -45,9 +57,9 @@ async function render(root) {
   const doLoadCbcScale = async (btn) => withBusy(btn, async () => {
     const r = await Db.grading.loadCbcCompetencyScale();
     if (!r.ok) { toast(r.message, 'err'); return; }
-    toast(r.added ? 'CBC competency scale loaded.' : 'The CBC competency scale is already loaded.', 'ok');
+    toast(r.added ? 'CBC competency scale activated.' : 'CBC competency scale is now active.', 'ok');
     render(root);
-  }, 'Loading…');
+  }, 'Activating…');
   const loadBtn = root.querySelector('#load-cbc-scale'), emptyLoadBtn = root.querySelector('#empty-load-cbc-scale');
   if (loadBtn) loadBtn.onclick = () => doLoadCbcScale(loadBtn);
   if (emptyLoadBtn) emptyLoadBtn.onclick = () => doLoadCbcScale(emptyLoadBtn);
