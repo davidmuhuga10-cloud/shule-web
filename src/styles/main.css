@@ -12,6 +12,24 @@
   --grid-ink:#000000; --grid-text:#000000;
 }
 *{box-sizing:border-box}
+/* Round 4 §2 (accessibility BUG, site-wide): every native checkbox anywhere
+   in the app — Class List's column-picker, Permissions toggles, Publish
+   Results' subject list, staff admin/publish-access checkboxes, School
+   Settings, etc. — previously rendered with whatever grey the browser's OS
+   theme defaults to, which is exactly as hard to see as the custom
+   .ex-class-check squares this brief screenshots (fixed separately, further
+   down, since those are fully custom-drawn and don't take accent-color).
+   accent-color is respected by every browser this app targets and re-colors
+   the WHOLE control (box outline + check mark + focus ring), not just the
+   checked fill, so a single rule here fixes visibility everywhere at once
+   instead of needing to be hunted down and set per screen. Explicit
+   width/height so every checkbox reads as comfortably tappable/visible by
+   default too, not just accidentally-tiny ones some screens forgot to size —
+   any screen using the visually-hidden-native-input-behind-a-custom-box
+   pattern (e.g. .ex-class-check) keeps working exactly as before, since
+   THOSE inputs set their own size via an inline style, which always wins
+   over this general rule. */
+input[type="checkbox"]{accent-color:var(--primary);width:16px;height:16px}
 html,body{margin:0;padding:0}
 body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
   background:var(--bg);color:var(--ink);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
@@ -66,7 +84,14 @@ h1,h2,h3,h4{margin:0;font-weight:650;color:var(--ink)}
 .ex-class-card.on{border-color:var(--primary);background:rgba(18,122,107,.06)}
 .ex-class-card.locked{background:var(--bg);cursor:default}
 .ex-class-top{display:flex;align-items:center;gap:9px;cursor:inherit}
-.ex-class-check{width:19px;height:19px;border-radius:6px;border:1.5px solid var(--line);flex:0 0 auto;
+/* Round 4 §2 (accessibility BUG): this used to border with var(--line), the
+   app's very light greyish-blue chrome color (#e6ebf1) — fine for a subtle
+   card divider, but nearly invisible as an EMPTY checkbox outline, which is
+   exactly what someone with low vision needs to be able to see clearly
+   before they've ticked it. var(--ink) (near-black) gives it real contrast
+   against the white card background; the CHECKED state was already clearly
+   visible (solid theme green fill) and is untouched. */
+.ex-class-check{width:19px;height:19px;border-radius:6px;border:2px solid var(--ink);flex:0 0 auto;
   display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;background:#fff}
 .ex-class-card.on .ex-class-check{background:var(--primary);border-color:var(--primary)}
 .ex-class-card.locked .ex-class-check{background:var(--muted);border-color:var(--muted)}
@@ -594,6 +619,35 @@ table.data td.num,table.data th.num{text-align:center}
 /* Logo (School Settings + printouts) */
 .logo-thumb{width:64px;height:64px;border-radius:10px;object-fit:cover;border:1px solid var(--line);background:#fff}
 .logo-placeholder{width:64px;height:64px;border-radius:10px;border:1.5px dashed var(--line);display:grid;place-items:center;color:var(--muted);font-size:22px;background:#fafbfc}
+/* ----------------------------------------------------------------------
+   Round 4 §7 — Timetable module (_timetableGrid.mjs / timetable.mjs /
+   timetableSetup.mjs). The main grid deliberately reuses the same visual
+   language as .report-grid (bordered cells, uppercase small headers) so a
+   printed timetable feels consistent with every other printed report,
+   without actually depending on .report's own scoping (Timetable isn't a
+   "report" page — see printHeader.mjs's global, unscoped .print-header,
+   which every non-Report-Form printable screen already relies on the same
+   way). Prints portrait/landscape via the same shared printOptionsHtml()/
+   wirePrintOptions() every other report uses — no bespoke print code here.
+   ---------------------------------------------------------------------- */
+.tt-grid{width:100%;border-collapse:collapse;font-size:12px;color:var(--grid-text)}
+.tt-grid th,.tt-grid td{border:1.3px solid var(--grid-ink);padding:7px 8px;vertical-align:top}
+.tt-grid thead th{font-size:10.5px;font-weight:800;background:#f7f9fb;text-transform:uppercase;letter-spacing:.3px;text-align:center}
+.tt-grid .tt-period-col{width:110px;font-size:11px;white-space:nowrap;background:#fafbfc}
+.tt-grid .tt-time{font-size:9.5px;color:var(--muted)}
+.tt-grid .tt-break-row td{background:#eef1f5;text-align:center;font-weight:700;color:var(--muted);font-size:11px}
+.tt-grid .tt-cell{min-width:110px;text-align:center}
+.tt-grid .tt-subject{font-weight:700;font-size:12px}
+.tt-grid .tt-sub2{font-size:10px;color:var(--muted);margin-top:1px}
+.tt-grid .tt-room{display:inline-block;margin-top:3px;font-size:9px;font-weight:700;color:var(--brand-2);background:#eaf3f2;border-radius:6px;padding:1px 6px}
+.tt-grid .tt-editable{cursor:pointer}
+.tt-grid .tt-editable:hover{background:#eef6f5}
+/* Teacher Availability click-grid (Setup tab) — not printed, screen-only. */
+.tt-avail-grid th,.tt-avail-grid td{text-align:center}
+.tt-avail-cell{cursor:pointer;font-weight:600;font-size:12px;color:#1a7a4c;user-select:none}
+.tt-avail-cell:hover{background:#f2f8f5}
+.tt-avail-cell.blocked{color:var(--danger);background:#fdf1f1}
+
 /* Brief §8/§9: printed reports should have sane margins/page sizing and
    never require scrolling on paper. @page sets a consistent margin on every
    printed page. Landscape printing (e.g. the Mark List/broadsheet, which can

@@ -18,7 +18,9 @@ const EMBEDS = [
   { needle: 'classes(', table: 'classes', fk: 'class_id', as: 'classes' },
   { needle: 'subjects(', table: 'subjects', fk: 'subject_id', as: 'subjects' },
   { needle: 'staff(', table: 'staff', fk: 'staff_id', as: 'staff' },
-  { needle: 'students(', table: 'students', fk: 'student_id', as: 'students' }
+  { needle: 'students(', table: 'students', fk: 'student_id', as: 'students' },
+  { needle: 'streams(', table: 'streams', fk: 'stream_id', as: 'streams' },
+  { needle: 'rooms(', table: 'rooms', fk: 'room_id', as: 'rooms' }
 ];
 
 export function createMockSupabase(initialTables) {

@@ -154,6 +154,33 @@ export function createResultsApi(supabase, gradingApi) {
       return ok(rows);
     },
 
+    /** Round 4 §4 ("change the flow to ask for Class first, then Exam — if
+     *  the selected class has no exams, show 'no exams found' and disable
+     *  the print button entirely, nothing should generate"): Report Forms
+     *  used to offer every exam in the school regardless of whether it was
+     *  ever assigned to the chosen class, so a class with zero exams still
+     *  let you pick one and only failed later, deep in generation.
+     *  exam_classes is the same source of truth getBroadsheet()/
+     *  listSubmissions() already treat as "this class actually sits this
+     *  exam" — scoping the Exam dropdown to it up front means a class with
+     *  no exams shows that immediately, before an Exam is even chosen. */
+    async listExamsForClass(classId) {
+      if (!classId) return ok([]);
+      const { data: examClassRows, error: ecErr } = await supabase.from('exam_classes').select('exam_id').eq('class_id', classId);
+      if (ecErr) return err(ecErr.message);
+      const examIds = [...new Set((examClassRows || []).map((r) => r.exam_id).filter(Boolean))];
+      if (!examIds.length) return ok([]);
+      const { data, error } = await supabase.from('exams').select('*, academic_years(name), terms(name)').is('deleted_at', null).in('id', examIds);
+      if (error) return err(error.message);
+      const rows = (data || []).map((e) => ({
+        ...e,
+        academic_year_name: e.academic_years ? e.academic_years.name : '',
+        term_name: e.terms ? e.terms.name : ''
+      }));
+      rows.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+      return ok(rows);
+    },
+
     async saveExam(payload) {
       payload = payload || {};
       const name = String(payload.name || '').trim();

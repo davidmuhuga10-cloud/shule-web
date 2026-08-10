@@ -9,12 +9,19 @@
  *   - If ANY row fails validation (e.g. gender not filled in), the import is
  *     blocked entirely — fix it in the spreadsheet and re-upload, rather than
  *     silently skipping the bad rows.
- *   - Round 2 §6: Stream is no longer chosen once for the whole batch up
- *     front. It's a column IN the spreadsheet instead ("Stream"), read per
+ *   - Round 2 §6: Stream is a column IN the spreadsheet ("Arm"), read per
  *     row, so a single upload can enroll students into several different
- *     streams of the same class at once. It's always optional — even for a
- *     class that has streams set up — matching direct feedback that the old
- *     "choose one stream first, and it's compulsory" gate was too rigid.
+ *     arms of the same class at once.
+ *   - Round 4 §1 (BUG): Round 2 §6 originally made Arm optional per row —
+ *     but that let a whole class of students land with no arm at all if the
+ *     uploader just forgot the column, which was never actually desired.
+ *     Reversed: Arm is now REQUIRED, same as Admission Number/Name/Gender —
+ *     one blank Arm anywhere in the file blocks the entire import (via the
+ *     same all-or-nothing validateRow() gate below) with a clear "stream not
+ *     filled" reason, rather than silently importing that student arm-less.
+ *     This is safe to require unconditionally now: Round 3 §17 already
+ *     guarantees every class has at least one arm (a class can no longer
+ *     exist with zero arms), so there's always something valid to type in.
  */
 import { esc, toast, options, renderPrereq, $ } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
@@ -29,7 +36,7 @@ const TEMPLATE_COLUMNS = [
   { key: 'admission_no', label: 'Admission Number' },
   { key: 'full_name', label: 'Student Name' },
   { key: 'gender', label: 'Gender (Male/Female)' },
-  { key: 'stream', label: 'Arm (leave blank if none / not applicable)' },
+  { key: 'stream', label: 'Arm (required)' },
   { key: 'guardian_name', label: 'Guardian Name' },
   { key: 'guardian_contact', label: 'Guardian Contact' },
   { key: 'guardian_relationship', label: 'Guardian Relationship' },
@@ -81,7 +88,7 @@ function rowsFromSheet(sheetRows) {
 
 /** streamNames: lowercased set of the chosen class's real stream names, used
  *  to catch a typo'd stream before import rather than silently dropping it
- *  server-side. A blank stream is always fine — never required (Round 2 §6).
+ *  server-side.
  *  existingAdmissionSet: lowercased set of admission numbers already in use
  *  school-wide (Round 3 §2) — a duplicate now fails clearly AT PREVIEW time,
  *  matching how Add Student already blocks a duplicate immediately, instead
@@ -98,7 +105,11 @@ function validateRow(row, streamNames, existingAdmissionSet, seenInBatch) {
   // exemption. Matching the server exactly here means preview never again
   // approves a row that's actually doomed to be skipped.
   const streamText = String(row.stream || '').trim();
-  if (streamText && (!streamNames || !streamNames.has(streamText.toLowerCase()))) {
+  // Round 4 §1 (BUG): blank Arm used to be fine — now it's a hard error like
+  // every other required field, so it trips the same "any error blocks the
+  // whole Import button" gate this preview already enforces below.
+  if (!streamText) return 'Stream not filled — every student must have an Arm.';
+  if (!streamNames || !streamNames.has(streamText.toLowerCase())) {
     return `Arm "${streamText}" was not found for this class.`;
   }
   const admissionKey = String(row.admission_no || '').trim().toLowerCase();
@@ -128,13 +139,13 @@ function render(root, classes, state) {
         <div class="field"><label>Class</label><select id="bu-class">${options(classes, 'id', 'name', state.class_id, 'Choose a class')}</select></div>
       </div>
       <div class="card-b" style="padding-top:0"><p class="hint">Every row you import will be enrolled into this class — the spreadsheet itself never sets the class.
-        ${state.streams.length ? `This class has arms set up (${state.streams.map((s) => esc(s.name)).join(', ')}) — use the "Arm" column in the template to place each student into one, or leave it blank if you'd rather assign arms later.` : ''}</p></div>
+        ${state.streams.length ? `This class has arms set up (${state.streams.map((s) => esc(s.name)).join(', ')}) — use the "Arm" column in the template to place each student into one. Every row needs one filled in.` : ''}</p></div>
     </div>
 
     <div class="card" style="margin-bottom:16px">
       <div class="card-h"><h3>2. Download template, fill it in, upload it back</h3></div>
       <div class="card-b">
-        <p class="hint" style="margin-top:0">Only Admission Number, Student Name and Gender are required — every other column, including Arm, is optional, but filling them in now means you won't need to go back and edit each student afterward.</p>
+        <p class="hint" style="margin-top:0">Admission Number, Student Name, Gender and Arm are all required for every row — every other column is optional, but filling them in now means you won't need to go back and edit each student afterward.</p>
         <button class="btn secondary" id="bu-template">⬇ Download template (.xlsx)</button>
         <div class="field" style="margin-top:14px"><label>Upload the filled-in spreadsheet</label><input id="bu-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></div>
         <button class="btn" id="bu-preview" style="margin-top:6px" disabled>Preview</button>

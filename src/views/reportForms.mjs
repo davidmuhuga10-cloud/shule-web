@@ -1,7 +1,8 @@
-import { esc, options, renderPrereq, loader, toast, printOptionsHtml, wirePrintOptions, withBusy } from '../app.js';
+import { esc, options, renderPrereq, loader, toast, go, printOptionsHtml, wirePrintOptions, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { renderReportCard } from './_reportCard.mjs';
 import { takeNavIntent } from '../lib/navIntent.mjs';
+import { isContactInfoComplete, renderMissingContactInfo } from '../lib/printHeader.mjs';
 
 const BATCH_VALUE = '__all__';
 
@@ -46,12 +47,17 @@ function termDatesCardHtml(settings) {
 function render(root, exams, classes, intent, settings) {
   intent = intent || {};
   settings = settings || {};
+  // Round 4 §4: "change the flow to ask for Class first, then Exam" — Class
+  // now leads (was Exam, Class, Arm, Student); the Exam field starts
+  // disabled/empty exactly like Arm and Student already did, and only fills
+  // in once a class is chosen (see refreshExams below), scoped to just the
+  // exams that class was actually assigned to.
   root.innerHTML = `
-    <div class="page-head no-print"><div><h2>Report Forms</h2><p>Pick an exam and a student to generate their report form — or choose "Print all" to batch-print a whole class at once.</p></div></div>
+    <div class="page-head no-print"><div><h2>Report Forms</h2><p>Pick a class, then an exam and a student, to generate their report form — or choose "Print all" to batch-print a whole class at once.</p></div></div>
     <div class="card no-print" style="margin-bottom:16px">
       <div class="card-b grid4">
-        <div class="field"><label>Exam</label><select id="rf-exam">${options(exams, 'id', 'name', intent.exam_id || '', 'Choose an exam')}</select></div>
         <div class="field"><label>Class</label><select id="rf-class">${options(classes, 'id', 'name', intent.class_id || '', 'Choose a class')}</select></div>
+        <div class="field"><label>Exam</label><select id="rf-exam" disabled><option value="">Choose a class first</option></select></div>
         <div class="field"><label>Arm (optional)</label><select id="rf-stream" ${intent.class_id ? '' : 'disabled'}><option value="">Whole class</option></select></div>
         <div class="field"><label>Student</label><select id="rf-student" disabled><option value="">Choose a class first</option></select></div>
       </div>
@@ -80,6 +86,39 @@ function render(root, exams, classes, intent, settings) {
     const sres = await Db.streams.list(cid);
     streamSel.disabled = false;
     streamSel.innerHTML = '<option value="">Whole class</option>' + options(sres.ok ? sres.data : [], 'id', 'name', preselect || '');
+  };
+
+  // Round 4 §4: "change the flow to ask for Class first, then Exam — if the
+  // selected class has no exams, show 'no exams found' and disable the
+  // print button entirely, nothing should generate." Scoped to
+  // exam_classes (Db.results.listExamsForClass) — the same "this class was
+  // actually assigned to sit this exam" source of truth getBroadsheet()/
+  // listSubmissions() already use — instead of offering every exam in the
+  // school regardless of whether this class was ever assigned to it.
+  // Returns true when the class has zero exams, so the caller can freeze
+  // the rest of the form right away (no card, nothing to print) instead of
+  // only discovering this later once Exam+Student are both picked.
+  const refreshExams = async (cid, preselect) => {
+    const examSel = root.querySelector('#rf-exam');
+    const cardEl = root.querySelector('#rf-card');
+    if (!cid) {
+      examSel.disabled = true;
+      examSel.innerHTML = '<option value="">Choose a class first</option>';
+      cardEl.innerHTML = '';
+      return true;
+    }
+    const eres = await Db.results.listExamsForClass(cid);
+    const classExams = eres.ok ? eres.data : [];
+    if (!classExams.length) {
+      examSel.disabled = true;
+      examSel.innerHTML = '<option value="">No exams found</option>';
+      cardEl.innerHTML = `<div class="card"><div class="card-b"><div class="empty warn"><div class="e-ico">⚠️</div><h3>No exams found</h3><p>This class hasn't been assigned to sit any exam yet, so there's nothing to print. Assign an exam to this class under Exams first.</p></div></div></div>`;
+      return true;
+    }
+    examSel.disabled = false;
+    examSel.innerHTML = options(classExams, 'id', 'name', preselect || '', 'Choose an exam');
+    cardEl.innerHTML = '';
+    return false;
   };
 
   // Round 3 §12: "Add a Stream filter option under Report Forms as well" —
@@ -142,6 +181,13 @@ function render(root, exams, classes, intent, settings) {
     const cardEl = root.querySelector('#rf-card');
     cardEl.innerHTML = loader();
     const extra = await loadExtra(examId, classId, streamId);
+    // Round 4 §3: "the rule that blocks printing until a school's
+    // header/contact details are set already works correctly elsewhere...
+    // but not under Report Forms specifically." Same gate Mark List/Class
+    // List/Score Sheet/Exam Analysis already enforce (printHeader.mjs),
+    // applied here too — before anything (single student or a whole batch)
+    // gets generated.
+    if (!isContactInfoComplete(extra.settings)) { renderMissingContactInfo(cardEl, () => go('settings')); return; }
     // Round 3 §12: a class/exam combo that was never actually paired (this
     // class didn't sit this exam) used to fall through into an empty,
     // marks-less report instead of saying so plainly.
@@ -206,8 +252,12 @@ function render(root, exams, classes, intent, settings) {
   };
 
   root.querySelector('#rf-class').onchange = async (e) => {
-    await refreshStreams(e.target.value);
-    await refreshStudents(e.target.value, '', '');
+    const cid = e.target.value;
+    // Round 4 §4: Exam is now scoped to the chosen class — refreshed
+    // alongside Arm/Student on every class change, not just once up front.
+    const [, noExams] = await Promise.all([refreshStreams(cid), refreshExams(cid)]);
+    await refreshStudents(cid, '', '');
+    if (noExams) root.querySelector('#rf-student').disabled = true;
     wireStudentSelect();
   };
   root.querySelector('#rf-stream').onchange = async (e) => {
@@ -225,9 +275,10 @@ function render(root, exams, classes, intent, settings) {
   // at the top of this file) — defaults to batch-printing the whole class,
   // unless a specific student_id was handed off too (e.g. from a student's
   // profile page — brief §5's "view results" action), in which case that
-  // one student is preselected instead.
+  // one student is preselected instead. Exam is now class-scoped (§4), so
+  // it's refreshed here too before the handed-off exam_id is selected.
   if (intent.class_id && intent.exam_id) {
-    refreshStreams(intent.class_id, intent.stream_id).then(() => {
+    Promise.all([refreshStreams(intent.class_id, intent.stream_id), refreshExams(intent.class_id, intent.exam_id)]).then(() => {
       refreshStudents(intent.class_id, intent.student_id || BATCH_VALUE, intent.stream_id).then(() => { wireStudentSelect(); tryLoad(); });
     });
   }

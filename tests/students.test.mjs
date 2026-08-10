@@ -101,18 +101,27 @@ async function run() {
 
   // ---- bulkCreate --------------------------------------------------------------
   {
-    const sb = createMockSupabase({ students: [{ id: 's1', admission_no: '10', full_name: 'Existing Kid' }] });
+    // Round 4 §1: stream is now required on every row, so every row here
+    // names one (the mock's actual streams table doesn't matter for THIS
+    // test — it's exercising the OTHER skip reasons — but the row-level
+    // resolution still needs a stream that exists on the class, otherwise
+    // these rows would be skipped for "Arm not found" instead of the
+    // specific reason each is meant to test).
+    const sb = createMockSupabase({
+      students: [{ id: 's1', admission_no: '10', full_name: 'Existing Kid' }],
+      streams: [{ id: 'str1', class_id: 'c1', name: 'North' }]
+    });
     const api = createStudentsApi(sb);
     const res = await api.bulkCreate({
       class_id: 'c1',
       rows: [
-        { admission_no: '11', full_name: 'New Kid A', gender: 'Male' },
-        { admission_no: '12', full_name: 'New Kid B', gender: 'Female' },
-        { admission_no: '10', full_name: 'Clashes With Existing', gender: 'Male' }, // dup vs existing
-        { admission_no: '13', full_name: '', gender: 'Male' }, // missing name
-        { admission_no: '', full_name: 'No Admission No', gender: 'Male' }, // missing admission no
-        { admission_no: '14', full_name: 'Bad Gender', gender: 'Other' }, // bad gender
-        { admission_no: '11', full_name: 'Duplicate In File', gender: 'Male' } // dup within the same batch
+        { admission_no: '11', full_name: 'New Kid A', gender: 'Male', stream: 'North' },
+        { admission_no: '12', full_name: 'New Kid B', gender: 'Female', stream: 'North' },
+        { admission_no: '10', full_name: 'Clashes With Existing', gender: 'Male', stream: 'North' }, // dup vs existing
+        { admission_no: '13', full_name: '', gender: 'Male', stream: 'North' }, // missing name
+        { admission_no: '', full_name: 'No Admission No', gender: 'Male', stream: 'North' }, // missing admission no
+        { admission_no: '14', full_name: 'Bad Gender', gender: 'Other', stream: 'North' }, // bad gender
+        { admission_no: '11', full_name: 'Duplicate In File', gender: 'Male', stream: 'North' } // dup within the same batch
       ]
     });
     check('bulkCreate succeeds', res.ok === true);
@@ -130,18 +139,30 @@ async function run() {
     check('bulkCreate requires a class to be chosen', res.ok === false);
   }
   {
-    // Round 2 §6: stream is now read PER ROW from the spreadsheet's own
-    // "Stream" column, and is always optional — even for a class that has
-    // streams set up. The old "choose one stream for the whole batch up
-    // front, and it's compulsory" gate is gone entirely.
+    // Round 2 §6: stream is read PER ROW from the spreadsheet's own
+    // "Stream" column (so a single upload can enroll students into several
+    // different arms of the same class at once) — Round 4 §1 then made it
+    // REQUIRED on every row, reversing Round 2 §6's "always optional" call:
+    // a blank stream anywhere in the file now rejects the WHOLE import,
+    // rather than that one row silently landing with no arm.
     const sb = createMockSupabase({
       classes: [{ id: 'c1', name: 'Grade 7' }],
-      streams: [{ id: 'str1', class_id: 'c1', name: 'North' }, { id: 'str2', class_id: 'c1', name: 'South' }]
+      streams: [{ id: 'str1', class_id: 'c1', name: 'North' }, { id: 'str2', class_id: 'c1', name: 'South' }],
+      students: []
     });
     const api = createStudentsApi(sb);
     const noStream = await api.bulkCreate({ class_id: 'c1', rows: [{ admission_no: '1', full_name: 'X', gender: 'Male' }] });
-    check('bulkCreate no longer requires a stream when the class has streams', noStream.ok === true && noStream.created === 1);
-    check('bulkCreate leaves stream_id null when the row names none', noStream.createdRows[0].stream_id === null);
+    check('bulkCreate rejects the WHOLE import when a row has no stream', noStream.ok === false && /stream not filled/i.test(noStream.message));
+
+    const mixedBlank = await api.bulkCreate({
+      class_id: 'c1',
+      rows: [
+        { admission_no: '1', full_name: 'X', gender: 'Male', stream: 'North' },
+        { admission_no: '2', full_name: 'Y', gender: 'Male', stream: '' }
+      ]
+    });
+    check('bulkCreate rejects the whole import even if only ONE of several rows is missing a stream', mixedBlank.ok === false && /stream not filled/i.test(mixedBlank.message));
+    check('nothing gets created when the import is rejected for a blank stream', sb._tables.students.length === 0);
 
     const withStream = await api.bulkCreate({ class_id: 'c1', rows: [{ admission_no: '2', full_name: 'Y', gender: 'Male', stream: 'North' }] });
     check('bulkCreate resolves a per-row stream name to the right stream_id', withStream.ok === true && withStream.createdRows[0].stream_id === 'str1');
@@ -170,12 +191,15 @@ async function run() {
     // Richer bio-data fields flow through bulkCreate exactly like the single
     // Add Student form's "More details" section (brief: "one can upload a
     // lot of information via the sheet without having to go back and edit").
-    const sb = createMockSupabase({ classes: [{ id: 'c1', name: 'Grade 7' }] });
+    const sb = createMockSupabase({
+      classes: [{ id: 'c1', name: 'Grade 7' }],
+      streams: [{ id: 'str1', class_id: 'c1', name: 'North' }]
+    });
     const api = createStudentsApi(sb);
     const res = await api.bulkCreate({
       class_id: 'c1',
       rows: [{
-        admission_no: '1', full_name: 'Amos', gender: 'Male',
+        admission_no: '1', full_name: 'Amos', gender: 'Male', stream: 'North',
         date_of_birth: '2015-03-14', admission_date: '2022-01-10',
         upi_number: 'UPI123', assessment_number: 'KNEC456', previous_school: 'Green Hills Academy',
         guardian_relationship: 'Mother', guardian_id_number: '12345678', medical_notes: 'Asthma'

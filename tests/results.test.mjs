@@ -48,6 +48,25 @@ async function run() {
     check('saveExam falls back to written for an unrecognized exam_type', badType.data.exam_type === 'written');
   }
 
+  // ---- listExamsForClass (Round 4 §4: Report Forms flow is Class-first) ---------
+  {
+    const { results } = freshApis({ classes: [{ id: 'c1', name: 'Grade 7' }, { id: 'c2', name: 'Grade 8' }] });
+    check('listExamsForClass returns nothing for an empty/missing class id', (await results.listExamsForClass('')).ok === true && (await results.listExamsForClass('')).data.length === 0);
+    check('listExamsForClass returns nothing for a class assigned to zero exams', (await results.listExamsForClass('c2')).ok === true && (await results.listExamsForClass('c2')).data.length === 0);
+    const examA = (await results.saveExam({ name: 'Opener', academic_year_id: 'y1', term_id: 't1', class_ids: ['c1'] })).data;
+    await results.saveExam({ name: 'Midterm (Grade 8 only)', academic_year_id: 'y1', term_id: 't1', class_ids: ['c2'] });
+    const forC1 = await results.listExamsForClass('c1');
+    check('listExamsForClass only returns exams actually assigned to that class (via exam_classes)', forC1.ok === true && forC1.data.length === 1 && forC1.data[0].id === examA.id);
+    const forC2 = await results.listExamsForClass('c2');
+    check('a different class sees its own, different exam list', forC2.ok === true && forC2.data.length === 1 && forC2.data[0].name === 'Midterm (Grade 8 only)');
+    // Unassigning a class from an exam (re-saving with a narrower class_ids)
+    // must drop it from that class's list too — same exam_classes replace-
+    // the-set behavior saveExam() already documents.
+    await results.saveExam({ id: examA.id, name: 'Opener', academic_year_id: 'y1', term_id: 't1', class_ids: [] });
+    const afterUnassign = await results.listExamsForClass('c1');
+    check('listExamsForClass reflects a class being unassigned from an exam', afterUnassign.ok === true && afterUnassign.data.length === 0);
+  }
+
   // ---- getResultsEntry / saveResultsEntry (whole-subject, no papers) ------------
   {
     const { sb, results } = freshApis();

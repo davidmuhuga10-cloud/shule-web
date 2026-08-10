@@ -1,7 +1,8 @@
 /**
  * settings.mjs — Supabase equivalent of Dashboard.gs's getSettings/saveSettings.
  * Key/value pairs: school_name, school_motto, po_box, phone, email, logo,
- * show_pathway_summary ('true'/'false' — School Settings toggle gating the
+ * show_pathway_summary ('true'/'false' — Permissions toggle (moved out of
+ * School Settings per Round 4 §6; see permissionsSettings.mjs) gating the
  * Report Form's STEM/Social Sciences/Arts & Sport Science cluster row, off
  * by default; see _reportCard.mjs's clusterSummaryHtml()).
  */

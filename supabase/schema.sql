@@ -409,6 +409,13 @@ create table public.subject_class_assignments (
   -- for the full rationale and assignments.mjs for how "effective subjects"
   -- is computed from this.
   stream_id uuid references public.streams(id) on delete cascade,
+  -- Round 4 §7 (0018_timetable.sql): how many periods a week this subject
+  -- needs for this class/stream, and whether some of them should be double
+  -- lessons — read by the Timetable module's generator. Null periods_per_week
+  -- means "not configured yet"; the generator falls back to a default rather
+  -- than requiring every subject to be set up before anything works.
+  periods_per_week integer,
+  is_double boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -1530,6 +1537,137 @@ create policy message_logs_staff_write on public.message_logs for insert
   with check (public.is_staff() and school_id = public.current_school_id());
 create policy message_logs_admin_delete on public.message_logs for delete
   using (public.is_admin() and school_id = public.current_school_id());
+
+-- ----------------------------------------------------------------------------
+-- Round 4 §7 — Timetable module (see migrations/0018_timetable.sql for the
+-- full design rationale in comment form; this is the same DDL, just without
+-- the `if not exists`/idempotency guards a migration needs against an
+-- already-upgraded live database).
+-- ----------------------------------------------------------------------------
+create table public.rooms (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  name text not null,
+  capacity integer,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create trigger trg_rooms_updated_at before update on public.rooms
+  for each row execute function public.set_updated_at();
+create trigger trg_rooms_school_id before insert on public.rooms
+  for each row execute function public.set_school_id();
+create index idx_rooms_school on public.rooms(school_id);
+create unique index idx_rooms_unique_name on public.rooms(school_id, name);
+
+-- One school-wide daily period template (which days it repeats across lives
+-- in `settings.timetable_days`, e.g. "Mon,Tue,Wed,Thu,Fri" — no schema
+-- change needed for that).
+create table public.timetable_periods (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  period_index integer not null,
+  start_time text not null,
+  end_time text not null,
+  is_break boolean not null default false,
+  label text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create trigger trg_timetable_periods_updated_at before update on public.timetable_periods
+  for each row execute function public.set_updated_at();
+create trigger trg_timetable_periods_school_id before insert on public.timetable_periods
+  for each row execute function public.set_school_id();
+create index idx_tt_periods_school on public.timetable_periods(school_id);
+create unique index idx_tt_periods_unique_index on public.timetable_periods(school_id, period_index);
+
+create table public.teacher_unavailability (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  staff_id uuid not null references public.staff(id) on delete cascade,
+  day_of_week smallint not null,
+  period_index integer not null,
+  created_at timestamptz not null default now(),
+  constraint teacher_unavailability_day_check check (day_of_week between 1 and 6)
+);
+create trigger trg_teacher_unavailability_school_id before insert on public.teacher_unavailability
+  for each row execute function public.set_school_id();
+create index idx_tt_unavail_school on public.teacher_unavailability(school_id);
+create index idx_tt_unavail_staff on public.teacher_unavailability(staff_id);
+create unique index idx_tt_unavail_unique on public.teacher_unavailability(staff_id, day_of_week, period_index);
+
+-- Always scoped to a specific stream, never "whole class" — every class
+-- already has at least one arm/stream (Round 3 §17), so there's no
+-- genuinely streamless case to model.
+create table public.timetable_entries (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  academic_year_id uuid not null references public.academic_years(id) on delete cascade,
+  term_id uuid not null references public.terms(id) on delete cascade,
+  day_of_week smallint not null,
+  period_index integer not null,
+  subject_id uuid not null references public.subjects(id) on delete cascade,
+  class_id uuid not null references public.classes(id) on delete cascade,
+  stream_id uuid not null references public.streams(id) on delete cascade,
+  staff_id uuid references public.staff(id) on delete set null,
+  room_id uuid references public.rooms(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint timetable_entries_day_check check (day_of_week between 1 and 6)
+);
+create trigger trg_timetable_entries_updated_at before update on public.timetable_entries
+  for each row execute function public.set_updated_at();
+create trigger trg_timetable_entries_school_id before insert on public.timetable_entries
+  for each row execute function public.set_school_id();
+create index idx_tt_entries_school on public.timetable_entries(school_id);
+create index idx_tt_entries_scope on public.timetable_entries(academic_year_id, term_id);
+create index idx_tt_entries_class on public.timetable_entries(class_id);
+create index idx_tt_entries_stream on public.timetable_entries(stream_id);
+create index idx_tt_entries_staff on public.timetable_entries(staff_id);
+create unique index idx_tt_entries_unique_stream_slot
+  on public.timetable_entries(academic_year_id, term_id, day_of_week, period_index, stream_id);
+create unique index idx_tt_entries_unique_staff_slot
+  on public.timetable_entries(academic_year_id, term_id, day_of_week, period_index, staff_id) where staff_id is not null;
+create unique index idx_tt_entries_unique_room_slot
+  on public.timetable_entries(academic_year_id, term_id, day_of_week, period_index, room_id) where room_id is not null;
+
+alter table public.rooms enable row level security;
+alter table public.timetable_periods enable row level security;
+alter table public.teacher_unavailability enable row level security;
+alter table public.timetable_entries enable row level security;
+
+create policy rooms_read on public.rooms for select
+  using (school_id = public.current_school_id());
+create policy rooms_admin_write on public.rooms for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy rooms_admin_update on public.rooms for update
+  using (public.is_admin() and school_id = public.current_school_id());
+create policy rooms_admin_delete on public.rooms for delete
+  using (public.is_admin() and school_id = public.current_school_id());
+
+create policy timetable_periods_read on public.timetable_periods for select
+  using (school_id = public.current_school_id());
+create policy timetable_periods_admin_write on public.timetable_periods for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy timetable_periods_admin_update on public.timetable_periods for update
+  using (public.is_admin() and school_id = public.current_school_id());
+create policy timetable_periods_admin_delete on public.timetable_periods for delete
+  using (public.is_admin() and school_id = public.current_school_id());
+
+create policy teacher_unavailability_read on public.teacher_unavailability for select
+  using (school_id = public.current_school_id());
+create policy teacher_unavailability_staff_write on public.teacher_unavailability for insert
+  with check (public.is_staff() and school_id = public.current_school_id());
+create policy teacher_unavailability_staff_delete on public.teacher_unavailability for delete
+  using (public.is_staff() and school_id = public.current_school_id());
+
+create policy timetable_entries_read on public.timetable_entries for select
+  using (school_id = public.current_school_id());
+create policy timetable_entries_staff_write on public.timetable_entries for insert
+  with check (public.is_staff() and school_id = public.current_school_id());
+create policy timetable_entries_staff_update on public.timetable_entries for update
+  using (public.is_staff() and school_id = public.current_school_id());
+create policy timetable_entries_staff_delete on public.timetable_entries for delete
+  using (public.is_staff() and school_id = public.current_school_id());
 
 -- Additional, narrow parent read access bolted onto existing tables — these
 -- are extra PERMISSIVE policies (Postgres OR's them with the ones already on

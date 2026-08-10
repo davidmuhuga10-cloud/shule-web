@@ -36,6 +36,8 @@ import { viewSettingsHub } from './views/settings.mjs';
 import { viewAttendance } from './views/attendance.mjs';
 import { viewMessaging } from './views/messaging.mjs';
 import { viewMyChildren } from './views/myChildren.mjs';
+import { viewTimetableHub } from './views/timetableHub.mjs';
+import { viewMyTimetable } from './views/myTimetable.mjs';
 import { renderComingSoon } from './views/_comingSoon.mjs';
 
 /* ------------------------------ Shared state ----------------------------- */
@@ -643,6 +645,7 @@ const NAV = {
     { route: 'dashboard', label: 'Dashboard', ico: '🏠' },
     { section: 'Academics' },
     { route: 'classes', label: 'Classes & Arms', ico: '🏫' },
+    { route: 'timetable', label: 'Timetable', ico: '📅' },
     { section: 'People' },
     { route: 'students', label: 'Students', ico: '🎒' },
     { route: 'staff-teachers', label: 'Teachers and Staff', ico: '👨‍🏫' },
@@ -657,6 +660,7 @@ const NAV = {
   ],
   teacher: [
     { route: 'dashboard', label: 'Dashboard', ico: '🏠' },
+    { route: 'my-timetable', label: 'My Timetable', ico: '📅' },
     { section: 'People' },
     { route: 'students', label: 'Students', ico: '🎒' },
     { section: 'Daily' },
@@ -755,7 +759,9 @@ const ROUTES = {
   'settings': viewSettingsHub,
   'attendance': viewAttendance,
   'messaging': viewMessaging,
-  'my-children': viewMyChildren
+  'my-children': viewMyChildren,
+  'timetable': viewTimetableHub,
+  'my-timetable': viewMyTimetable
 };
 
 async function router() {

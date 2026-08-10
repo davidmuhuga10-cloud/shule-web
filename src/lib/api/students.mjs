@@ -17,9 +17,9 @@ function todayIso() {
 /** Feature brief: admission number, gender, name, class and stream are all
  *  compulsory when adding a SINGLE student via save() — UNLESS the chosen
  *  class has no streams set up at all, in which case there's nothing to
- *  pick. bulkCreate() deliberately does NOT use this rule (Round 2 §6):
- *  stream is read per row from the spreadsheet and is always optional
- *  there, even for a class that has streams. */
+ *  pick. bulkCreate() has its own equivalent all-rows-required stream rule
+ *  (Round 4 §1) enforced directly in bulkCreate() below, since it validates
+ *  a whole file of rows up front rather than one payload at a time. */
 async function classHasStreams(supabase, classId) {
   if (!classId) return false;
   const { data } = await supabase.from('streams').select('id').eq('class_id', classId);
@@ -199,23 +199,34 @@ export function createStudentsApi(supabase) {
     /**
      * Bulk-create students already validated + previewed client-side. Class
      * is chosen ONCE in the UI (never read from the uploaded file) — every
-     * row is enrolled into it — but Stream is now read PER ROW from the
+     * row is enrolled into it — but Stream is read PER ROW from the
      * spreadsheet's own "Stream" column (Round 2 §6: "add a 'Stream' column
      * directly into the bulk upload Excel template... so a single upload
-     * can include students across multiple streams in one class at once.
-     * The current stream-selection requirement should become optional, or
-     * be removed entirely"). A blank stream is always allowed now, even for
-     * a class that has streams set up — that upfront "choose a stream
-     * first" gate is gone; a row simply lands with no stream if it doesn't
-     * name one. Resolved server-side (not trusted from the client) by
-     * matching each row's `stream` text against the class's real streams.
-     * rows: [{ admission_no, full_name, gender, stream?, guardian_name?, guardian_contact? }]
+     * can include students across multiple streams in one class at once").
+     * Resolved server-side (not trusted from the client) by matching each
+     * row's `stream` text against the class's real streams.
+     *
+     * Round 4 §1 (BUG): a blank Stream used to be silently allowed — now
+     * it's rejected, and not just per-row: if EVEN ONE row in the whole file
+     * has a blank stream, the ENTIRE import is refused up front (nothing
+     * inserted at all), matching bulkUpload.mjs's client-side validateRow()
+     * gate exactly rather than diverging from it. This mirrors what the
+     * client already blocks at preview time, but re-checked here too since
+     * this endpoint is never trusted to only ever be called through that UI.
+     * rows: [{ admission_no, full_name, gender, stream, guardian_name?, guardian_contact? }]
      */
     async bulkCreate(payload) {
       payload = payload || {};
       if (!payload.class_id) return err('Please choose a class before importing.');
       const rows = Array.isArray(payload.rows) ? payload.rows : [];
       if (!rows.length) return err('No rows to import.');
+
+      const blankStreamLines = rows
+        .map((row, idx) => (String(row.stream || '').trim() ? null : idx + 1))
+        .filter((line) => line !== null);
+      if (blankStreamLines.length) {
+        return err(`Import rejected — stream not filled for row(s) ${blankStreamLines.slice(0, 10).join(', ')}${blankStreamLines.length > 10 ? ', and more' : ''}. Every student needs an Arm before importing — fix the spreadsheet and re-upload.`);
+      }
 
       const [{ data: existing }, { data: classStreams }] = await Promise.all([
         supabase.from('students').select('admission_no'),

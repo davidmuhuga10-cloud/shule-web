@@ -20,6 +20,7 @@ import { createAttendanceApi } from './attendance.mjs';
 import { createMessagingApi } from './messaging.mjs';
 import { createParentsApi } from './parents.mjs';
 import { createCapabilitiesApi } from './capabilities.mjs';
+import { createTimetableApi } from './timetable.mjs';
 
 async function callAdminFunction(action, payload) {
   const token = await getAccessToken();
@@ -56,6 +57,7 @@ async function callSendMessage(payload) {
 
 const academics = createAcademicsApi(supabase);
 const grading = createGradingApi(supabase);
+const settings = createSettingsApi(supabase);
 
 export const Db = {
   academicYears: academics.academicYears,
@@ -70,10 +72,15 @@ export const Db = {
   grading,
   results: createResultsApi(supabase, grading),
   dashboard: createDashboardApi(supabase),
-  settings: createSettingsApi(supabase),
+  settings,
   users: createUsersApi(supabase, callAdminFunction),
   attendance: createAttendanceApi(supabase),
   messaging: createMessagingApi(supabase, callSendMessage),
   parents: createParentsApi(supabase, callAdminFunction),
-  capabilities: createCapabilitiesApi(supabase)
+  capabilities: createCapabilitiesApi(supabase),
+  // Round 4 §7: the Timetable module. settings is injected (see
+  // timetable.mjs's header comment) so `days` can read/write
+  // `settings.timetable_days` through the exact same batched save() every
+  // other settings field already uses.
+  timetable: createTimetableApi(supabase, settings)
 };

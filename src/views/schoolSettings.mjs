@@ -82,13 +82,6 @@ function render(root, settings) {
           </div>
           <p class="hint">Automatically shrunk to a small thumbnail for fast loading on report forms and class lists. Files over 1 MB are rejected outright — compress your image and try again.</p>
         </div>
-        <div class="field">
-          <label class="chk" style="font-weight:600">
-            <input type="checkbox" id="set-pathways" ${settings.show_pathway_summary === 'true' ? 'checked' : ''}>
-            Show a STEM / Social Sciences / Arts &amp; Sport Science pathway summary on Report Forms
-          </label>
-          <p class="hint">CBC "pathways" are a Senior School (Grade 10-12) concept — leave this off for schools/classes that don't use them yet. Off by default; tick it if your school wants that row added to the Report Form.</p>
-        </div>
       </div>
       <div class="modal-f" style="border-top:1px solid var(--line)"><button class="btn" id="set-save">Save settings</button></div>
     </div>
@@ -131,8 +124,7 @@ function render(root, settings) {
       town: root.querySelector('#set-town').value,
       phone: root.querySelector('#set-phone').value,
       email: root.querySelector('#set-email').value,
-      logo: pendingLogo,
-      show_pathway_summary: root.querySelector('#set-pathways').checked ? 'true' : 'false'
+      logo: pendingLogo
     };
     // Brief §3: "Block saving of changes until all mandatory fields are
     // filled in" — same 4 fields the red asterisks above flag, checked with

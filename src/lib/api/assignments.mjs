@@ -119,11 +119,17 @@ export async function getEffectiveClassSubjectIdsBatch(supabase, classIds) {
 }
 
 export function createAssignmentsApi(supabase) {
+  // Round 4 §7: also selects id/periods_per_week/is_double (not just
+  // subject_id) so getStreamSubjects() can surface the Timetable module's
+  // per-subject weekly period count alongside everything else this already
+  // resolves — same stream-row-wins-else-class-wide precedence, no
+  // duplicated logic in timetable.mjs.
   async function effectiveSubjectIdsForStream(streamId, classId) {
-    const { data: streamRows } = await supabase.from('subject_class_assignments').select('subject_id').eq('stream_id', streamId);
-    if (streamRows && streamRows.length) return { ids: streamRows.map((r) => r.subject_id), inherited: false };
-    const { data: classWide } = await supabase.from('subject_class_assignments').select('subject_id').eq('class_id', classId).is('stream_id', null);
-    return { ids: (classWide || []).map((r) => r.subject_id), inherited: (classWide || []).length > 0 };
+    const cols = 'id, subject_id, periods_per_week, is_double';
+    const { data: streamRows } = await supabase.from('subject_class_assignments').select(cols).eq('stream_id', streamId);
+    if (streamRows && streamRows.length) return { ids: streamRows.map((r) => r.subject_id), rows: streamRows, inherited: false };
+    const { data: classWide } = await supabase.from('subject_class_assignments').select(cols).eq('class_id', classId).is('stream_id', null);
+    return { ids: (classWide || []).map((r) => r.subject_id), rows: classWide || [], inherited: (classWide || []).length > 0 };
   }
 
   return {
@@ -168,7 +174,8 @@ export function createAssignmentsApi(supabase) {
       if (!streamId) return err('Please choose an arm.');
       const { data: stream } = await supabase.from('streams').select('id, class_id, name').eq('id', streamId).maybeSingle();
       if (!stream) return err('Arm not found.');
-      const { ids: subjectIds, inherited } = await effectiveSubjectIdsForStream(streamId, stream.class_id);
+      const { ids: subjectIds, rows: assignmentRows, inherited } = await effectiveSubjectIdsForStream(streamId, stream.class_id);
+      const assignmentBySubject = {}; assignmentRows.forEach((r) => { assignmentBySubject[r.subject_id] = r; });
 
       const [{ data: subjects }, { data: teacherRows }, { data: staffAll }, { data: cls }] = await Promise.all([
         subjectIds.length ? supabase.from('subjects').select('id, name, code, level').in('id', subjectIds) : Promise.resolve({ data: [] }),
@@ -179,11 +186,20 @@ export function createAssignmentsApi(supabase) {
       const staffMap = {}; (staffAll || []).forEach((s) => { staffMap[s.id] = s.full_name; });
       const teacherBySubject = {}; (teacherRows || []).forEach((t) => { teacherBySubject[t.subject_id] = t.staff_id; });
 
-      const rows = (subjects || []).map((s) => ({
-        subject_id: s.id, name: s.name, code: s.code, level: s.level,
-        teacher_staff_id: teacherBySubject[s.id] || null,
-        teacher_name: teacherBySubject[s.id] ? (staffMap[teacherBySubject[s.id]] || '(deleted)') : ''
-      })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+      const rows = (subjects || []).map((s) => {
+        const a = assignmentBySubject[s.id] || {};
+        return {
+          subject_id: s.id, name: s.name, code: s.code, level: s.level,
+          teacher_staff_id: teacherBySubject[s.id] || null,
+          teacher_name: teacherBySubject[s.id] ? (staffMap[teacherBySubject[s.id]] || '(deleted)') : '',
+          // Round 4 §7 (Timetable module): the subject_class_assignments row
+          // this came from, plus its weekly-period config — assignment_id is
+          // what timetable.mjs's requirements.save() targets to update it.
+          assignment_id: a.id || null,
+          periods_per_week: a.periods_per_week === undefined ? null : a.periods_per_week,
+          is_double: !!a.is_double
+        };
+      }).sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
       return ok(rows, { inherited, class_id: stream.class_id, class_name: cls ? cls.name : '', stream_name: stream.name });
     },
