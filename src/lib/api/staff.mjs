@@ -70,6 +70,72 @@ export function createStaffApi(supabase) {
       const { error } = await supabase.from('staff').delete().eq('id', id);
       if (error) return err(error.message);
       return ok(true);
+    },
+
+    /**
+     * Bulk-create staff/teachers already validated + previewed client-side
+     * (Round 2 §5 — "matching the bulk upload capability that already exists
+     * for Students"). Same shape as students.bulkCreate: skip exact
+     * duplicates (by email, when one is given — many rows will have none,
+     * since email is optional here) rather than failing the whole batch.
+     * rows: [{ full_name, phone, email, role, gender, qualifications, is_admin }]
+     */
+    async bulkCreate(payload) {
+      payload = payload || {};
+      const rows = Array.isArray(payload.rows) ? payload.rows : [];
+      if (!rows.length) return err('No rows to import.');
+
+      const { data: existing } = await supabase.from('staff').select('email');
+      const existingSet = new Set((existing || []).map((r) => String(r.email || '').toLowerCase()).filter(Boolean));
+      const seenInBatch = new Set();
+
+      const skipped = [];
+      // toInsert and isAdminFlags stay index-aligned with each other (NOT
+      // with the original `rows` array, since invalid/duplicate rows are
+      // skipped) so the is_admin flag can be re-attached to the right
+      // created row after insert, below.
+      const toInsert = [];
+      const isAdminFlags = [];
+      rows.forEach((row, idx) => {
+        const line = idx + 1;
+        const fullName = String(row.full_name || '').trim();
+        const email = String(row.email || '').trim().toLowerCase();
+        if (!fullName) {
+          skipped.push({ line, full_name: fullName, reason: 'Missing full name.' });
+          return;
+        }
+        if (email) {
+          if (existingSet.has(email) || seenInBatch.has(email)) {
+            skipped.push({ line, full_name: fullName, reason: 'Duplicate email address.' });
+            return;
+          }
+          seenInBatch.add(email);
+        }
+        toInsert.push({
+          full_name: fullName,
+          email,
+          phone: row.phone || '',
+          role: row.role || 'Teacher',
+          gender: row.gender || null,
+          qualifications: row.qualifications || '',
+          employment_start_date: row.employment_start_date || null,
+          status: 'active'
+        });
+        isAdminFlags.push(!!row.is_admin);
+      });
+
+      let created = 0;
+      let createdRows = [];
+      if (toInsert.length) {
+        const { data, error } = await supabase.from('staff').insert(toInsert).select();
+        if (error) return err('Import failed: ' + error.message);
+        created = toInsert.length;
+        // createdRows lets the caller provision a login for each new staff
+        // member (with the right admin/teacher role) without a second
+        // round-trip — mirrors students.bulkCreate's createdRows.
+        createdRows = (data || []).map((r, i) => ({ ...r, is_admin: isAdminFlags[i] }));
+      }
+      return ok(null, { created, createdRows, skipped, total: rows.length });
     }
   };
 }

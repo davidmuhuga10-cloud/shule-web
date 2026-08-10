@@ -20,6 +20,7 @@
 import { esc, modal, closeModal, toast, confirmAction, options, renderLoading, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { STANDARD_CLASS_LEVELS } from '../lib/api/academics.mjs';
+import { plainNameError } from '../lib/validators.mjs';
 
 export async function viewClasses(root) {
   await renderList(root);
@@ -144,22 +145,33 @@ function openClassModal(root, existing, staff, allClasses) {
 /** A tiny, focused "type one stream name" prompt — the "+" button's popup
  *  (brief §4.1: a clear "click to add a stream" affordance instead of a
  *  comma-separated free-text field). Shared by the Add Class modal (queues
- *  streams before the class exists) and the Class Detail screen (adds a
- *  stream to an already-saved class immediately). */
-function promptAddStream(onAdd) {
+ *  streams before the class exists), the Class Detail screen (adds a
+ *  stream to an already-saved class immediately), and now (Round 2 §4)
+ *  renaming an existing stream — pass `existingName` to switch the modal
+ *  into rename mode (pre-filled input, "Rename"/"Save" wording).
+ *
+ *  Round 2 §2 (BUG): "Blue,Red" used to be accepted with no validation at
+ *  all — this now rejects anything but letters/digits/spaces client-side,
+ *  same rule academics.mjs's streams.save() enforces server-side (never
+ *  trust the client-side check alone), so the person gets an immediate,
+ *  specific "no commas or special characters" message instead of a
+ *  silently-accepted bad value or, at best, a generic server error. */
+function promptAddStream(onAdd, existingName) {
+  const isRename = existingName !== undefined && existingName !== null;
   modal({
-    title: 'Add a stream',
-    body: `<div class="field"><label>Stream name</label><input id="stream-name-input" placeholder="e.g. North, East, Blue"></div>`,
-    okLabel: 'Add',
+    title: isRename ? 'Rename stream' : 'Add a stream',
+    body: `<div class="field"><label>Stream name</label><input id="stream-name-input" value="${esc(isRename ? existingName : '')}" placeholder="e.g. North, East, Blue"></div>`,
+    okLabel: isRename ? 'Save' : 'Add',
     onOk: () => {
       const val = document.getElementById('stream-name-input').value.trim();
-      if (!val) { toast('Please enter a stream name.', 'err'); return; }
+      const error = plainNameError(val, 'Stream name');
+      if (error) { toast(error, 'err'); return; }
       closeModal();
       onAdd(val);
     }
   });
   const input = document.getElementById('stream-name-input');
-  if (input) input.focus();
+  if (input) { input.focus(); input.select(); }
 }
 
 /* ============================================================================
@@ -178,6 +190,7 @@ async function renderClassDetail(root, cls, staff) {
             <div class="muted" style="font-size:12.5px">${s.student_count} student(s)</div>
           </div>
           <button class="btn manage-btn">Manage Subjects &amp; Teachers →</button>
+          <button class="btn sm secondary" data-rename-stream="${s.id}">Rename</button>
           <button class="btn sm danger stream-del" data-del-stream="${s.id}">Delete</button>
         </div>
       </div>`).join('')
@@ -202,9 +215,20 @@ async function renderClassDetail(root, cls, staff) {
     renderClassDetail(root, cls, staff);
   });
   root.querySelectorAll('[data-open-stream]').forEach((el) => el.onclick = (e) => {
-    if (e.target.closest('[data-del-stream]')) return;
+    if (e.target.closest('[data-del-stream]') || e.target.closest('[data-rename-stream]')) return;
     renderLoading(root, 'Loading subjects & teachers, please wait…');
     renderStreamSubjects(root, cls, streams.find((s) => s.id === el.dataset.openStream), staff);
+  });
+  // Round 2 §4: there was previously no way to rename an existing stream.
+  root.querySelectorAll('[data-rename-stream]').forEach((b) => b.onclick = (e) => {
+    e.stopPropagation();
+    const stream = streams.find((s) => s.id === b.dataset.renameStream);
+    promptAddStream(async (name) => {
+      const res = await Db.streams.save({ id: stream.id, class_id: cls.id, name });
+      if (!res.ok) { toast(res.message, 'err'); return; }
+      toast('Stream renamed.', 'ok');
+      renderClassDetail(root, cls, staff);
+    }, stream.name);
   });
   root.querySelectorAll('[data-del-stream]').forEach((b) => b.onclick = (e) => {
     e.stopPropagation();

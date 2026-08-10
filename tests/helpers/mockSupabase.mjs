@@ -39,6 +39,8 @@ export function createMockSupabase(initialTables) {
       if (kind === 'gt') return Number(rv) > Number(val);
       if (kind === 'gte') return rv >= val;
       if (kind === 'lte') return rv <= val;
+      if (kind === 'lt') return rv < val;
+      if (kind === 'not_is') return val === null ? (rv !== null && rv !== undefined) : rv !== val;
       return true;
     });
   }
@@ -80,6 +82,14 @@ export function createMockSupabase(initialTables) {
       gt(col, val) { state.filters.push(['gt', col, val]); return api; },
       gte(col, val) { state.filters.push(['gte', col, val]); return api; },
       lte(col, val) { state.filters.push(['lte', col, val]); return api; },
+      lt(col, val) { state.filters.push(['lt', col, val]); return api; },
+      // Only the specific negated forms this app actually issues are
+      // supported (mirrors the EMBEDS comment above — special-cased, not a
+      // full PostgREST .not() emulator). Currently just `.not(col, 'is', val)`.
+      not(col, op, val) {
+        if (op === 'is') state.filters.push(['not_is', col, val]);
+        return api;
+      },
       order(col, opts) { state.order = { col, ascending: !opts || opts.ascending !== false }; return api; },
       limit() { return api; },
       async single() {

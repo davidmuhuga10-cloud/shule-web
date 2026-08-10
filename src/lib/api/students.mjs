@@ -15,10 +15,11 @@ function todayIso() {
 }
 
 /** Feature brief: admission number, gender, name, class and stream are all
- *  compulsory when adding a student — UNLESS the chosen class has no
- *  streams set up at all, in which case there's nothing to pick. Shared by
- *  save() and bulkCreate() so a single student and a whole spreadsheet of
- *  them are held to exactly the same rule. */
+ *  compulsory when adding a SINGLE student via save() — UNLESS the chosen
+ *  class has no streams set up at all, in which case there's nothing to
+ *  pick. bulkCreate() deliberately does NOT use this rule (Round 2 §6):
+ *  stream is read per row from the spreadsheet and is always optional
+ *  there, even for a class that has streams. */
 async function classHasStreams(supabase, classId) {
   if (!classId) return false;
   const { data } = await supabase.from('streams').select('id').eq('class_id', classId);
@@ -185,22 +186,33 @@ export function createStudentsApi(supabase) {
 
     /**
      * Bulk-create students already validated + previewed client-side. Class
-     * and stream are chosen ONCE in the UI (never read from the uploaded
-     * file), matching the Apps Script version's bulkCreateStudents.
-     * rows: [{ admission_no, full_name, gender, guardian_name?, guardian_contact? }]
+     * is chosen ONCE in the UI (never read from the uploaded file) — every
+     * row is enrolled into it — but Stream is now read PER ROW from the
+     * spreadsheet's own "Stream" column (Round 2 §6: "add a 'Stream' column
+     * directly into the bulk upload Excel template... so a single upload
+     * can include students across multiple streams in one class at once.
+     * The current stream-selection requirement should become optional, or
+     * be removed entirely"). A blank stream is always allowed now, even for
+     * a class that has streams set up — that upfront "choose a stream
+     * first" gate is gone; a row simply lands with no stream if it doesn't
+     * name one. Resolved server-side (not trusted from the client) by
+     * matching each row's `stream` text against the class's real streams.
+     * rows: [{ admission_no, full_name, gender, stream?, guardian_name?, guardian_contact? }]
      */
     async bulkCreate(payload) {
       payload = payload || {};
       if (!payload.class_id) return err('Please choose a class before importing.');
-      if (!payload.stream_id && await classHasStreams(supabase, payload.class_id)) {
-        return err('Please choose a stream before importing — this class has streams set up.');
-      }
       const rows = Array.isArray(payload.rows) ? payload.rows : [];
       if (!rows.length) return err('No rows to import.');
 
-      const { data: existing } = await supabase.from('students').select('admission_no');
+      const [{ data: existing }, { data: classStreams }] = await Promise.all([
+        supabase.from('students').select('admission_no'),
+        supabase.from('streams').select('id, name').eq('class_id', payload.class_id)
+      ]);
       const existingSet = new Set((existing || []).map((r) => String(r.admission_no).toLowerCase()));
       const seenInBatch = new Set();
+      const streamByName = {};
+      (classStreams || []).forEach((s) => { streamByName[String(s.name).trim().toLowerCase()] = s.id; });
 
       const skipped = [];
       const toInsert = [];
@@ -217,6 +229,15 @@ export function createStudentsApi(supabase) {
           skipped.push({ line, admission_no: admissionNo, full_name: fullName, reason: 'Gender must be Male or Female.' });
           return;
         }
+        const streamText = String(row.stream || '').trim();
+        let streamId = null;
+        if (streamText) {
+          streamId = streamByName[streamText.toLowerCase()] || null;
+          if (!streamId) {
+            skipped.push({ line, admission_no: admissionNo, full_name: fullName, reason: `Stream "${streamText}" was not found for this class.` });
+            return;
+          }
+        }
         const key = admissionNo.toLowerCase();
         if (existingSet.has(key) || seenInBatch.has(key)) {
           skipped.push({ line, admission_no: admissionNo, full_name: fullName, reason: 'Duplicate admission number.' });
@@ -225,7 +246,7 @@ export function createStudentsApi(supabase) {
         seenInBatch.add(key);
         toInsert.push({
           admission_no: admissionNo, full_name: fullName, gender,
-          class_id: payload.class_id, stream_id: payload.stream_id || null,
+          class_id: payload.class_id, stream_id: streamId,
           guardian_name: row.guardian_name || '', guardian_contact: row.guardian_contact || '', status: 'active',
           // Richer bio-data — all optional, same field set as the single
           // Add Student form's "More details" section, so a bulk import can

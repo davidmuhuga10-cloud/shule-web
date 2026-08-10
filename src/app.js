@@ -17,6 +17,7 @@ import { viewDashboard } from './views/dashboard.mjs';
 import { viewClasses } from './views/classes.mjs';
 import { viewStudents } from './views/students.mjs';
 import { viewBulkUpload } from './views/bulkUpload.mjs';
+import { viewStaffBulkUpload } from './views/staffBulkUpload.mjs';
 import { viewStaffHub } from './views/staffTeachers.mjs';
 import { viewGrading } from './views/gradingScales.mjs';
 import { viewExamsHub } from './views/examsHub.mjs';
@@ -234,10 +235,27 @@ export function modal(opts) {
   if (opts.onOpen) opts.onOpen();
 }
 export function closeModal() { $('#modal-root').innerHTML = ''; }
+// Round 2 brief §3 (recurring BUG): "Delete Subject" — and, once actually
+// audited site-wide as explicitly asked for, at least two dozen other
+// delete/withdraw/publish/reset-type buttons across the app (classes,
+// exams, grading, staff, students, publishing, marks entry...) — gave no
+// feedback and could be clicked repeatedly. Every one of them goes through
+// this ONE confirmAction() helper, and the actual bug lived here, not in
+// each call site individually: the "Yes, continue" button closed the
+// confirm dialog and fired the caller's async action WITHOUT awaiting it
+// or showing any busy state — modal() already had a working withBusy()
+// pattern for its OK button, but confirmAction()'s onOk short-circuited it
+// by closing the modal (destroying that very button) before the real
+// work even started. Fixed once, here, exactly as asked: await the actual
+// action, let the existing withBusy() disable+relabel "Yes, continue"
+// while it runs, and only close the dialog once it's done (success or
+// failure — same end state every caller already expected, just with real
+// feedback in between instead of none).
 export function confirmAction(msg, onYes, danger) {
   modal({
     title: 'Please confirm', body: `<p style="margin:0">${esc(msg)}</p>`,
-    okLabel: 'Yes, continue', onOk: () => { closeModal(); onYes(); }
+    okLabel: 'Yes, continue',
+    onOk: async () => { try { await onYes(); } finally { closeModal(); } }
   });
   if (danger) { const b = $('#modal-ok'); if (b) b.className = 'btn danger'; }
 }
@@ -540,7 +558,22 @@ async function doSignup(e) {
 /** Dismissible, non-blocking "still setting up" notice — separate from the
  *  regular toast() helper above because that one always auto-hides after a
  *  fixed 3.2s; this one has to stay up for however long the background
- *  seeding fetch actually takes, and disappears the moment it resolves. */
+ *  seeding fetch actually takes, and disappears the moment it resolves.
+ *
+ *  Round 2 brief §1 (BUG): this used to be pure fire-and-forget — on
+ *  success it just vanished, leaving `state.settings`/the sidebar
+ *  branding/the academic-year context exactly as they were at the moment
+ *  the dashboard first rendered (i.e. still empty/unseeded), so a brand
+ *  new admin who navigated to Exams right after signing in hit the "set up
+ *  your academic calendar first" gate even though seeding had, by then,
+ *  actually finished — it just was never reflected in the running app
+ *  without a manual page refresh. On failure it silently swallowed the
+ *  error, leaving the school permanently half-set-up with no subjects,
+ *  grading scale or academic year, and no indication anything went wrong.
+ *  Now: on success, refresh the branding + re-run the router so whichever
+ *  screen the admin is looking at (or navigates to next) sees the real
+ *  seeded data; on failure, say so and offer Retry (safe to retry —
+ *  seed_school_defaults is idempotent). */
 function showSetupToast(schoolId) {
   const t = document.createElement('div');
   t.className = 'toast setup-toast';
@@ -556,14 +589,49 @@ function showSetupToast(schoolId) {
   t.querySelector('.toast-close').onclick = remove;
 
   if (!schoolId) { remove(); return; }
-  fetch('/.netlify/functions/school-seed', {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ school_id: schoolId })
-  }).catch(() => {}).finally(remove);
+  runSeed();
+
+  function runSeed() {
+    fetch('/.netlify/functions/school-seed', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ school_id: schoolId })
+    })
+      .then(async (res) => {
+        const result = await res.json().catch(() => ({ ok: false }));
+        if (!result.ok) throw new Error(result.message || 'Setup did not finish.');
+        remove();
+        await refreshBrandingAndContext();
+        if (state.profile) await router();
+      })
+      .catch(() => {
+        t.innerHTML = `<span>Your school's setup didn't finish — some defaults (subjects, grading scale, academic year) may be missing.</span>
+          <button type="button" class="btn ghost sm" id="setup-retry" style="margin-left:8px">Retry</button>
+          <button type="button" class="toast-close" aria-label="Dismiss">&times;</button>`;
+        t.querySelector('.toast-close').onclick = remove;
+        t.querySelector('#setup-retry').onclick = () => { t.querySelector('#setup-retry').textContent = 'Retrying…'; runSeed(); };
+      });
+  }
+}
+
+/** Re-fetches settings (brand name/logo) after the background seed above
+ *  completes and unconditionally re-applies them to the sidebar — see
+ *  bootApp()'s brand-name/logo block for why "unconditional" matters here. */
+async function refreshBrandingAndContext() {
+  try {
+    const settingsRes = await Db.settings.get();
+    state.settings = settingsRes.ok ? settingsRes.data : {};
+  } catch (e) { state.settings = {}; }
+  applyBranding();
+  Db.dashboard.getActiveContext().then((active) => {
+    $('#topctx').innerHTML = active.academic_year_name
+      ? `Active: <b>${esc(active.academic_year_name)}</b> · <b>${esc(active.term_name || 'No term set')}</b>`
+      : '<span class="muted">No active academic year set</span>';
+  }).catch(() => {});
 }
 
 async function forceLogout(msg) {
   await authLogout();
   state.profile = null;
+  state.settings = {};
   renderAuth(msg || 'Your session expired. Please sign in again.');
 }
 
@@ -615,7 +683,7 @@ const NAV = {
 // just have them as icons" — exams-hub/reports-hub/settings are the actual
 // sidebar entries now; these are what their icon tiles/tabs link to).
 const HIDDEN_ALLOWED_ROUTES = {
-  admin: ['bulk-upload', 'exam-desk', 'deleted-exams', 'grading', 'class-list', 'broadsheet', 'reports', 'transcript', 'certificates', 'exam-analysis', 'score-sheet'],
+  admin: ['bulk-upload', 'staff-bulk-upload', 'exam-desk', 'deleted-exams', 'grading', 'class-list', 'broadsheet', 'reports', 'transcript', 'certificates', 'exam-analysis', 'score-sheet'],
   teacher: ['bulk-upload', 'exam-desk', 'class-list', 'broadsheet', 'reports', 'transcript', 'certificates', 'exam-analysis', 'score-sheet']
 };
 
@@ -669,6 +737,7 @@ const ROUTES = {
   'classes': viewClasses,
   'students': viewStudents,
   'bulk-upload': viewBulkUpload,
+  'staff-bulk-upload': viewStaffBulkUpload,
   'staff-teachers': viewStaffHub,
   'grading': viewGrading,
   'exams-hub': viewExamsHub,
@@ -745,6 +814,7 @@ window.App = {
   async logout() {
     await authLogout();
     state.profile = null;
+    state.settings = {};
     renderAuth();
   }
 };
@@ -771,17 +841,7 @@ async function bootApp() {
   $('#avatar').textContent = initials(state.profile.name);
   $('#um-name').textContent = state.profile.name;
   $('#um-role').textContent = ({ admin: 'Administrator', teacher: 'Teacher / Staff', student: 'Student', parent: 'Parent' })[state.profile.role] || state.profile.role;
-  if (state.settings && state.settings.school_name) $('#brand-school').textContent = state.settings.school_name;
-  // Feature brief §1: "On login, display the logo next to the school name,
-  // if the school has one set. If not, show what's currently there" — the
-  // sidebar brand box always keeps its size (set in CSS), so swapping its
-  // content for an <img> here never shifts the layout even before this
-  // resolves; the generic 🎓 mark stays exactly as it was for any school
-  // that hasn't uploaded a logo.
-  const brandLogo = $('.sidebar .brand .logo');
-  if (brandLogo && state.settings && state.settings.logo) {
-    brandLogo.innerHTML = `<img src="${state.settings.logo}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:10px">`;
-  }
+  applyBranding();
 
   Db.dashboard.getActiveContext().then((active) => {
     $('#topctx').innerHTML = active.academic_year_name
@@ -791,6 +851,28 @@ async function bootApp() {
 
   if (!location.hash) location.hash = '#/' + defaultRoute();
   router();
+}
+
+/** Round 2 brief §1 (BUG): this used to only ever SET the sidebar's brand
+ *  name/logo when the new value was truthy ("if (settings.school_name)
+ *  ...") and otherwise silently left whatever text/logo was already in
+ *  that DOM element — harmless the very first time the app boots (the
+ *  static index.html default, "Shule", is already there), but a real bug
+ *  the moment a SECOND school's session shares the same page load: logging
+ *  out of one school and straight into a brand-new, not-yet-seeded one
+ *  (e.g. right after self-serve signup, before the background seed
+ *  finishes — see showSetupToast) left the PREVIOUS school's real name and
+ *  logo on screen, since the new (still-empty) settings never got a chance
+ *  to overwrite them. Every call now unconditionally sets both, falling
+ *  back to the same generic values a brand-new/unseeded school should
+ *  show. */
+function applyBranding() {
+  $('#brand-school').textContent = (state.settings && state.settings.school_name) || 'Shule';
+  const brandLogo = $('.sidebar .brand .logo');
+  if (!brandLogo) return;
+  brandLogo.innerHTML = state.settings && state.settings.logo
+    ? `<img src="${state.settings.logo}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:10px">`
+    : '🎓';
 }
 
 window.addEventListener('hashchange', () => { if (state.profile) router(); });

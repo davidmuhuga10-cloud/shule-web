@@ -1,7 +1,7 @@
-import { esc, modal, closeModal, toast, confirmAction, options } from '../app.js';
+import { esc, modal, closeModal, toast, confirmAction, options, go } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 
-const JOB_TITLES = ['Teacher', 'Head Teacher', 'Deputy Head Teacher', 'Bursar', 'Support Staff'];
+export const JOB_TITLES = ['Teacher', 'Head Teacher', 'Deputy Head Teacher', 'Bursar', 'Support Staff'];
 
 // Bug fix (feature brief §9.1): a teacher was showing up under BOTH
 // Teachers and Staff — a teacher isn't a Staff member in this app's
@@ -49,9 +49,9 @@ async function render(root) {
       </div></div>`}
     </div>`;
 
-  root.querySelector('#add-staff').onclick = () => openStaffModal(root);
+  root.querySelector('#add-staff').onclick = () => openAddChoiceModal(root);
   const emptyBtn = root.querySelector('#empty-add-staff');
-  if (emptyBtn) emptyBtn.onclick = () => openStaffModal(root);
+  if (emptyBtn) emptyBtn.onclick = () => openAddChoiceModal(root);
   root.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => openStaffModal(root, staff.find((s) => s.id === b.dataset.edit)));
   root.querySelectorAll('[data-del]').forEach((b) => b.onclick = () => confirmAction('Remove this staff member?', async () => {
     const r = await Db.staff.remove(b.dataset.del);
@@ -72,6 +72,32 @@ async function render(root) {
       if (r.ok) { toast('Login updated.', 'ok'); render(root); } else toast(r.message, 'err');
     }, nextStatus === 'inactive');
   });
+}
+
+/** "+ Add staff" asks Single vs Bulk first, same pattern as "+ Add student"
+ *  (students.mjs's openAddChoiceModal) — Round 2 §5: "Add bulk upload for
+ *  Teachers/Staff, matching the bulk upload capability that already exists
+ *  for Students." Editing an existing staff member always uses the single
+ *  form directly (see the [data-edit] handler above), so this only gates
+ *  the "add new" entry point. */
+export function openAddChoiceModal(root, onSaved) {
+  modal({
+    title: 'Add staff',
+    body: `
+      <p class="hint" style="margin-top:0">How would you like to add staff?</p>
+      <div class="grid2">
+        <button class="btn secondary" id="staff-choice-single" style="width:100%;padding:18px 12px;flex-direction:column;height:auto;gap:6px">
+          <div style="font-size:22px">🧑‍🏫</div><div>Single staff member</div>
+        </button>
+        <button class="btn secondary" id="staff-choice-bulk" style="width:100%;padding:18px 12px;flex-direction:column;height:auto;gap:6px">
+          <div style="font-size:22px">📥</div><div>Bulk upload</div>
+        </button>
+      </div>
+    `,
+    footer: false
+  });
+  document.getElementById('staff-choice-single').onclick = () => { closeModal(); openStaffModal(root, undefined, onSaved); };
+  document.getElementById('staff-choice-bulk').onclick = () => { closeModal(); go('staff-bulk-upload'); };
 }
 
 /** onSaved: optional callback run after a successful save instead of this

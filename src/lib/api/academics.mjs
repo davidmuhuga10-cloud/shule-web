@@ -11,6 +11,7 @@
 import { ok, err, fromResult } from './_util.mjs';
 import { CBC_LEVELS, STANDARD_CLASS_LEVELS, CBC_SUBJECTS, levelBucketForClassName } from './cbcDefaults.mjs';
 import { seedDefaultSubjectsForNewStream } from './assignments.mjs';
+import { plainNameError } from '../validators.mjs';
 
 // Re-exported for backward compatibility — these used to be defined here
 // directly; existing imports (e.g. views/classes.mjs) keep working
@@ -244,15 +245,25 @@ export function createAcademicsApi(supabase) {
         payload = payload || {};
         if (!payload.class_id) return err('Please choose the class this stream belongs to.');
         const name = String(payload.name || '').trim();
-        if (!name) return err('Stream name is required (e.g. "East", "North", "Blue").');
+        // Round 2 brief §2 (BUG): "Blue,Red" was accepted as one stream
+        // name — plain letters/digits/spaces only from here on, whether
+        // this is a brand-new stream or a rename (§4) of an existing one.
+        const nameError = plainNameError(name, 'Stream name');
+        if (nameError) return err(name ? nameError : 'Stream name is required (e.g. "East", "North", "Blue").');
         const rec = { class_id: payload.class_id, name, description: payload.description || '' };
+        // Same-name-in-this-class dup check applies to a rename too now
+        // (excluding the row being renamed) — previously only checked on
+        // create, so renaming stream B to collide with existing stream A
+        // silently succeeded.
+        let dupQuery = supabase.from('streams').select('id').eq('class_id', payload.class_id).eq('name', name);
+        if (payload.id) dupQuery = dupQuery.neq('id', payload.id);
+        const { data: dup } = await dupQuery.maybeSingle();
+        if (dup) return err('That stream already exists for this class.');
         if (payload.id) {
           const { data, error } = await supabase.from('streams').update(rec).eq('id', payload.id).select().single();
           if (error) return err(error.message);
           return ok(data);
         }
-        const { data: dup } = await supabase.from('streams').select('id').eq('class_id', payload.class_id).eq('name', name).maybeSingle();
-        if (dup) return err('That stream already exists for this class.');
         const { data, error } = await supabase.from('streams').insert(rec).select().single();
         if (error) return err(error.message);
         // Brief §4.2: seed the correct default CBC subjects for this stream's

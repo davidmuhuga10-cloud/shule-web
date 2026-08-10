@@ -44,6 +44,15 @@ export function createUsersApi(supabase, callAdminFunction) {
       return callAdminFunction('create_staff', { staff_id, full_name, role, phone });
     },
 
+    /** Bulk equivalent of provisionStaffLogin — one Netlify function call
+     *  provisions a whole batch (Teachers & Staff bulk upload's follow-up
+     *  step), same pattern as provisionStudentLogins. Caller chunks `rows`
+     *  itself for incremental progress feedback (see staffBulkUpload.mjs). */
+    async provisionStaffLogins(rows) {
+      if (!Array.isArray(rows) || !rows.length) return err('No staff to provision.');
+      return callAdminFunction('create_staff_bulk', { rows });
+    },
+
     async resetPassword(profileId, newPassword) {
       if (!profileId) return err('Missing profile.');
       return callAdminFunction('reset_password', { profile_id: profileId, new_password: newPassword });

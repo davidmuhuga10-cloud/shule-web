@@ -8,7 +8,7 @@
  */
 import { esc, initials, go } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
-import { openStaffModal } from './staff.mjs';
+import { openStaffModal, openAddChoiceModal } from './staff.mjs';
 
 function isTeacher(s) {
   return String(s.role || 'teacher').toLowerCase() === 'teacher';
@@ -62,9 +62,9 @@ async function render(root, query) {
     </div></div></div>`}
   `;
 
-  root.querySelector('#add-teacher').onclick = () => openStaffModal(root, undefined, () => render(root, query));
+  root.querySelector('#add-teacher').onclick = () => openAddChoiceModal(root, () => render(root, query));
   const emptyBtn = root.querySelector('#empty-add-teacher');
-  if (emptyBtn) emptyBtn.onclick = () => openStaffModal(root, undefined, () => render(root, query));
+  if (emptyBtn) emptyBtn.onclick = () => openAddChoiceModal(root, () => render(root, query));
   root.querySelector('#teacher-search').oninput = (e) => render(root, e.target.value);
   root.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => openStaffModal(root, all.find((s) => s.id === b.dataset.edit), () => render(root, query)));
   // Teacher-to-subject assignment now happens inside Classes & Streams (per

@@ -1,14 +1,15 @@
 /**
- * marksEntry.mjs — the "Marks Entry" panel of Exam Desk (System Fixes brief
- * §4/§14: the standalone Enter Marks module is gone — this file no longer
- * owns its own page/route. It now exports `renderMarksPanel()`, an
- * embeddable panel that examDesk.mjs mounts into one tab of a class's Exam
- * Desk detail view, right alongside the Publish & Review panel
- * (publishing.mjs). Everything below this point (subject filtering, the
- * marks grid, Maximum Marks gate, bulk upload, submit preview) is unchanged
- * from when it was its own page — only the outer page-with-its-own-exam/
- * class-pickers wrapper is gone, since Exam Desk's board is what picks the
- * exam+class now.
+ * marksEntry.mjs — the "Marks Entry" and "Bulk Upload" panels of Exam Desk
+ * (System Fixes brief §4/§14: the standalone Enter Marks module is gone —
+ * this file no longer owns its own page/route. It exports
+ * `renderMarksPanel()` (the key-in grid) and `renderMarksBulkPanel()` (Round
+ * 2 §8's own top-level "Bulk Upload" tab — download a template pre-filled
+ * with the class's actual subjects, fill in scores, re-upload), both
+ * embeddable panels that examDesk.mjs mounts into separate tabs of a class's
+ * Exam Desk detail view, alongside the Publish & Review panel
+ * (publishing.mjs). Bulk upload used to be a toggle button buried inside the
+ * Marks Entry panel; it's its own tab now, but the underlying
+ * renderBulkUpload()/renderBulkPreview() logic is unchanged.
  */
 import { esc, toast, options, loader, confirmAction, modal, closeModal, state, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
@@ -61,6 +62,42 @@ export async function renderMarksPanel(container, sel) {
     return;
   }
   await loadClassPanel(container, [], [], subjects, { exam_id: sel.exam_id, class_id: sel.class_id, stream_id: sel.stream_id || '', subject_id: sel.subject_id || '' });
+}
+
+/** Exam Desk's "Bulk Upload" tab (Round 2 §8) — promoted out of a toggle
+ *  buried inside the Marks Entry panel into its own top-level tab, so
+ *  downloading a template pre-filled with the class's actual subjects,
+ *  filling in scores, and re-uploading is a first-class action instead of a
+ *  "📥 Bulk upload marks" button someone has to notice first. Reuses the
+ *  exact same renderBulkUpload()/renderBulkPreview() pair the old toggle
+ *  called — the underlying template/import behavior is unchanged, only
+ *  where it's surfaced in the UI moved. */
+export async function renderMarksBulkPanel(container, sel) {
+  await ensureTeacherVisibility();
+  if (!isLikelyPc()) {
+    container.innerHTML = `<div class="card"><div class="card-b"><div class="empty">
+      <div class="e-ico">💻</div><h3>Bulk upload is available on a computer</h3>
+      <p>Spreadsheet bulk upload needs a computer to download, edit, and re-upload the template — key marks in directly under "Marks Entry" on a phone/tablet.</p>
+    </div></div></div>`;
+    return;
+  }
+  const subjectsRes = await Db.subjects.list();
+  const subjects = subjectsRes.ok ? subjectsRes.data : [];
+  if (!subjects.length) {
+    container.innerHTML = `<div class="card"><div class="card-b"><div class="empty">
+      <div class="e-ico">📚</div><h3>No subjects found</h3><p>Open a class's stream and assign it some subjects first.</p>
+    </div></div></div>`;
+    return;
+  }
+  const classSel = { exam_id: sel.exam_id, class_id: sel.class_id, stream_id: sel.stream_id || '' };
+  const subjectTabs = await loadSubjectTabs(classSel.exam_id, classSel.class_id, subjects);
+  if (!subjectTabs.length) {
+    container.innerHTML = `<div class="card"><div class="card-b"><div class="empty">
+      <div class="e-ico">📚</div><h3>No subjects found</h3><p>Add subjects to the school (or assign some to this class) first.</p>
+    </div></div></div>`;
+    return;
+  }
+  await renderBulkUpload(container, classSel, subjectTabs);
 }
 
 /** Every subject assigned to the class (falling back to every subject in
@@ -131,28 +168,13 @@ async function loadClassPanel(root, exams, classes, subjects, sel) {
             ${s.submission ? `<small style="opacity:.8">${s.submission.entered_count}/${s.submission.expected_count || '?'}</small>` : ''}
           </span>`).join('')}</div>
       </div>
-      <div class="modal-f" style="border-top:1px solid var(--line);justify-content:flex-start">
-        ${isLikelyPc()
-          ? '<button class="btn secondary sm" id="mk-bulk-toggle">📥 Bulk upload marks (this class)</button>'
-          : '<span class="hint" style="margin:0">Spreadsheet bulk upload is available on a computer — key in marks here on a phone/tablet.</span>'}
-      </div>
     </div>
-    <div id="mk-bulk-area"></div>
     <div id="mk-grid"></div>
   `;
 
   panel.querySelectorAll('[data-subject]').forEach((chip) => chip.onclick = () => {
     loadClassPanel(root, exams, classes, subjects, { ...sel, subject_id: chip.dataset.subject });
   });
-
-  let bulkOpen = false;
-  const bulkToggleBtn = panel.querySelector('#mk-bulk-toggle');
-  if (bulkToggleBtn) bulkToggleBtn.onclick = () => {
-    bulkOpen = !bulkOpen;
-    const area = panel.querySelector('#mk-bulk-area');
-    if (bulkOpen) { renderBulkUpload(area, sel, subjectTabs); panel.querySelector('#mk-grid').style.display = 'none'; }
-    else { area.innerHTML = ''; panel.querySelector('#mk-grid').style.display = ''; }
-  };
 
   await loadGrid(root, panel, sel.exam_id, sel.class_id, sel.stream_id, subjectTabs.find((s) => s.id === activeSubjectId));
 }

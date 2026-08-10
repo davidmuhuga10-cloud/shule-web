@@ -1660,6 +1660,7 @@ declare
   v_authorized boolean := false;
   v_staff_view boolean;
   v_min_subjects int := 0;
+  v_below_minimum boolean := false;
 begin
   v_role := public.current_role();
   v_own_student_id := public.current_student_id();
@@ -1692,8 +1693,19 @@ begin
   select * into v_year from public.academic_years where id = v_exam.academic_year_id;
   select * into v_term from public.terms where id = v_exam.term_id;
 
-  select coalesce(nullif(value, '')::int, 0) into v_min_subjects
-    from public.settings where school_id = v_caller_school and key = 'min_subjects_for_ranking';
+  -- Resolve the minimum-subjects rule with the same precedence the JS
+  -- broadsheet/publish-gate uses: a per-(exam,class) override on
+  -- exam_classes.min_subjects wins when set; otherwise fall back to the
+  -- school-wide settings row. Keeps this RPC's report card consistent with
+  -- getBroadsheet()/resolveMinSubjects() in src/lib/api/results.mjs.
+  select ec.min_subjects into v_min_subjects
+    from public.exam_classes ec
+    where ec.exam_id = p_exam_id and ec.class_id = v_student.class_id;
+
+  if v_min_subjects is null then
+    select coalesce(nullif(value, '')::int, 0) into v_min_subjects
+      from public.settings where school_id = v_caller_school and key = 'min_subjects_for_ranking';
+  end if;
   if v_min_subjects is null then v_min_subjects := 0; end if;
 
   with per_row as (
@@ -1750,6 +1762,15 @@ begin
     where v_average >= gr.min_score and v_average <= gr.max_score
     limit 1;
 
+
+  -- Round 2 §10: a student who sat fewer subjects than the required minimum
+  -- automatically gets an "X" overall grade for this exam, mirroring
+  -- getBroadsheet()'s belowMinimum logic in src/lib/api/results.mjs.
+  v_below_minimum := v_min_subjects > 0 and v_count < v_min_subjects;
+  if v_below_minimum then
+    v_overall_grade := 'X';
+  end if;
+
   with cohort as (
     select
       st.id,
@@ -1798,7 +1819,7 @@ begin
     'session_name', coalesce(v_year.name, ''), 'term_name', coalesce(v_term.name, ''),
     'subjects', v_subjects, 'total', v_total, 'average', v_average,
     'overall_grade', coalesce(v_overall_grade, ''), 'position', v_position,
-    'class_size', coalesce(v_class_size, 0)
+    'class_size', coalesce(v_class_size, 0), 'below_minimum', v_below_minimum
   );
 end;
 $$;

@@ -118,6 +118,25 @@ async function computeClassAverage(supabase, examId, classId) {
   return { average: Math.round(avg * 100) / 100, students_sat: students.length };
 }
 
+/** Round 2 §10 — shared min-subjects resolver for callers (publishExam)
+ *  that don't already have an `exam_classes` row in scope the way
+ *  getBroadsheet() does. Same precedence getBroadsheet has always used
+ *  inline: the per-(exam,class) override (exam_classes.min_subjects) wins
+ *  when set, else fall back to the school-wide `min_subjects_for_ranking`
+ *  setting. Kept as its own small fetch rather than folding into
+ *  getBroadsheet's own inline block, since that block already has its
+ *  `examClass` row fetched for other fields (ranking_criteria,
+ *  deviation_exam_id, grading_scale_id) and re-deriving it here would just
+ *  be a second, redundant read for that call site. */
+async function resolveMinSubjects(supabase, examId, classId) {
+  const { data: examClass } = await supabase.from('exam_classes').select('min_subjects').eq('exam_id', examId).eq('class_id', classId).maybeSingle();
+  if (examClass && examClass.min_subjects !== null && examClass.min_subjects !== undefined) {
+    return Number(examClass.min_subjects) || 0;
+  }
+  const { data: minSetting } = await supabase.from('settings').select('value').eq('key', 'min_subjects_for_ranking').maybeSingle();
+  return Number((minSetting || {}).value) || 0;
+}
+
 export function createResultsApi(supabase, gradingApi) {
   return {
     // System Fixes brief §8: a soft-deleted exam (exams.deleted_at set) is
@@ -569,7 +588,15 @@ export function createResultsApi(supabase, gradingApi) {
           }
         });
         const average = counted ? Math.round((total / counted) * 100) / 100 : 0;
-        const overallGrade = counted ? grade(average) : { grade_label: '', points: '' };
+        // Round 2 §10: "students who sat fewer subjects than the set
+        // minimum should automatically receive an 'X' grade for that exam"
+        // — distinct from (and in addition to) the existing ranking
+        // exclusion below (rankByTotal already blanks position/
+        // stream_position for the same counted < minSubjects students; this
+        // is the first time their own overall_grade reflects it too, rather
+        // than showing a computed grade as if they'd sat a full set).
+        const belowMinimum = minSubjects > 0 && counted < minSubjects;
+        const overallGrade = belowMinimum ? { grade_label: 'X', points: null } : (counted ? grade(average) : { grade_label: '', points: '' });
         return {
           student_id: s.id, admission_no: s.admission_no, full_name: s.full_name, gender: s.gender || '',
           stream_id: s.stream_id || '', stream_name: streamMap[s.stream_id] || '',
@@ -577,7 +604,8 @@ export function createResultsApi(supabase, gradingApi) {
           average,
           total_points: pointsCounted ? Math.round(pointsTotal * 100) / 100 : null,
           mean_points: pointsCounted ? Math.round((pointsTotal / pointsCounted) * 100) / 100 : null,
-          overall_grade: overallGrade.grade_label || ''
+          overall_grade: overallGrade.grade_label || '',
+          below_minimum: belowMinimum
         };
       });
 
@@ -874,6 +902,20 @@ export function createResultsApi(supabase, gradingApi) {
       const { data: examResults } = await supabase.from('results').select('subject_id').eq('exam_id', examId).eq('class_id', classId);
       const subjectIds = [...new Set((examResults || []).map((r) => r.subject_id))];
       if (!subjectIds.length) return err('No marks have been entered for this class yet.');
+
+      // Round 2 §10 — new publish gate: at least `min_subjects` DISTINCT
+      // subjects must each have at least one student's results uploaded
+      // before this class can be published at all. Reuses the exact same
+      // "distinct subject_ids present in `results`" count already computed
+      // above for this call (matches what the Exam Desk board already shows
+      // as "subjects with marks" for a class), just now actually enforced
+      // instead of only informational. A min_subjects of 0/unset (the
+      // default) keeps today's behaviour — any marks at all is enough.
+      const minSubjects = await resolveMinSubjects(supabase, examId, classId);
+      if (minSubjects > 0 && subjectIds.length < minSubjects) {
+        return err(`At least ${minSubjects} subject(s) need results uploaded before this class can be published — only ${subjectIds.length} so far.`);
+      }
+
       // System Fixes brief §12/§13: each subject's publish is fully
       // independent (its own result_submissions row, no cross-subject
       // read/write) — used to be awaited one at a time in a for-loop, which

@@ -213,6 +213,11 @@ async function run() {
     const byId = {}; sheet.students.forEach((s) => { byId[s.student_id] = s; });
     check('a student below min_subjects_for_ranking gets no position', byId.s2.position === '');
     check('a student meeting min_subjects_for_ranking is still ranked', byId.s1.position === 1);
+    // Round 2 §10: below-minimum students now also get an automatic "X"
+    // overall grade (not just an excluded position) — a student meeting the
+    // minimum keeps their real computed grade.
+    check('a student below min_subjects_for_ranking gets an automatic X overall grade', byId.s2.overall_grade === 'X' && byId.s2.below_minimum === true);
+    check('a student meeting min_subjects_for_ranking keeps a real computed grade, not X', byId.s1.overall_grade !== 'X' && byId.s1.overall_grade !== '' && byId.s1.below_minimum === false);
   }
 
   // ---- getBroadsheet (Mark List) only shows PUBLISHED subjects (feature brief §5) ----
@@ -313,6 +318,46 @@ async function run() {
     check('publishExam errors when the class has no marks at all', empty.ok === false);
   }
 
+  // ---- publishExam: Round 2 §10 minimum-subjects publish gate ---------------------
+  {
+    // School-wide fallback (no per-class override): 2 subjects assigned,
+    // minimum set to 2 — publishing with only 1 subject's marks in is
+    // blocked, and unblocks once the 2nd subject gets marks too.
+    const { sb, results } = freshApis({ settings: [{ id: 'set1', key: 'min_subjects_for_ranking', value: '2' }] });
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1' })).data;
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '50' }] });
+
+    const tooFew = await results.publishExam(exam.id, 'c1');
+    check('publishExam blocks when fewer than min_subjects have any marks uploaded', tooFew.ok === false);
+    check('publishExam explains how many subjects are still needed', /2 subject/.test(tooFew.message) && /only 1/.test(tooFew.message));
+    const stillDraft = await results.listSubmissions(exam.id, 'c1');
+    check('publishExam did not publish anything while blocked', stillDraft.data.every((r) => r.status !== 'published'));
+
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su2', scores: [{ student_id: 's1', score: '60' }] });
+    const nowOk = await results.publishExam(exam.id, 'c1');
+    check('publishExam succeeds once min_subjects worth of subjects have marks', nowOk.ok === true && nowOk.published === 2);
+  }
+  {
+    // Per-class override (exam_classes.min_subjects) takes precedence over
+    // the school-wide setting here too, same as getBroadsheet already does.
+    const { sb, results } = freshApis({ settings: [{ id: 'set1', key: 'min_subjects_for_ranking', value: '1' }] });
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', class_ids: ['c1'] })).data;
+    await results.savePublishSettings(exam.id, 'c1', { min_subjects: 2 });
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '50' }] });
+
+    const blocked = await results.publishExam(exam.id, 'c1');
+    check('publishExam honors a per-class min_subjects override over the lower school-wide setting', blocked.ok === false);
+  }
+  {
+    // min_subjects left at 0/unset (the default) never gates anything —
+    // exactly today's behaviour for every class that's never touched this.
+    const { sb, results } = freshApis();
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1' })).data;
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '50' }] });
+    const res = await results.publishExam(exam.id, 'c1');
+    check('publishExam is ungated when min_subjects is unset', res.ok === true);
+  }
+
   // ---- listSubmissions: teacher name + entered/expected counts (Phase 2e) ---------
   {
     const { sb, results } = freshApis({
@@ -398,29 +443,33 @@ async function run() {
     check('a class with marks is never silently dropped from the board', stillThere.data.length === 2);
   }
 
-  // ---- listExamClasses excludes a selected class with ZERO enrolled students (bug fix, feature brief §8) ----
+  // ---- listExamClasses shows a class with ZERO enrolled students honestly, doesn't hide it (System Fixes brief §7) ----
   {
     const { sb, results } = freshApis({
       classes: [{ id: 'c1', name: 'Grade 8' }, { id: 'c2', name: 'Grade 9' }, { id: 'c3', name: 'PP1' }],
       students: [{ id: 's1', admission_no: '1', full_name: 'A', gender: 'Male', class_id: 'c1', status: 'active' }],
       subject_class_assignments: [{ id: 'sca1', subject_id: 'su1', class_id: 'c1' }, { id: 'sca2', subject_id: 'su1', class_id: 'c2' }, { id: 'sca3', subject_id: 'su1', class_id: 'c3' }]
     });
-    // Grade 9 and PP1 have zero enrolled students (the exact reported bug: a
-    // school with 26 students all in Grade 8, but Grade 9/PP1 still showed
-    // up as "0/9 subjects have marks") — both are still explicitly selected
-    // onto the exam here, same as the real report.
+    // Grade 9 and PP1 have zero enrolled students. An earlier version of
+    // this fix hid such classes from the board entirely, which is exactly
+    // what the System Fixes brief's §7 bug report describes ("all 3 classes
+    // were ticked... but after creation only Grade 8 was actually saved —
+    // the other two classes were dropped") even though saveExam genuinely
+    // saved all three. The real fix: show every selected class, with a
+    // distinct 'no_students' status for ones that have nothing to enter.
     const exam = (await results.saveExam({ name: 'Opener Exams', academic_year_id: 'y1', term_id: 't1', class_ids: ['c1', 'c2', 'c3'] })).data;
 
     const rows = await results.listExamClasses(exam.id);
-    check('only the class that actually has enrolled students appears', rows.data.length === 1 && rows.data[0].class_id === 'c1');
-    check('the zero-student classes are not listed as pending at all', !rows.data.some((r) => r.class_id === 'c2' || r.class_id === 'c3'));
+    check('every selected class is saved and shown, not just the one with students', rows.data.length === 3);
+    check('the zero-student classes get an honest no_students status, not "pending"', rows.data.filter((r) => r.class_id === 'c2' || r.class_id === 'c3').every((r) => r.status === 'no_students'));
+    check('the class with students gets its normal status, unaffected', rows.data.find((r) => r.class_id === 'c1').status !== 'no_students');
 
-    // Enroll a student into Grade 9 after the fact — it should start
-    // appearing automatically, without needing to touch the exam again.
+    // Enroll a student into Grade 9 after the fact — its status should
+    // flip away from no_students automatically, without touching the exam.
     sb._tables.students.push({ id: 's9', admission_no: '9', full_name: 'New Kid', gender: 'Male', class_id: 'c2', status: 'active' });
     const afterEnroll = await results.listExamClasses(exam.id);
-    check('a class that gains a student is picked up automatically on the next load', afterEnroll.data.some((r) => r.class_id === 'c2'));
-    check('the still-empty class (PP1) remains excluded', !afterEnroll.data.some((r) => r.class_id === 'c3'));
+    check('a class that gains a student is no longer no_students', afterEnroll.data.find((r) => r.class_id === 'c2').status !== 'no_students');
+    check('the still-empty class (PP1) stays no_students, but stays visible', afterEnroll.data.find((r) => r.class_id === 'c3').status === 'no_students');
   }
 
   // ---- listExamClassChoices (Phase 2h) ---------------------------------------------
@@ -528,6 +577,51 @@ async function run() {
 
     const ec = await results.listExamClasses(exam.id);
     check('withdrawExam clears the released_at stamp', ec.data.find((r) => r.class_id === 'c1').released_at === null);
+  }
+
+  // ---- Deleted Exams: soft-delete, restore, 30-day auto-purge (System Fixes brief §8) ----
+  {
+    const { sb, results } = freshApis();
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1' })).data;
+
+    const before = await results.listExams();
+    check('a fresh exam appears in the normal exam list', before.data.some((e) => e.id === exam.id));
+
+    const del = await results.softDeleteExam(exam.id);
+    check('softDeleteExam succeeds and stamps deleted_at', del.ok === true && !!del.data.deleted_at);
+
+    const afterDelete = await results.listExams();
+    check('a soft-deleted exam disappears from the normal exam list', !afterDelete.data.some((e) => e.id === exam.id));
+
+    const deletedList = await results.listDeletedExams();
+    check('a soft-deleted exam appears in Deleted Exams', deletedList.data.some((e) => e.id === exam.id));
+    const row = deletedList.data.find((e) => e.id === exam.id);
+    check('a freshly-deleted exam reports ~30 days remaining', row.days_remaining >= 29 && row.days_remaining <= 30);
+
+    const restored = await results.restoreExam(exam.id);
+    check('restoreExam clears deleted_at', restored.ok === true && restored.data.deleted_at === null);
+    const afterRestore = await results.listExams();
+    check('a restored exam reappears in the normal exam list', afterRestore.data.some((e) => e.id === exam.id));
+    const deletedAfterRestore = await results.listDeletedExams();
+    check('a restored exam no longer appears in Deleted Exams', !deletedAfterRestore.data.some((e) => e.id === exam.id));
+
+    // Simulate an exam that's been sitting deleted for 31 days — past the
+    // window — and confirm it's actually gone from the database, not just
+    // hidden, the moment anything touches listDeletedExams/purge.
+    await results.softDeleteExam(exam.id);
+    const old = sb._tables.exams.find((e) => e.id === exam.id);
+    old.deleted_at = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+    const purge = await results.purgeExpiredDeletedExams();
+    check('purgeExpiredDeletedExams reports the purged count', purge.ok === true && purge.purged === 1);
+    check('an expired deleted exam is actually gone from the table, not just hidden', !sb._tables.exams.some((e) => e.id === exam.id));
+    const deletedAfterPurge = await results.listDeletedExams();
+    check('a purged exam no longer appears anywhere', !deletedAfterPurge.data.some((e) => e.id === exam.id));
+
+    // A deleted exam still within its window is NOT purged by the sweep.
+    const exam2 = (await results.saveExam({ name: 'Recent Delete', academic_year_id: 'y1', term_id: 't1' })).data;
+    await results.softDeleteExam(exam2.id);
+    await results.purgeExpiredDeletedExams();
+    check('a recently-deleted exam survives the purge sweep', sb._tables.exams.some((e) => e.id === exam2.id));
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

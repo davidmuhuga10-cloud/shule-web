@@ -12,7 +12,7 @@ const { studentEmailFor, studentPasswordFor, parentEmailFor, staffUsernameFor, s
   require('../netlify/functions/_lib/studentLogin.js');
 const { requireAdmin } = require('../netlify/functions/_lib/supabaseAdmin.js');
 const {
-  createStudentLogin, createStudentsBulk, createStaffLogin, createParentLogin, resetPassword, setLoginStatus
+  createStudentLogin, createStudentsBulk, createStaffLogin, createStaffBulk, createParentLogin, resetPassword, setLoginStatus
 } = require('../netlify/functions/admin-provision.js');
 
 let passed = 0, failed = 0;
@@ -342,6 +342,75 @@ function mockAdmin(opts) {
     admin.auth.admin.deleteUser = async (id) => { deleteCalled = true; return origDelete(id); };
     const res = await createStaffLogin(admin, { staff_id: 'staff-9', full_name: 'Rollback Teacher', role: 'teacher' }, SCHOOL_A);
     check('createStaffLogin rolls back the auth user when the profile insert fails', res.ok === false && deleteCalled === true);
+  }
+
+  // ---- createStaffBulk -------------------------------------------------------
+  // Same perf fix as createStudentsBulk, applied to Teachers & Staff bulk
+  // upload (Round 2 §5) — one Netlify function call provisions a whole batch.
+  {
+    const rows = [
+      { staff_id: 'bs-1', full_name: 'Amina Otieno', role: 'teacher', phone: '0711111111' },
+      { staff_id: 'bs-2', full_name: 'Brian Kiptoo', role: 'teacher', phone: '0722222222' },
+      { staff_id: 'bs-3', full_name: 'Cynthia Wanjiru', role: 'admin', phone: '0733333333' }
+    ];
+    const admin = mockAdmin();
+    const res = await createStaffBulk(admin, { rows }, SCHOOL_A);
+    check('createStaffBulk succeeds', res.ok === true);
+    check('createStaffBulk provisions every row', res.provisioned === 3 && res.total === 3);
+    check('createStaffBulk returns one result per row', res.results.length === 3);
+    check('createStaffBulk results are all ok', res.results.every((r) => r.ok === true));
+    const profiles = admin._tables.profiles.filter((p) => p.school_id === SCHOOL_A);
+    check('createStaffBulk inserted a profile per staff member', profiles.length === 3);
+    const adminProfile = profiles.find((p) => p.staff_id === 'bs-3');
+    check('createStaffBulk honors a per-row admin role', adminProfile && adminProfile.role === 'admin');
+  }
+  {
+    // Rows spanning more than one internal concurrency batch (CONCURRENCY=5).
+    const rows = Array.from({ length: 12 }, (_, i) => ({
+      staff_id: 'bulk-staff-' + i, full_name: 'Staff Member ' + i, role: 'teacher'
+    }));
+    const admin = mockAdmin();
+    const res = await createStaffBulk(admin, { rows }, SCHOOL_A);
+    check('createStaffBulk handles more rows than the concurrency chunk size', res.ok === true && res.provisioned === 12);
+  }
+  {
+    // Already-provisioned staff in the batch are reported ok (idempotent), not double-created.
+    const admin = mockAdmin({ tables: { profiles: [{ id: 'existing-1', staff_id: 'bs-1', role: 'teacher', school_id: SCHOOL_A }] } });
+    const rows = [
+      { staff_id: 'bs-1', full_name: 'Amina Otieno', role: 'teacher' },
+      { staff_id: 'bs-2', full_name: 'Brian Kiptoo', role: 'teacher' }
+    ];
+    const res = await createStaffBulk(admin, { rows }, SCHOOL_A);
+    check('createStaffBulk is idempotent for already-provisioned rows in the batch', res.ok === true && res.provisioned === 2);
+    check('createStaffBulk does not insert a duplicate profile for the already-provisioned row',
+      admin._tables.profiles.filter((p) => p.staff_id === 'bs-1').length === 1);
+  }
+  {
+    // Two staff members sharing a first name within the SAME batch must still get distinct usernames.
+    const admin = mockAdmin();
+    const rows = [
+      { staff_id: 'bs-mercy-1', full_name: 'Mercy Njeri', role: 'teacher' },
+      { staff_id: 'bs-mercy-2', full_name: 'Mercy Otieno', role: 'teacher' }
+    ];
+    const res = await createStaffBulk(admin, { rows }, SCHOOL_A);
+    const usernames = res.results.map((r) => r.username).sort();
+    check('createStaffBulk assigns distinct usernames to same-first-name staff in one batch', usernames[0] === 'mercy' && usernames[1] === 'mercy2');
+  }
+  {
+    // A malformed row (missing full_name) fails on its own without aborting the rest of the batch.
+    const admin = mockAdmin();
+    const rows = [
+      { staff_id: 'bs-1', full_name: 'Amina Otieno', role: 'teacher' },
+      { staff_id: 'bs-2' } // missing full_name
+    ];
+    const res = await createStaffBulk(admin, { rows }, SCHOOL_A);
+    check('createStaffBulk keeps going after one bad row', res.ok === true && res.provisioned === 1);
+    check('createStaffBulk reports the bad row as failed, not silently dropped', res.results.some((r) => r.ok === false));
+  }
+  {
+    const admin = mockAdmin();
+    const res = await createStaffBulk(admin, { rows: [] }, SCHOOL_A);
+    check('createStaffBulk rejects an empty batch', res.ok === false);
   }
 
   // ---- parentEmailFor -------------------------------------------------------

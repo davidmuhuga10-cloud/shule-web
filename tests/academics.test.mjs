@@ -149,6 +149,34 @@ async function run() {
     const res = await api.streams.remove('st1');
     check('streams.remove is blocked when students are assigned', res.ok === false);
   }
+  // Round 2 §2 (BUG): a stream name like "Blue,Red" was accepted with no
+  // validation. Round 2 §4: renaming an existing stream reuses save().
+  {
+    const sb = createMockSupabase({ classes: [{ id: 'c1', name: 'Grade 7' }], streams: [{ id: 'st1', class_id: 'c1', name: 'North' }, { id: 'st2', class_id: 'c1', name: 'South' }] });
+    const api = createAcademicsApi(sb);
+
+    const withComma = await api.streams.save({ class_id: 'c1', name: 'Blue,Red' });
+    check('streams.save rejects a name with a comma', withComma.ok === false);
+    check('the rejection message explains why (special characters)', /special character/i.test(withComma.message));
+
+    const withSlash = await api.streams.save({ class_id: 'c1', name: 'Blue/Red' });
+    check('streams.save rejects a name with a slash', withSlash.ok === false);
+
+    const plain = await api.streams.save({ class_id: 'c1', name: 'Blue Team 2' });
+    check('streams.save accepts letters, digits and spaces', plain.ok === true);
+
+    const renamed = await api.streams.save({ id: 'st1', class_id: 'c1', name: 'Northeast' });
+    check('streams.save renames an existing stream', renamed.ok === true && renamed.data.name === 'Northeast');
+
+    const renameToComma = await api.streams.save({ id: 'st1', class_id: 'c1', name: 'North,East' });
+    check('renaming to a name with special characters is rejected too, not just on create', renameToComma.ok === false);
+
+    const renameToOwnName = await api.streams.save({ id: 'st1', class_id: 'c1', name: 'Northeast' });
+    check('renaming a stream to its own current name is allowed (not flagged as a duplicate of itself)', renameToOwnName.ok === true);
+
+    const renameToOtherStreamsName = await api.streams.save({ id: 'st1', class_id: 'c1', name: 'South' });
+    check('renaming a stream to collide with a DIFFERENT existing stream in the same class is rejected', renameToOtherStreamsName.ok === false);
+  }
 
   // ---- classes: standardized levels (Phase 2b) -----------------------------------
   {

@@ -13,7 +13,8 @@
  * saveStaff, per the notes in SETUP_GUIDE.md.
  *
  * POST body: { action, ...fields }, header: Authorization: Bearer <admin JWT>
- * Actions: create_student | create_staff | create_parent | reset_password | set_login_status
+ * Actions: create_student | create_students_bulk | create_staff | create_staff_bulk |
+ *          create_parent | reset_password | set_login_status
  * ----------------------------------------------------------------------------
  */
 
@@ -70,6 +71,8 @@ exports.handler = async (event) => {
         return json(200, await createStudentsBulk(admin, payload, schoolId));
       case 'create_staff':
         return json(200, await createStaffLogin(admin, payload, schoolId));
+      case 'create_staff_bulk':
+        return json(200, await createStaffBulk(admin, payload, schoolId));
       case 'create_parent':
         return json(200, await createParentLogin(admin, payload, schoolId));
       case 'reset_password':
@@ -176,19 +179,34 @@ async function createStaffLogin(admin, payload, schoolId) {
   if (!staff_id || !full_name) {
     return { ok: false, message: 'staff_id and full_name are required.' };
   }
-  const appRole = role === 'admin' ? 'admin' : 'teacher';
-
-  const existing = await findProfileBy(admin, 'staff_id', staff_id, schoolId);
-  if (existing) {
-    return { ok: true, alreadyProvisioned: true, profile_id: existing.id };
-  }
-
   const { data: school, error: schoolErr } = await admin
     .from('schools').select('code').eq('id', schoolId).maybeSingle();
   if (schoolErr || !school) return { ok: false, message: 'Could not resolve your school — please sign in again.' };
 
-  const username = await findAvailableUsername(admin, staffUsernameFor(full_name), schoolId);
-  const email = staffEmailFor(username, school.code);
+  return provisionOneStaff(admin, schoolId, school.code, { staff_id, full_name, role, phone });
+}
+
+/** Shared by the single (`create_staff`) and bulk (`create_staff_bulk`)
+ *  paths so both provision a login exactly the same way — the bulk path just
+ *  resolves the school code ONCE up front instead of once per staff member.
+ *  Mirrors provisionOneStudent()'s shape. */
+async function provisionOneStaff(admin, schoolId, schoolCode, { staff_id, full_name, role, phone }, precomputedUsername) {
+  if (!staff_id || !full_name) {
+    return { ok: false, staff_id, message: 'staff_id and full_name are required.' };
+  }
+  const appRole = role === 'admin' ? 'admin' : 'teacher';
+
+  const existing = await findProfileBy(admin, 'staff_id', staff_id, schoolId);
+  if (existing) {
+    return { ok: true, alreadyProvisioned: true, profile_id: existing.id, staff_id };
+  }
+
+  // The bulk path (see createStaffBulk) precomputes every row's username up
+  // front, sequentially, before any concurrent work starts — otherwise two
+  // rows sharing a first name and running concurrently could each query the
+  // table before the other's profile is inserted and both grab "mercy".
+  const username = precomputedUsername || await findAvailableUsername(admin, staffUsernameFor(full_name), schoolId);
+  const email = staffEmailFor(username, schoolCode);
   const password = DEFAULT_TEACHER_PASSWORD;
 
   const { data: created, error: createErr } = await admin.auth.admin.createUser({
@@ -197,17 +215,60 @@ async function createStaffLogin(admin, payload, schoolId) {
     email_confirm: true,
     user_metadata: { role: appRole, staff_id, full_name, school_id: schoolId }
   });
-  if (createErr) return { ok: false, message: 'Could not create the login: ' + createErr.message };
+  if (createErr) return { ok: false, staff_id, message: 'Could not create the login: ' + createErr.message };
 
   const { error: profileErr } = await admin
     .from('profiles')
     .insert({ id: created.user.id, school_id: schoolId, name: full_name, email, username, phone: phone || null, role: appRole, staff_id, status: 'active' });
   if (profileErr) {
     await admin.auth.admin.deleteUser(created.user.id);
-    return { ok: false, message: 'Could not link the profile: ' + profileErr.message };
+    return { ok: false, staff_id, message: 'Could not link the profile: ' + profileErr.message };
   }
 
-  return { ok: true, profile_id: created.user.id, username, defaultPassword: password };
+  return { ok: true, profile_id: created.user.id, username, defaultPassword: password, staff_id };
+}
+
+/**
+ * Bulk-provision staff logins in ONE request instead of one Netlify function
+ * round trip per staff member — same rationale, and same limited-concurrency
+ * shape, as createStudentsBulk().
+ * payload.rows: [{ staff_id, full_name, role, phone }]
+ */
+async function createStaffBulk(admin, payload, schoolId) {
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  if (!rows.length) return { ok: false, message: 'No staff to provision.' };
+
+  const { data: school, error: schoolErr } = await admin
+    .from('schools').select('code').eq('id', schoolId).maybeSingle();
+  if (schoolErr || !school) return { ok: false, message: 'Could not resolve your school — please sign in again.' };
+
+  // Resolve every row's username up front, in order, against one snapshot of
+  // already-taken usernames — see provisionOneStaff's comment on why this
+  // can't safely happen inside the concurrent batch below.
+  const { data: existingProfiles } = await admin.from('profiles').select('username').eq('school_id', schoolId);
+  const taken = new Set((existingProfiles || []).map((r) => r.username).filter(Boolean).map((u) => String(u).toLowerCase()));
+  const usernameFor = new Map();
+  rows.forEach((row) => {
+    if (!row || !row.full_name) return;
+    const base = staffUsernameFor(row.full_name);
+    let candidate = base;
+    let suffix = 2;
+    while (taken.has(candidate)) { candidate = base + suffix; suffix++; }
+    taken.add(candidate);
+    usernameFor.set(row, candidate);
+  });
+
+  const CONCURRENCY = 5;
+  const results = [];
+  for (let i = 0; i < rows.length; i += CONCURRENCY) {
+    const batch = rows.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.all(
+      batch.map((row) => provisionOneStaff(admin, schoolId, school.code, row, usernameFor.get(row)))
+    );
+    results.push(...batchResults);
+  }
+  const provisioned = results.filter((r) => r.ok).length;
+  return { ok: true, provisioned, total: rows.length, results };
 }
 
 /** Finds the first available username at this school — "mercy", then
@@ -369,6 +430,7 @@ async function findProfileByEmail(admin, email, schoolId) {
 module.exports.createStudentLogin = createStudentLogin;
 module.exports.createStudentsBulk = createStudentsBulk;
 module.exports.createStaffLogin = createStaffLogin;
+module.exports.createStaffBulk = createStaffBulk;
 module.exports.createParentLogin = createParentLogin;
 module.exports.resetPassword = resetPassword;
 module.exports.setLoginStatus = setLoginStatus;

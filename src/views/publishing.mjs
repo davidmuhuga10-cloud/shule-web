@@ -88,9 +88,11 @@ async function openPublishSettingsModal(root, sel, onEditSubject) {
   });
 }
 
-/** Step 11: "Grant Teacher Access" — under an Action menu at the bottom of
- *  the publish screen, an admin can let specific teachers edit their
- *  results again after publishing. Reuses the existing admin-only
+/** Step 11: "Grant Teacher Access" — under an Action card at the TOP of the
+ *  publish screen (Round 2 §9: this and Withdraw Results used to sit at the
+ *  bottom, easy to miss — moved to the top, immediately visible), an admin
+ *  can let specific teachers edit their results again after publishing.
+ *  Reuses the existing admin-only
  *  reopenSubmission() (draft-reopen) mechanism per-subject rather than a
  *  new parallel "still published but editable" state — simpler and already
  *  covered by the same DB trigger rules. Selectable per learning area, with
@@ -179,6 +181,13 @@ async function loadList(root, sel, onEditSubject) {
   const noResultsYet = rows.filter((r) => r.entered_count === 0);
 
   listEl.innerHTML = `
+    ${isAdmin ? `<div class="card" style="margin-bottom:16px">
+      <div class="card-h"><h3>Action</h3></div>
+      <div class="card-b" style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn secondary sm" id="pb-grant-access">🔓 Grant teacher edit access</button>
+        <button class="btn secondary sm" id="pb-withdraw">↩️ Withdraw Results</button>
+      </div>
+    </div>` : ''}
     ${allPublished ? `<div class="card" style="margin-bottom:16px;border-color:var(--ok)"><div class="card-b" style="display:flex;align-items:center;gap:12px">
       <p class="hint" style="margin:0;flex:1"><b>✅ Every subject is published</b> for this class — report cards and analyses are ready to print, nothing further to do here.</p>
       <button class="btn" id="pb-go-reports">🖨️ Go to Report Forms</button>
@@ -215,14 +224,7 @@ async function loadList(root, sel, onEditSubject) {
             ${isAdmin ? `<button class="btn ghost sm" data-edit="${r.subject_id}">✏️ Edit Marks</button>` : ''}
           </td></tr>`).join('')}</tbody>
       </table></div>
-    </div>
-    ${isAdmin ? `<div class="card" style="margin-top:16px">
-      <div class="card-h"><h3>Action</h3></div>
-      <div class="card-b" style="display:flex;gap:10px;flex-wrap:wrap">
-        <button class="btn secondary sm" id="pb-grant-access">🔓 Grant teacher edit access</button>
-        <button class="btn secondary sm" id="pb-withdraw">↩️ Withdraw Results</button>
-      </div>
-    </div>` : ''}`;
+    </div>`;
 
   const goReportsBtn = listEl.querySelector('#pb-go-reports');
   if (goReportsBtn) goReportsBtn.onclick = () => {

@@ -12,10 +12,13 @@
  *   1. Board screen (renderBoardScreen) — same exam board as the old
  *      exams.mjs: create/edit exams, see every ticked class with its status.
  *   2. Detail screen (renderDetailScreen) — clicking a class's action drills
- *      into that exam+class with two in-page tabs, "Marks Entry" and
- *      "Publish & Review" (renderMarksPanel/renderPublishPanel from
- *      marksEntry.mjs/publishing.mjs, refactored into embeddable panels for
- *      exactly this purpose). Switching tabs — even the "fix this subject"
+ *      into that exam+class with three in-page tabs, in order: "Review and
+ *      Publish", "Marks Entry", "Bulk Upload" (Round 2 §8 — renamed/reordered
+ *      from the old "Marks Entry" / "Publish & Review" pair, with Bulk Upload
+ *      promoted out of a toggle inside Marks Entry into its own tab).
+ *      renderPublishPanel/renderMarksPanel/renderMarksBulkPanel from
+ *      publishing.mjs/marksEntry.mjs are embeddable panels for exactly this
+ *      purpose. Switching tabs — even the "fix this subject"
  *      shortcut from the Publish tab — never leaves the page, matching the
  *      brief's literal "one place" requirement, not just a cosmetic rename.
  *
@@ -26,7 +29,8 @@ import { esc, modal, closeModal, toast, confirmAction, options, renderPrereq, lo
 import { Db } from '../lib/api/index.mjs';
 import { EXAM_TYPE_LABELS } from '../lib/api/results.mjs';
 import { setNavIntent } from '../lib/navIntent.mjs';
-import { renderMarksPanel } from './marksEntry.mjs';
+import { renderMarksPanel, renderMarksBulkPanel } from './marksEntry.mjs';
+import { CBC_LEVELS, levelBucketForClassName } from '../lib/api/cbcDefaults.mjs';
 import { renderPublishPanel } from './publishing.mjs';
 
 const EXAM_TYPE_CHOICES = Object.keys(EXAM_TYPE_LABELS).map((k) => ({ id: k, name: EXAM_TYPE_LABELS[k] }));
@@ -155,11 +159,18 @@ function examCard(exam, classRows) {
       // losing data. A ticked class with no students now stays visible with
       // an honest "No students enrolled" status and no action, instead of
       // vanishing from the board entirely.
+      // Round 2 §8: the not_started row's action is now "Review and Publish"
+      // (was "Enter Marks") and routes to the SAME data-review handler as
+      // ready_to_publish — both land on the detail screen's now-first
+      // "Review and Publish" tab, matching the tabs being reordered so that
+      // tab comes before Marks Entry. in_progress keeps its own distinct
+      // "Continue marks entry" action straight into the marks grid, since
+      // someone mid-entry is better served landing back where they left off.
       if (r.status === 'no_students') action = `<span class="muted" style="font-size:12px">Enrol students in this class first</span>`;
       else if (r.status === 'no_subjects') action = `<span class="muted" style="font-size:12px">Assign subjects to this class first</span>`;
-      else if (r.status === 'not_started') action = `<button class="btn ghost sm" data-continue="${r.class_id}">📝 Enter Marks</button>`;
+      else if (r.status === 'not_started') action = `<button class="btn ghost sm" data-review="${r.class_id}">✅ Review and Publish</button>`;
       else if (r.status === 'in_progress') action = `<button class="btn ghost sm" data-continue="${r.class_id}">📝 Continue marks entry</button>`;
-      else if (r.status === 'ready_to_publish') action = `<button class="btn ghost sm" data-review="${r.class_id}">✅ Review &amp; Publish</button>`;
+      else if (r.status === 'ready_to_publish') action = `<button class="btn ghost sm" data-review="${r.class_id}">✅ Review and Publish</button>`;
       else {
         // Step 13: published/released classes get the full set of
         // post-publish actions instead of just "Print Reports".
@@ -196,7 +207,7 @@ function examCard(exam, classRows) {
 }
 
 /* ============================================================================
- * Screen 2 — exam+class detail (Marks Entry / Publish & Review tabs)
+ * Screen 2 — exam+class detail (Review and Publish / Marks Entry / Bulk Upload tabs)
  * ==========================================================================*/
 async function renderDetailScreen(root, years, terms, exam, classId, sel) {
   const classesRes = await Db.classes.list();
@@ -211,9 +222,10 @@ async function renderDetailScreen(root, years, terms, exam, classId, sel) {
         <p>Enter marks, then review and publish — all in one place.</p>
       </div>
     </div>
-    <div class="tabs" style="max-width:420px">
+    <div class="tabs" style="max-width:560px">
+      <button data-tab="publish" class="${sel.tab === 'marks' || sel.tab === 'bulk' ? '' : 'active'}">✅ Review and Publish</button>
       <button data-tab="marks" class="${sel.tab === 'marks' ? 'active' : ''}">✍️ Marks Entry</button>
-      <button data-tab="publish" class="${sel.tab === 'publish' ? 'active' : ''}">✅ Publish &amp; Review</button>
+      <button data-tab="bulk" class="${sel.tab === 'bulk' ? 'active' : ''}">📥 Bulk Upload</button>
     </div>
     <div id="ed-panel"></div>
   `;
@@ -224,11 +236,14 @@ async function renderDetailScreen(root, years, terms, exam, classId, sel) {
   const panel = root.querySelector('#ed-panel');
   if (sel.tab === 'marks') {
     await renderMarksPanel(panel, { exam_id: exam.id, class_id: classId, subject_id: sel.subject_id || '' });
+  } else if (sel.tab === 'bulk') {
+    await renderMarksBulkPanel(panel, { exam_id: exam.id, class_id: classId });
   } else {
     // The "Edit Marks"/"Upload" shortcuts inside the Publish tab flip this
     // same screen back to the Marks Entry tab, pre-selected to that
     // subject, instead of navigating away — see publishing.mjs's
-    // onEditSubject callback plumbing.
+    // onEditSubject callback plumbing. Defaults here (no tab, or tab:
+    // 'publish') land on "Review and Publish" — now the first tab.
     await renderPublishPanel(panel, { exam_id: exam.id, class_id: classId }, (subjectId) => {
       renderDetailScreen(root, years, terms, exam, classId, { tab: 'marks', subject_id: subjectId });
     });
@@ -236,24 +251,62 @@ async function renderDetailScreen(root, years, terms, exam, classId, sel) {
 }
 
 /** Brief §7.1 (unchanged from the old Manage Exams): creating (or editing)
- *  an exam prompts the admin to select which classes are sitting it, via a
- *  plain tick-list — a class that already has recorded marks for this exam
- *  can't be unticked here (it's disabled, matching what saveExam's
- *  server-side guard already enforces).
+ *  an exam prompts the admin to select which classes are sitting it — a
+ *  class that already has recorded marks for this exam can't be unticked
+ *  here (it's disabled, matching what saveExam's server-side guard already
+ *  enforces).
  *
- *  Brief §5: redesigned as one clean aligned row per class — checkbox,
- *  class name, and the "min. learning areas" field all in a single flex
- *  row that lines up, instead of the old far-left-checkbox /
- *  far-right-field layout.
+ *  Round 2 §7 (approved design — GATED task, mockup reviewed and signed off
+ *  before this was built): the previous two redesign attempts were still a
+ *  table of rows, and a fixed-width "min. learning areas" input squeezed
+ *  next to the class name meant full names ("Grade 1") had no room and
+ *  wrapped mid-word ("G" / "1"). Rebuilt as a card grid instead — each class
+ *  is its own grid cell with no competing column, so a name always gets as
+ *  much room as it needs; the "min. learning areas" field only appears
+ *  INSIDE a card once it's selected, so most cards (the unselected ones)
+ *  stay lightweight; classes are grouped by CBC level (levelBucketForClassName,
+ *  the same bucketing cbcDefaults.mjs already provides), echoing the
+ *  level-grouped chip layout Subjects already uses under Classes & Streams;
+ *  a search box + Select all/Clear cover schools with many classes.
  *  Brief §6: "Supplementary Exam"/"Written Exam" renamed to "CAT"/"Normal
  *  Exam" (EXAM_TYPE_LABELS, results.mjs) and the "out of marks" field is
  *  gone entirely — exams are no longer created with a fixed max score. */
+function groupClassesByLevel(classes) {
+  const order = [...CBC_LEVELS, 'Other'];
+  const byLevel = {};
+  classes.forEach((c) => {
+    const level = levelBucketForClassName(c.name) || 'Other';
+    (byLevel[level] = byLevel[level] || []).push(c);
+  });
+  return order.filter((level) => byLevel[level] && byLevel[level].length).map((level) => ({ level, classes: byLevel[level] }));
+}
+
+function classCardHtml(c, selectedIds, lockedIds, minByClass) {
+  const isSelected = selectedIds.has(c.id);
+  const isLocked = lockedIds.has(c.id);
+  const minVal = minByClass[c.id] === null || minByClass[c.id] === undefined ? '' : minByClass[c.id];
+  return `
+    <div class="ex-class-card${isSelected ? ' on' : ''}${isLocked ? ' locked' : ''}" data-class-card="${c.id}" data-class-name="${esc(c.name.toLowerCase())}">
+      <div class="ex-class-top">
+        <span class="ex-class-check">✓</span>
+        <input type="checkbox" data-class-check value="${c.id}" ${isSelected ? 'checked' : ''} ${isLocked ? 'disabled' : ''} style="position:absolute;opacity:0;width:0;height:0">
+        <span class="ex-class-name">${esc(c.name)}</span>
+      </div>
+      ${isLocked ? '<div class="ex-class-locked-note">🔒 Has marks recorded — can\'t be removed</div>' : ''}
+      <div class="ex-class-min">
+        <label>Min. learning areas</label>
+        <input type="number" min="0" data-class-min="${c.id}" title="Minimum learning areas for ${esc(c.name)}" value="${minVal}" placeholder="—">
+      </div>
+    </div>`;
+}
+
 function openExamModal(root, years, terms, classes, existing, currentClassRows) {
   const selectedIds = new Set((currentClassRows || []).map((r) => r.class_id));
   const lockedIds = new Set((currentClassRows || []).filter((r) => r.subjects_with_marks > 0).map((r) => r.class_id));
   const minByClass = {};
   (currentClassRows || []).forEach((r) => { minByClass[r.class_id] = r.min_subjects; });
   const initialType = existing ? existing.exam_type : 'written';
+  const groups = groupClassesByLevel(classes);
 
   modal({
     title: existing ? 'Edit exam' : 'Add exam',
@@ -270,15 +323,22 @@ function openExamModal(root, years, terms, classes, existing, currentClassRows) 
       </p>
       <div class="field">
         <label>Which grades are sitting this exam?</label>
-        <p class="hint" style="margin-top:0">Tick every class that will sit this exam, and optionally set a minimum number of learning areas a student must have taken to be ranked — anyone who sat fewer is shown as "X" instead of skewing the class mean. Leave blank to use the school-wide default. You can add more classes later from the exam card.</p>
-        <div style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 8px">
-          ${classes.length ? classes.map((c) => `
-            <div class="ex-class-row" style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line)">
-              <input type="checkbox" data-class-check value="${c.id}" ${selectedIds.has(c.id) ? 'checked' : ''} ${lockedIds.has(c.id) ? 'disabled' : ''}>
-              <span style="flex:1;min-width:0">${esc(c.name)}${lockedIds.has(c.id) ? ' <span class="muted" style="font-size:11px">(has marks recorded — can\'t remove)</span>' : ''}</span>
-              <input type="number" min="0" data-class-min="${c.id}" placeholder="Min. learning areas" title="Minimum learning areas for ${esc(c.name)}" style="width:150px;flex:0 0 auto" value="${minByClass[c.id] === null || minByClass[c.id] === undefined ? '' : minByClass[c.id]}">
-            </div>`).join('') : '<p class="muted" style="margin:0">No classes yet — add a class first.</p>'}
-        </div>
+        <p class="hint" style="margin-top:0">Tap a class to include it. Set a minimum number of learning areas per class if you want anyone who sat fewer marked "X" instead of skewing the class mean — leave blank to use the school-wide default. You can add more classes later from the exam card.</p>
+        ${classes.length ? `
+          <div class="ex-class-toolbar">
+            <div class="field" style="flex:1;margin:0"><input type="text" id="ex-class-search" placeholder="Search classes…"></div>
+            <button type="button" class="btn secondary sm" id="ex-select-all">Select all</button>
+            <button type="button" class="btn secondary sm" id="ex-clear-all">Clear</button>
+          </div>
+          <div id="ex-class-groups" class="ex-class-scroll">
+            ${groups.map((g) => `
+              <div class="ex-class-group" data-class-group>
+                <div class="ex-class-level-label">${esc(g.level)}</div>
+                <div class="ex-class-grid">${g.classes.map((c) => classCardHtml(c, selectedIds, lockedIds, minByClass)).join('')}</div>
+              </div>`).join('')}
+          </div>
+          <p class="hint" id="ex-class-count" style="margin:10px 0 0"></p>
+        ` : '<p class="muted" style="margin:0">No classes yet — add a class first.</p>'}
       </div>
     `,
     okLabel: 'Save',
@@ -286,6 +346,63 @@ function openExamModal(root, years, terms, classes, existing, currentClassRows) 
       document.getElementById('ex-type').onchange = (e) => {
         document.getElementById('ex-consolidated-note').style.display = e.target.value === 'consolidated' ? '' : 'none';
       };
+      if (!classes.length) return;
+
+      const countEl = document.getElementById('ex-class-count');
+      const updateCount = () => {
+        const checked = document.querySelectorAll('[data-class-check]:checked').length;
+        countEl.textContent = `${checked} of ${classes.length} class(es) selected`;
+      };
+      const syncCardState = (card) => {
+        const cb = card.querySelector('[data-class-check]');
+        card.classList.toggle('on', cb.checked);
+      };
+
+      document.querySelectorAll('[data-class-card]').forEach((card) => {
+        const cb = card.querySelector('[data-class-check]');
+        cb.onchange = () => { syncCardState(card); updateCount(); };
+        // Clicking anywhere on the card (except directly inside the min.
+        // input, once it's showing) toggles it — locked cards ignore clicks
+        // entirely since their checkbox is disabled.
+        card.onclick = (e) => {
+          if (cb.disabled || e.target.closest('.ex-class-min')) return;
+          if (e.target.tagName === 'INPUT') return; // native checkbox click already toggles + fires onchange
+          cb.checked = !cb.checked;
+          cb.dispatchEvent(new Event('change'));
+        };
+      });
+
+      document.getElementById('ex-select-all').onclick = () => {
+        document.querySelectorAll('[data-class-check]:not(:disabled)').forEach((cb) => {
+          const card = cb.closest('[data-class-card]');
+          if (card.style.display === 'none') return; // respect the active search filter
+          cb.checked = true;
+          syncCardState(card);
+        });
+        updateCount();
+      };
+      document.getElementById('ex-clear-all').onclick = () => {
+        document.querySelectorAll('[data-class-check]:not(:disabled)').forEach((cb) => {
+          const card = cb.closest('[data-class-card]');
+          if (card.style.display === 'none') return;
+          cb.checked = false;
+          syncCardState(card);
+        });
+        updateCount();
+      };
+
+      document.getElementById('ex-class-search').oninput = (e) => {
+        const q = e.target.value.trim().toLowerCase();
+        document.querySelectorAll('[data-class-card]').forEach((card) => {
+          card.style.display = !q || card.dataset.className.indexOf(q) !== -1 ? '' : 'none';
+        });
+        document.querySelectorAll('[data-class-group]').forEach((group) => {
+          const anyVisible = [...group.querySelectorAll('[data-class-card]')].some((card) => card.style.display !== 'none');
+          group.style.display = anyVisible ? '' : 'none';
+        });
+      };
+
+      updateCount();
     },
     onOk: async () => {
       const lockedButUnchecked = [...lockedIds]; // always resubmitted regardless of checkbox state (disabled inputs don't post)

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Exam Class-Selection Screen — Redesign Proposal (for approval)</title>
+<style>
+  :root{
+    --bg:#f4f6f9; --surface:#ffffff; --ink:#1b2733; --muted:#6b7a8d;
+    --line:#e6ebf1; --primary:#127a6b; --primary-d:#0e6759; --danger:#d64545; --danger-bg:#fdecec;
+    --ok:#1a7f4b; --ok-bg:#e8f8ef; --radius:10px; --radius-sm:8px;
+    --shadow:0 4px 18px rgba(20,40,50,.08);
+  }
+  *{box-sizing:border-box}
+  body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--ink);font-size:14px;line-height:1.5;margin:0;padding:32px 22px 80px}
+  .wrap{max-width:960px;margin:0 auto}
+  h1{font-size:22px;margin:0 0 6px}
+  .lede{color:var(--muted);font-size:14px;max-width:720px;margin:0 0 28px}
+  .gate{background:#fff7e6;border:1px solid #f3d38a;color:#7a5b00;border-radius:var(--radius-sm);padding:12px 16px;font-size:13px;margin-bottom:34px}
+  .gate b{display:block;margin-bottom:2px}
+  section{margin-bottom:44px}
+  section > h2{font-size:15px;margin:0 0 4px;display:flex;align-items:center;gap:8px}
+  section > p.section-note{color:var(--muted);font-size:12.5px;margin:0 0 14px;max-width:680px}
+  .tag{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+    padding:3px 9px;border-radius:20px}
+  .tag.before{background:var(--danger-bg);color:var(--danger)}
+  .tag.after{background:var(--ok-bg);color:var(--ok)}
+
+  /* ---------- BEFORE: reproduction of the current broken layout ---------- */
+  .before-card{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:18px;max-width:520px}
+  .before-card .lbl{font-weight:700;font-size:14px;margin-bottom:6px}
+  .before-card .hint{font-size:12px;color:var(--muted);margin:0 0 12px}
+  .before-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+  .before-row input[type=checkbox]{flex:0 0 auto}
+  .before-name{flex:1;min-width:0;font-size:13px;overflow:hidden;white-space:normal;word-break:break-all;line-height:1.15}
+  .before-row input[type=text]{flex:0 0 150px;border:1px solid var(--line);border-radius:6px;padding:7px 9px;font-size:12px;color:var(--muted)}
+  .callout{margin-top:12px;font-size:12.5px;color:var(--danger);background:var(--danger-bg);border-radius:var(--radius-sm);padding:9px 12px}
+
+  /* ---------- AFTER: proposed redesign ---------- */
+  .after-shell{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:22px;box-shadow:var(--shadow)}
+  .after-head{margin-bottom:4px}
+  .after-head .lbl{font-weight:700;font-size:15px}
+  .after-head .hint{font-size:12.5px;color:var(--muted);margin:4px 0 0;max-width:640px}
+  .toolbar{display:flex;align-items:center;gap:10px;margin:16px 0 18px}
+  .search{flex:1;position:relative}
+  .search input{width:100%;padding:9px 13px 9px 34px;border:1px solid var(--line);border-radius:20px;font-size:13px;background:#f8fafb}
+  .search::before{content:"🔍";position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:12px;opacity:.5}
+  .quick-actions{display:flex;gap:6px;flex:0 0 auto}
+  .qbtn{border:1px solid var(--line);background:#fff;color:var(--muted);font-size:12px;font-weight:600;
+    padding:8px 12px;border-radius:20px;cursor:pointer;white-space:nowrap}
+  .qbtn:hover{border-color:var(--primary);color:var(--primary)}
+
+  .level-group{margin-bottom:20px}
+  .level-group:last-child{margin-bottom:0}
+  .level-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:9px}
+  .class-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+
+  .class-card{border:1.5px solid var(--line);border-radius:var(--radius-sm);padding:12px 14px;cursor:pointer;
+    transition:.15s;background:#fcfdfd}
+  .class-card:hover{border-color:var(--primary)}
+  .class-card.on{border-color:var(--primary);background:#f2faf8}
+  .class-card.locked{background:#f7f7f8;cursor:default}
+  .cc-top{display:flex;align-items:center;gap:10px}
+  .cc-check{width:20px;height:20px;border-radius:6px;border:1.5px solid var(--line);flex:0 0 auto;
+    display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;background:#fff}
+  .class-card.on .cc-check{background:var(--primary);border-color:var(--primary)}
+  .class-card.locked .cc-check{background:var(--muted);border-color:var(--muted)}
+  .cc-name{font-weight:650;font-size:14px;flex:1;min-width:0}
+  .cc-locked-note{font-size:10.5px;color:var(--muted);margin-top:6px;display:flex;align-items:center;gap:4px}
+  .cc-min{display:none;align-items:center;gap:8px;margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)}
+  .class-card.on .cc-min{display:flex}
+  .class-card.locked .cc-min{display:flex}
+  .cc-min label{font-size:11px;color:var(--muted);flex:1}
+  .cc-min input{width:64px;flex:0 0 auto;border:1px solid var(--line);border-radius:6px;padding:5px 7px;font-size:12px;text-align:center}
+
+  .after-footer{display:flex;align-items:center;justify-content:space-between;margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}
+  .count{font-size:12.5px;color:var(--muted)}
+  .count b{color:var(--ink)}
+  .save-btn{background:var(--primary);color:#fff;border:none;padding:10px 20px;border-radius:8px;font-size:13.5px;font-weight:600;cursor:pointer}
+
+  .why{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;margin-top:8px}
+  .why h3{font-size:13.5px;margin:0 0 10px}
+  .why ul{margin:0;padding-left:20px;font-size:13px}
+  .why li{margin-bottom:8px}
+  .why li b{color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Exam Class-Selection Screen — Redesign Proposal</h1>
+  <p class="lede">Mockup for review only — nothing here has been built into the app yet, per the "send a design for approval before deploying" instruction. Reply with go-ahead, changes, or a different direction and I'll build from whatever's approved.</p>
+
+  <div class="gate"><b>⚠ Awaiting your approval</b>This screen is gated — no code changes will be made to Exam Desk's class-selection UI until this design (or a revised version of it) is signed off.</div>
+
+  <section>
+    <h2><span class="tag before">Before</span> What's happening today</h2>
+    <p class="section-note">The checkbox / class-name / "min. learning areas" row squeezes the class name into a narrow flexible column next to a fixed-width input box. On a typical modal width, "Grade 1" and "Grade 5" don't have room to sit on one line, so they wrap mid-word — reading as "G" / "1" instead of "Grade 1".</p>
+    <div class="before-card">
+      <div class="lbl">Which grades are sitting this exam?</div>
+      <p class="hint">Tick every class that will sit this exam, and optionally set a minimum number of learning areas...</p>
+      <div class="before-row">
+        <input type="checkbox">
+        <div class="before-name">Grade 1</div>
+        <input type="text" placeholder="Min. learning area" readonly>
+      </div>
+      <div class="before-row">
+        <input type="checkbox">
+        <div class="before-name">Grade 5</div>
+        <input type="text" placeholder="Min. learning area" readonly>
+      </div>
+    </div>
+    <div class="callout">Root cause: the name column and the input column compete for the same limited width on every row, whether or not that class is even selected — the input is shown (and reserved space for) even for classes nobody has ticked.</div>
+  </section>
+
+  <section>
+    <h2><span class="tag after">After</span> Proposed redesign</h2>
+    <p class="section-note">Classes become selectable cards in a responsive grid instead of table rows — the full class name always has as much room as it needs, because there's no competing fixed-width input next to it. The "min. learning areas" field only appears <i>inside a card once it's selected</i>, so unselected classes stay lightweight and scannable. Classes are grouped by education level (Primary / Junior Secondary / Senior Secondary) — the same grouping and chip convention Subjects already uses under Classes &amp; Streams, so this isn't a new pattern for the app, just this screen adopting one that's already proven here. A search box and Select all / Clear shortcuts are added for schools with a long class list.</p>
+
+    <div class="after-shell">
+      <div class="after-head">
+        <div class="lbl">Which grades are sitting this exam?</div>
+        <p class="hint">Tap a class to include it. Set a minimum number of learning areas per class if you want anyone who sat fewer marked "X" instead of skewing the class mean — leave blank to use the school-wide default.</p>
+      </div>
+
+      <div class="toolbar">
+        <div class="search"><input type="text" placeholder="Search classes…" readonly></div>
+        <div class="quick-actions">
+          <button class="qbtn">Select all</button>
+          <button class="qbtn">Clear</button>
+        </div>
+      </div>
+
+      <div class="level-group">
+        <div class="level-label">Primary</div>
+        <div class="class-grid">
+          <div class="class-card on">
+            <div class="cc-top"><div class="cc-check">✓</div><div class="cc-name">Grade 1</div></div>
+            <div class="cc-min"><label>Min. learning areas</label><input type="text" placeholder="—" readonly></div>
+          </div>
+          <div class="class-card">
+            <div class="cc-top"><div class="cc-check"></div><div class="cc-name">Grade 2</div></div>
+          </div>
+          <div class="class-card">
+            <div class="cc-top"><div class="cc-check"></div><div class="cc-name">Grade 3</div></div>
+          </div>
+          <div class="class-card">
+            <div class="cc-top"><div class="cc-check"></div><div class="cc-name">Grade 4</div></div>
+          </div>
+          <div class="class-card on">
+            <div class="cc-top"><div class="cc-check">✓</div><div class="cc-name">Grade 5</div></div>
+            <div class="cc-min"><label>Min. learning areas</label><input type="text" value="7"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="level-group">
+        <div class="level-label">Junior Secondary</div>
+        <div class="class-grid">
+          <div class="class-card locked">
+            <div class="cc-top"><div class="cc-check">✓</div><div class="cc-name">Grade 7</div></div>
+            <div class="cc-locked-note">🔒 Has marks recorded — can't be removed</div>
+            <div class="cc-min"><label>Min. learning areas</label><input type="text" value="9"></div>
+          </div>
+          <div class="class-card on">
+            <div class="cc-top"><div class="cc-check">✓</div><div class="cc-name">Grade 8</div></div>
+            <div class="cc-min"><label>Min. learning areas</label><input type="text" placeholder="—" readonly></div>
+          </div>
+          <div class="class-card">
+            <div class="cc-top"><div class="cc-check"></div><div class="cc-name">Grade 9</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="after-footer">
+        <div class="count"><b>4</b> of 8 classes selected</div>
+        <button class="save-btn">Save</button>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Why this structure, not just an alignment patch</h2>
+    <div class="why">
+      <ul>
+        <li><b>Names can never truncate again.</b> A card sized to its own grid cell has no neighboring column fighting it for width — "Grade 11 Arts &amp; Sports Science" gets exactly as much room as it needs, same as "Grade 1".</li>
+        <li><b>The layout stops feeling cramped</b> because most cards (the unselected ones) show nothing but a checkbox and a name — the "min. learning areas" control, which is only relevant to a fraction of classes on any given exam, no longer takes up permanent real estate on every row.</li>
+        <li><b>Reuses an existing, working pattern.</b> The Subjects screen under Classes &amp; Streams already groups chips by education level with this same uppercase-label convention — carrying that into Exam Desk keeps the app internally consistent instead of introducing a one-off component.</li>
+        <li><b>Scales to schools with many classes.</b> The search box and Select all / Clear actions matter once a school has 12+ classes across three levels — scrolling a long checkbox list to find one class is exactly the kind of friction a chip/card grid with search avoids.</li>
+        <li><b>Locked classes (already has marks) are visually distinct</b> — greyed check, explicit "has marks recorded" note — rather than just a disabled checkbox that's easy to miss the reason for.</li>
+      </ul>
+    </div>
+  </section>
+</div>
+</body>
+</html>

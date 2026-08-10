@@ -130,15 +130,41 @@ async function run() {
     check('bulkCreate requires a class to be chosen', res.ok === false);
   }
   {
+    // Round 2 §6: stream is now read PER ROW from the spreadsheet's own
+    // "Stream" column, and is always optional — even for a class that has
+    // streams set up. The old "choose one stream for the whole batch up
+    // front, and it's compulsory" gate is gone entirely.
     const sb = createMockSupabase({
       classes: [{ id: 'c1', name: 'Grade 7' }],
-      streams: [{ id: 'str1', class_id: 'c1', name: 'North' }]
+      streams: [{ id: 'str1', class_id: 'c1', name: 'North' }, { id: 'str2', class_id: 'c1', name: 'South' }]
     });
     const api = createStudentsApi(sb);
     const noStream = await api.bulkCreate({ class_id: 'c1', rows: [{ admission_no: '1', full_name: 'X', gender: 'Male' }] });
-    check('bulkCreate requires a stream when the class has streams', noStream.ok === false);
-    const withStream = await api.bulkCreate({ class_id: 'c1', stream_id: 'str1', rows: [{ admission_no: '1', full_name: 'X', gender: 'Male' }] });
-    check('bulkCreate accepts a stream when the class has streams', withStream.ok === true);
+    check('bulkCreate no longer requires a stream when the class has streams', noStream.ok === true && noStream.created === 1);
+    check('bulkCreate leaves stream_id null when the row names none', noStream.createdRows[0].stream_id === null);
+
+    const withStream = await api.bulkCreate({ class_id: 'c1', rows: [{ admission_no: '2', full_name: 'Y', gender: 'Male', stream: 'North' }] });
+    check('bulkCreate resolves a per-row stream name to the right stream_id', withStream.ok === true && withStream.createdRows[0].stream_id === 'str1');
+
+    const caseInsensitive = await api.bulkCreate({ class_id: 'c1', rows: [{ admission_no: '3', full_name: 'Z', gender: 'Male', stream: ' south ' }] });
+    check('bulkCreate matches a per-row stream name case-insensitively and trims whitespace', caseInsensitive.ok === true && caseInsensitive.createdRows[0].stream_id === 'str2');
+
+    const unknownStream = await api.bulkCreate({ class_id: 'c1', rows: [{ admission_no: '4', full_name: 'Unknown Stream Kid', gender: 'Male', stream: 'Nonexistent' }] });
+    check('bulkCreate skips a row naming a stream that does not exist on this class', unknownStream.ok === true && unknownStream.created === 0);
+    check('bulkCreate reports why the unknown-stream row was skipped', unknownStream.skipped.length === 1 && /not found/i.test(unknownStream.skipped[0].reason));
+
+    // A single upload spanning multiple streams in the same class, in one batch.
+    const multiStream = await api.bulkCreate({
+      class_id: 'c1',
+      rows: [
+        { admission_no: '5', full_name: 'North Kid', gender: 'Male', stream: 'North' },
+        { admission_no: '6', full_name: 'South Kid', gender: 'Female', stream: 'South' }
+      ]
+    });
+    check('bulkCreate can enroll students into different streams of the same class in one upload',
+      multiStream.ok === true && multiStream.created === 2
+      && multiStream.createdRows.find((r) => r.admission_no === '5').stream_id === 'str1'
+      && multiStream.createdRows.find((r) => r.admission_no === '6').stream_id === 'str2');
   }
   {
     // Richer bio-data fields flow through bulkCreate exactly like the single
