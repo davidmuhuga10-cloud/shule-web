@@ -14,13 +14,15 @@
  * research this is built on.
  */
 import { ok, err } from './_util.mjs';
-import { generateTimetable } from '../timetable/generate.mjs';
+import { generateTimetable, DEFAULT_PERIODS_PER_WEEK } from '../timetable/generate.mjs';
 
 export const TIMETABLE_DAYS_DEFAULT = [1, 2, 3, 4, 5];
 
+// 1=Mon .. 7=Sun — some schools teach on Sunday too, so the week isn't
+// capped at Saturday.
 function parseDays(value) {
   if (!value) return TIMETABLE_DAYS_DEFAULT.slice();
-  const nums = String(value).split(',').map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n >= 1 && n <= 6);
+  const nums = String(value).split(',').map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n >= 1 && n <= 7);
   return nums.length ? nums : TIMETABLE_DAYS_DEFAULT.slice();
 }
 
@@ -97,7 +99,7 @@ export function createTimetableApi(supabase, settingsApi) {
         return ok(parseDays(res.data.timetable_days));
       },
       async save(days) {
-        days = (days || []).map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 6);
+        days = (days || []).map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 7);
         if (!days.length) return err('Choose at least one teaching day.');
         return settingsApi.save({ timetable_days: days.join(',') });
       }
@@ -128,13 +130,21 @@ export function createTimetableApi(supabase, settingsApi) {
        *  `assignmentId` comes straight off a row returned by
        *  Db.assignments.getStreamSubjects() (see that function's Round 4 §7
        *  additions). No new fetch needed here; the Setup screen already has
-       *  everything it needs from that one call. */
-      async save(assignmentId, periodsPerWeek, isDouble) {
+       *  everything it needs from that one call.
+       *
+       *  `doublePeriodsPerWeek` is a COUNT, not a yes/no — e.g. "Math gets 3
+       *  double lessons a week" — so a school can mix doubles and singles
+       *  for the same subject exactly as they actually run it, rather than
+       *  a checkbox that forces every possible pair into a double. */
+      async save(assignmentId, periodsPerWeek, doublePeriodsPerWeek) {
         if (!assignmentId) return err('Missing subject assignment.');
-        const rec = {
-          periods_per_week: periodsPerWeek === '' || periodsPerWeek === null || periodsPerWeek === undefined ? null : Number(periodsPerWeek) || null,
-          is_double: !!isDouble
-        };
+        const periods = periodsPerWeek === '' || periodsPerWeek === null || periodsPerWeek === undefined ? null : Number(periodsPerWeek) || null;
+        const doubles = doublePeriodsPerWeek === '' || doublePeriodsPerWeek === null || doublePeriodsPerWeek === undefined ? 0 : Number(doublePeriodsPerWeek) || 0;
+        const capacity = periods === null ? DEFAULT_PERIODS_PER_WEEK : periods;
+        if (doubles > Math.floor(capacity / 2)) {
+          return err(`${doubles} double lesson${doubles === 1 ? '' : 's'} need${doubles === 1 ? 's' : ''} at least ${doubles * 2} periods/week — this subject only has ${capacity}.`);
+        }
+        const rec = { periods_per_week: periods, double_periods_per_week: doubles };
         const { error } = await supabase.from('subject_class_assignments').update(rec).eq('id', assignmentId);
         if (error) return err(error.message);
         return ok(true);
@@ -235,29 +245,46 @@ export function createTimetableApi(supabase, settingsApi) {
     async generate(academicYearId, termId) {
       if (!academicYearId || !termId) return err('Choose an academic year and term first.');
 
-      const [{ data: classes }, { data: streams }, periodsRes, daysRes] = await Promise.all([
+      // Perf: fetch classes/streams/period grid/teaching days/teacher
+      // unavailability up front, all in parallel — none of these depend on
+      // each other, and teacher_unavailability doesn't depend on anything
+      // else in this function either, so there's no reason to wait for the
+      // subject-assignment step before starting it.
+      const [{ data: classes }, { data: streams }, periodsRes, daysRes, { data: unavailRows }] = await Promise.all([
         supabase.from('classes').select('id, name'),
         supabase.from('streams').select('id, class_id, name'),
         this.periods.list(),
-        this.days.get()
+        this.days.get(),
+        supabase.from('teacher_unavailability').select('staff_id, day_of_week, period_index')
       ]);
       if (!periodsRes.ok) return err(periodsRes.message);
       if (!daysRes.ok) return err(daysRes.message);
       if (!periodsRes.data.length) return err('Set up your period grid first (Setup tab) before generating a timetable.');
       if (!(streams || []).length) return err('No classes/arms found — add classes and arms first.');
 
-      // Effective subjects (with periods/week, double flag, teacher) per
-      // stream — reuses the exact same precedence assignments.mjs already
-      // resolves, one call per stream (small counts: a school's stream
-      // count, not its student count — fine to run in parallel).
-      const streamSubjectsRes = await Promise.all((streams || []).map(async (s) => {
-        const { data, error } = await supabase.from('subject_class_assignments').select('subject_id, stream_id, class_id, periods_per_week, is_double').eq('stream_id', s.id);
-        let rows = data || [];
-        if (!rows.length) {
-          const { data: classWide } = await supabase.from('subject_class_assignments').select('subject_id, stream_id, class_id, periods_per_week, is_double').eq('class_id', s.class_id).is('stream_id', null);
-          rows = classWide || [];
-        }
-        return { stream: s, rows };
+      // Effective subjects (with periods/week, doubles/week, teacher) per
+      // stream — same stream-row-wins-else-class-wide precedence
+      // assignments.mjs's getEffectiveClassSubjectIdsBatch already uses,
+      // but fetched here in exactly TWO queries total (every stream's own
+      // rows in one .in() call, every class-wide fallback row in another),
+      // not two queries PER STREAM. A big school with 30-40 streams used to
+      // mean 60-80 sequential-feeling round trips (the browser can only run
+      // ~6 requests at once per host, so most of them just queued) — that
+      // was the main reason Generate felt slow. Now it's always 2, however
+      // many streams the school has.
+      const streamIds = (streams || []).map((s) => s.id);
+      const classIds = [...new Set((streams || []).map((s) => s.class_id))];
+      const [{ data: streamRows }, { data: classWideRows }] = await Promise.all([
+        streamIds.length ? supabase.from('subject_class_assignments').select('subject_id, stream_id, class_id, periods_per_week, double_periods_per_week').in('stream_id', streamIds) : Promise.resolve({ data: [] }),
+        classIds.length ? supabase.from('subject_class_assignments').select('subject_id, stream_id, class_id, periods_per_week, double_periods_per_week').in('class_id', classIds).is('stream_id', null) : Promise.resolve({ data: [] })
+      ]);
+      const rowsByStream = {};
+      (streamRows || []).forEach((r) => { (rowsByStream[r.stream_id] = rowsByStream[r.stream_id] || []).push(r); });
+      const rowsByClass = {};
+      (classWideRows || []).forEach((r) => { (rowsByClass[r.class_id] = rowsByClass[r.class_id] || []).push(r); });
+      const streamSubjectsRes = (streams || []).map((s) => ({
+        stream: s,
+        rows: (rowsByStream[s.id] && rowsByStream[s.id].length) ? rowsByStream[s.id] : (rowsByClass[s.class_id] || [])
       }));
 
       const allSubjectIds = [...new Set(streamSubjectsRes.flatMap((r) => r.rows.map((x) => x.subject_id)))];
@@ -278,12 +305,11 @@ export function createTimetableApi(supabase, settingsApi) {
         stream_id: stream.id, class_id: stream.class_id,
         subjects: rows.map((r) => ({
           subject_id: r.subject_id, subject_name: subjectNameById[r.subject_id] || '',
-          periods_per_week: r.periods_per_week, is_double: !!r.is_double,
+          periods_per_week: r.periods_per_week, double_periods_per_week: r.double_periods_per_week,
           staff_id: teacherByStreamSubject[`${stream.id}|${r.subject_id}`] || teacherByClassSubject[`${stream.class_id}|${r.subject_id}`] || null
         }))
       }));
 
-      const { data: unavailRows } = await supabase.from('teacher_unavailability').select('staff_id, day_of_week, period_index');
       const unavailable = new Set((unavailRows || []).map((u) => `${u.staff_id}|${u.day_of_week}|${u.period_index}`));
 
       const { entries, unresolved } = generateTimetable({

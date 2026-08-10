@@ -23,7 +23,8 @@ const BASE_TABLES = {
     { id: 's3', admission_no: '9', full_name: 'Tie A', gender: 'Male', class_id: 'c1', stream_id: 'str1', status: 'active' },
     { id: 's4', admission_no: '10', full_name: 'Tie B', gender: 'Female', class_id: 'c1', stream_id: 'str1', status: 'active' }
   ],
-  subject_class_assignments: [{ id: 'sca1', subject_id: 'su1', class_id: 'c1' }, { id: 'sca2', subject_id: 'su2', class_id: 'c1' }]
+  subject_class_assignments: [{ id: 'sca1', subject_id: 'su1', class_id: 'c1' }, { id: 'sca2', subject_id: 'su2', class_id: 'c1' }],
+  subject_papers: []
 };
 
 function freshApis(extraTables) {
@@ -142,13 +143,12 @@ async function run() {
 
   // ---- getResultsEntry / saveResultsEntry (per-paper marks) ----------------------
   {
-    const { sb, results } = freshApis({
-      subject_papers: [
-        { id: 'p1', subject_id: 'su1', name: 'Paper 1', paper_no: 1, weight: 0.6, out_of: 100 },
-        { id: 'p2', subject_id: 'su1', name: 'Paper 2', paper_no: 2, weight: 0.4, out_of: 50 }
-      ]
-    });
+    const { sb, results } = freshApis();
     const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100, class_ids: ['c1'] })).data;
+    sb._tables.subject_papers.push(
+      { id: 'p1', exam_id: exam.id, subject_id: 'su1', name: 'Paper 1', paper_no: 1, weight: 0.6, out_of: 100 },
+      { id: 'p2', exam_id: exam.id, subject_id: 'su1', name: 'Paper 2', paper_no: 2, weight: 0.4, out_of: 50 }
+    );
 
     const entryP1 = await results.getResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', paper_id: 'p1' });
     check('getResultsEntry uses the paper\'s own out_of', entryP1.out_of === 100);
@@ -164,7 +164,66 @@ async function run() {
 
     const sheet = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1', includeUnpublished: true });
     // 80/100*100*0.6 = 48, 40/50*100*0.4 = 32 -> 80 combined, on the exam's own out_of (100).
-    check('getBroadsheet combines per-paper marks into one weighted effective score', sheet.students.find((s) => s.student_id === 's1').scores.su1 === 80);
+    const janeRow = sheet.students.find((s) => s.student_id === 's1');
+    check('getBroadsheet combines per-paper marks into one weighted effective score', janeRow.scores.su1 === 80);
+
+    // ---- Learning Area Papers: display-only fields (papers, paperScores, subjectPct) ----
+    const su1Subject = sheet.subjects.find((s) => s.id === 'su1');
+    check('getBroadsheet exposes the subject\'s paper configuration for this exam', Array.isArray(su1Subject.papers) && su1Subject.papers.length === 2);
+    check('getBroadsheet keeps papers in paper_no order', su1Subject.papers[0].id === 'p1' && su1Subject.papers[1].id === 'p2');
+    check('getBroadsheet exposes each student\'s raw per-paper scores', janeRow.paperScores.su1.p1 === 80 && janeRow.paperScores.su1.p2 === 40);
+    check('getBroadsheet exposes the combined subject % (same weighted formula, expressed on the exam out_of)', janeRow.subjectPct.su1 === 80);
+    // The combined %, not the raw paper scores, is what feeds totals/ranking.
+    check('the combined score (not a raw paper score) is what drives the student\'s total', janeRow.total === 80 + (janeRow.scores.su2 || 0));
+
+    // A subject with no papers configured for this exam gets no `papers`/paperScores/subjectPct entries.
+    const su2Subject = sheet.subjects.find((s) => s.id === 'su2');
+    check('a subject with no papers configured for this exam has an empty papers list', Array.isArray(su2Subject.papers) && su2Subject.papers.length === 0);
+    check('a student\'s paperScores has no entry for a non-papers subject', !('su2' in (janeRow.paperScores || {})));
+  }
+
+  // ---- Learning Area Papers: setup is scoped per-exam, not a permanent subject property ----
+  {
+    const { sb, results } = freshApis();
+    const examA = (await results.saveExam({ name: 'Opener', academic_year_id: 'y1', term_id: 't1', out_of: 100, class_ids: ['c1'] })).data;
+    const examB = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100, class_ids: ['c1'] })).data;
+    // su1 (Mathematics) uses papers in examA only; examB reverts to a single combined score.
+    sb._tables.subject_papers.push(
+      { id: 'pa1', exam_id: examA.id, subject_id: 'su1', name: 'Paper 1', paper_no: 1, weight: 0.5, out_of: 100 },
+      { id: 'pa2', exam_id: examA.id, subject_id: 'su1', name: 'Paper 2', paper_no: 2, weight: 0.5, out_of: 100 }
+    );
+    await results.saveResultsEntry({ exam_id: examA.id, class_id: 'c1', subject_id: 'su1', paper_id: 'pa1', scores: [{ student_id: 's1', score: '80' }] });
+    await results.saveResultsEntry({ exam_id: examA.id, class_id: 'c1', subject_id: 'su1', paper_id: 'pa2', scores: [{ student_id: 's1', score: '60' }] });
+    await results.saveResultsEntry({ exam_id: examB.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '55' }] });
+
+    const sheetA = await results.getBroadsheet({ exam_id: examA.id, class_id: 'c1', includeUnpublished: true });
+    const sheetB = await results.getBroadsheet({ exam_id: examB.id, class_id: 'c1', includeUnpublished: true });
+    check('exam A sees su1 configured with 2 papers', sheetA.subjects.find((s) => s.id === 'su1').papers.length === 2);
+    check('exam B (same subject, no papers configured for it) sees su1 with zero papers', sheetB.subjects.find((s) => s.id === 'su1').papers.length === 0);
+    check('exam A combines the papers into 70', sheetA.students.find((s) => s.student_id === 's1').scores.su1 === 70);
+    check('exam B just uses the single plain score of 55, unaffected by exam A\'s paper setup', sheetB.students.find((s) => s.student_id === 's1').scores.su1 === 55);
+  }
+
+  // ---- listExamSubjects (Learning Area Papers setup screen's subject list) --------
+  {
+    const { sb, results } = freshApis({
+      subjects: [{ id: 'su1', name: 'Mathematics' }, { id: 'su2', name: 'English' }, { id: 'su3', name: 'Not assigned to any class' }],
+      subject_class_assignments: [{ id: 'sca1', subject_id: 'su1', class_id: 'c1' }, { id: 'sca2', subject_id: 'su2', class_id: 'c1' }]
+    });
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', class_ids: ['c1'] })).data;
+    const listed = await results.listExamSubjects(exam.id);
+    check('listExamSubjects succeeds', listed.ok === true);
+    check('listExamSubjects only returns subjects actually assigned to a class sitting this exam', listed.data.length === 2 && listed.data.every((s) => s.id !== 'su3'));
+    check('listExamSubjects sorts alphabetically', listed.data[0].name === 'English' && listed.data[1].name === 'Mathematics');
+
+    const missing = await results.listExamSubjects('');
+    check('listExamSubjects requires an exam', missing.ok === false);
+
+    const { results: results2 } = freshApis({ classes: [{ id: 'c1', name: 'Grade 7' }, { id: 'c2', name: 'Grade 8' }] });
+    const examNoClass = (await results2.saveExam({ name: 'Unassigned', academic_year_id: 'y1', term_id: 't1', class_ids: ['c2'] })).data;
+    // c2 has no subject_class_assignments seeded in this fresh instance -> zero subjects, not an error.
+    const none = await results2.listExamSubjects(examNoClass.id);
+    check('listExamSubjects returns an empty list (not an error) for an exam whose class has no assigned subjects', none.ok === true && none.data.length === 0);
   }
 
   // ---- broadsheet ranking with ties -----------------------------------------------

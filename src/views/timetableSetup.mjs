@@ -68,7 +68,7 @@ async function renderGrid(root) {
       <div class="card" style="margin-bottom:16px">
         <div class="card-h"><h3>Teaching Days</h3></div>
         <div class="card-b" style="display:flex;gap:18px;flex-wrap:wrap">
-          ${[1, 2, 3, 4, 5, 6].map((d) => `<label class="chk"><input type="checkbox" class="tt-day" value="${d}" ${activeDays.has(d) ? 'checked' : ''}> ${DAY_LABELS[d]}</label>`).join('')}
+          ${[1, 2, 3, 4, 5, 6, 7].map((d) => `<label class="chk"><input type="checkbox" class="tt-day" value="${d}" ${activeDays.has(d) ? 'checked' : ''}> ${DAY_LABELS[d]}</label>`).join('')}
         </div>
         <div class="modal-f" style="border-top:1px solid var(--line)"><button class="btn secondary sm" id="tt-days-save">Save teaching days</button></div>
       </div>
@@ -95,8 +95,14 @@ async function renderGrid(root) {
     }, 'Saving…');
 
     root.querySelector('#tt-period-add').onclick = () => {
-      rows.push({ start_time: '', end_time: '', is_break: false, label: '' });
+      // Capture whatever's currently in the on-screen rows FIRST — the new
+      // blank row isn't in the DOM yet, so syncing after the push would
+      // read a table that doesn't have it and silently drop it again (the
+      // reported "Add period doesn't work" bug: push, then sync, then
+      // draw — sync overwrote the array with the still-old DOM before the
+      // new row ever got rendered).
       syncRowsFromDom();
+      rows.push({ start_time: '', end_time: '', is_break: false, label: '' });
       draw();
     };
     root.querySelectorAll('.p-remove').forEach((b) => b.onclick = () => {
@@ -174,7 +180,7 @@ async function renderRequirements(root) {
   root.innerHTML = `
     <div class="card">
       <div class="card-h"><h3>Subject Periods & Double Lessons</h3></div>
-      <div class="card-b"><p class="hint" style="margin:0 0 10px">How many periods a week each subject needs, and whether it should be scheduled as double lessons where possible. Leave "Periods/week" blank to use the default (5) — you don't have to configure every subject before generating a timetable.</p>
+      <div class="card-b"><p class="hint" style="margin:0 0 10px">How many periods a week each subject needs, and how many of those should be scheduled as double lessons (e.g. Math might get 3 doubles a week and the rest as singles). Leave "Periods/week" blank to use the default (5), and "Doubles/week" blank or 0 for no doubles — you don't have to configure every subject before generating a timetable.</p>
         <div class="grid2">
           <div class="field"><label>Class</label><select id="req-class">${options(classes, 'id', 'name', '', 'Choose a class')}</select></div>
           <div class="field"><label>Arm</label><select id="req-stream" disabled><option value="">Choose a class first</option></select></div>
@@ -204,12 +210,12 @@ async function renderRequirements(root) {
     if (!rows.length) { table.innerHTML = '<p class="hint" style="margin:0">This arm has no subjects assigned yet — add subjects under Classes &amp; Arms first.</p>'; return; }
     table.innerHTML = `
       ${res.inherited ? '<p class="hint" style="margin:0 0 10px">Showing this class\'s default subjects (not yet customized for this arm specifically) — editing here changes the class-wide default.</p>' : ''}
-      <table class="data"><thead><tr><th>Subject</th><th>Teacher</th><th>Periods/week</th><th>Double lessons?</th></tr></thead><tbody>
+      <table class="data"><thead><tr><th>Subject</th><th>Teacher</th><th>Periods/week</th><th>Doubles/week</th></tr></thead><tbody>
         ${rows.map((r) => `<tr data-assignment="${r.assignment_id || ''}">
           <td>${esc(r.name)}</td>
           <td>${esc(r.teacher_name || '—')}</td>
           <td><input type="number" min="0" max="20" class="req-periods" style="width:80px" placeholder="5" value="${r.periods_per_week === null ? '' : r.periods_per_week}" ${r.assignment_id ? '' : 'disabled'}></td>
-          <td style="text-align:center"><input type="checkbox" class="req-double" ${r.is_double ? 'checked' : ''} ${r.assignment_id ? '' : 'disabled'}></td>
+          <td><input type="number" min="0" max="10" class="req-double" style="width:80px" placeholder="0" value="${r.double_periods_per_week ? r.double_periods_per_week : ''}" ${r.assignment_id ? '' : 'disabled'}></td>
         </tr>`).join('')}
       </tbody></table>
     `;
@@ -218,8 +224,8 @@ async function renderRequirements(root) {
       if (!assignmentId) return;
       const save = () => {
         const periods = tr.querySelector('.req-periods').value;
-        const isDouble = tr.querySelector('.req-double').checked;
-        Db.timetable.requirements.save(assignmentId, periods, isDouble).then((r) => { if (!r.ok) toast(r.message, 'err'); });
+        const doubles = tr.querySelector('.req-double').value;
+        Db.timetable.requirements.save(assignmentId, periods, doubles).then((r) => { if (!r.ok) toast(r.message, 'err'); });
       };
       tr.querySelector('.req-periods').onchange = save;
       tr.querySelector('.req-double').onchange = save;

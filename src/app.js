@@ -645,7 +645,6 @@ const NAV = {
     { route: 'dashboard', label: 'Dashboard', ico: '🏠' },
     { section: 'Academics' },
     { route: 'classes', label: 'Classes & Arms', ico: '🏫' },
-    { route: 'timetable', label: 'Timetable', ico: '📅' },
     { section: 'People' },
     { route: 'students', label: 'Students', ico: '🎒' },
     { route: 'staff-teachers', label: 'Teachers and Staff', ico: '👨‍🏫' },
@@ -656,7 +655,8 @@ const NAV = {
     { route: 'attendance', label: 'Attendance', ico: '🗓️' },
     { route: 'messaging', label: 'Messaging', ico: '💬' },
     { section: 'Configuration' },
-    { route: 'settings', label: 'Settings', ico: '⚙️' }
+    { route: 'settings', label: 'Settings', ico: '⚙️' },
+    { route: 'timetable', label: 'Timetable', ico: '📅' }
   ],
   teacher: [
     { route: 'dashboard', label: 'Dashboard', ico: '🏠' },

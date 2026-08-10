@@ -98,7 +98,9 @@ async function computeClassAverage(supabase, examId, classId) {
   if (!subjectIds.length) return { average: 0, students_sat: 0 };
   const { data: exam } = await supabase.from('exams').select('out_of').eq('id', examId).maybeSingle();
   const examOutOf = Number(exam && exam.out_of) || 100;
-  const { data: papers } = await supabase.from('subject_papers').select('*').in('subject_id', subjectIds);
+  // Learning Area Papers are scoped to THIS exam (0020_learning_area_papers.sql)
+  // — a subject's paper setup for a different exam is irrelevant here.
+  const { data: papers } = await supabase.from('subject_papers').select('*').eq('exam_id', examId).in('subject_id', subjectIds);
   const paperById = indexById(papers || []);
   const { data: results } = await supabase.from('results').select('*').eq('exam_id', examId).eq('class_id', classId);
   const byStudent = {};
@@ -346,7 +348,12 @@ export function createResultsApi(supabase, gradingApi) {
       let outOf = Number(exam.out_of) || 100;
       let maxMarksSet = false;
       if (q.paper_id) {
-        const { data: paper } = await supabase.from('subject_papers').select('*').eq('id', q.paper_id).maybeSingle();
+        // Defense in depth: a paper_id must actually belong to this exam,
+        // not just exist somewhere — same "never trust the client alone"
+        // convention as everywhere else in this codebase (a stale paper_id
+        // left over from switching exams should error, not silently apply
+        // the wrong paper's out_of).
+        const { data: paper } = await supabase.from('subject_papers').select('*').eq('id', q.paper_id).eq('exam_id', q.exam_id).maybeSingle();
         if (!paper) return err('Paper not found.');
         outOf = Number(paper.out_of) || 100;
       } else {
@@ -541,10 +548,17 @@ export function createResultsApi(supabase, gradingApi) {
         subjects = subjects.filter((s) => statusBySubject[s.id] === 'published');
       }
 
+      // Learning Area Papers: scoped to THIS exam (0020_learning_area_papers.sql)
+      // — a subject's paper setup from a different exam is never relevant to
+      // this Mark List. A subject with zero rows here is shown as a single
+      // combined column, exactly as before this feature existed.
       const { data: papers } = subjects.length
-        ? await supabase.from('subject_papers').select('*').in('subject_id', subjects.map((s) => s.id))
+        ? await supabase.from('subject_papers').select('*').eq('exam_id', q.exam_id).in('subject_id', subjects.map((s) => s.id))
         : { data: [] };
       const paperById = indexById(papers || []);
+      const papersBySubject = {};
+      (papers || []).forEach((p) => { (papersBySubject[p.subject_id] = papersBySubject[p.subject_id] || []).push(p); });
+      Object.values(papersBySubject).forEach((list) => list.sort((a, b) => a.paper_no - b.paper_no));
 
       let studentQuery = supabase.from('students').select('*').eq('class_id', q.class_id).eq('status', 'active');
       if (q.stream_id) studentQuery = studentQuery.eq('stream_id', q.stream_id);
@@ -566,8 +580,13 @@ export function createResultsApi(supabase, gradingApi) {
       // Combine per-paper rows into one effective score per (student, subject) —
       // normalize each paper's own out_of, apply its weight, scale to the
       // exam's out_of. A whole-subject row (no paper_id) behaves exactly as
-      // before: weight 1, already in the exam's out_of.
+      // before: weight 1, already in the exam's out_of. This effective score
+      // is what EVERY total/mean/ranking/"subjects done" figure is built
+      // from below — per the brief, individual paper scores never feed
+      // those directly, only this combined value (and the raw per-paper
+      // scores kept alongside it purely for display — see paperScoresBySubjectStudent).
       const bySubjectStudent = {};
+      const paperScoresBySubjectStudent = {}; // { subject_id: { student_id: { paper_id: rawScore } } }
       (results || []).forEach((r) => {
         if (r.score === null || r.score === undefined) return;
         const paper = r.paper_id ? paperById[r.paper_id] : null;
@@ -580,6 +599,11 @@ export function createResultsApi(supabase, gradingApi) {
         const effective = (Number(r.score) * weight / rowOutOf) * examOutOf;
         if (!bySubjectStudent[r.subject_id]) bySubjectStudent[r.subject_id] = {};
         bySubjectStudent[r.subject_id][r.student_id] = (bySubjectStudent[r.subject_id][r.student_id] || 0) + effective;
+        if (paper) {
+          if (!paperScoresBySubjectStudent[r.subject_id]) paperScoresBySubjectStudent[r.subject_id] = {};
+          if (!paperScoresBySubjectStudent[r.subject_id][r.student_id]) paperScoresBySubjectStudent[r.subject_id][r.student_id] = {};
+          paperScoresBySubjectStudent[r.subject_id][r.student_id][r.paper_id] = Number(r.score);
+        }
       });
 
       // Step 1: per-(exam,class) "minimum learning areas" (exam_classes.
@@ -611,11 +635,22 @@ export function createResultsApi(supabase, gradingApi) {
       const rows = (students || []).map((s) => {
         const scores = {};
         const grades = {};
+        // Learning Area Papers display-only data (never fed into
+        // total/average/ranking below — those all read `scores`/`grades`
+        // exactly as before): each paper-enabled subject's raw per-paper
+        // marks, plus that subject's combined score expressed as a % of
+        // the exam's out_of — what the Mark List's extra columns render.
+        const paperScores = {};
+        const subjectPct = {};
         let total = 0, counted = 0, pointsTotal = 0, pointsCounted = 0;
         subjects.forEach((sub) => {
           const map = bySubjectStudent[sub.id];
           const v = map && map[s.id] !== undefined ? Math.round(map[s.id] * 100) / 100 : null;
           scores[sub.id] = v;
+          if (papersBySubject[sub.id]) {
+            paperScores[sub.id] = (paperScoresBySubjectStudent[sub.id] && paperScoresBySubjectStudent[sub.id][s.id]) || {};
+            subjectPct[sub.id] = (v !== null && examOutOf > 0) ? Math.round((v / examOutOf) * 100 * 10) / 10 : null;
+          }
           if (v !== null && !isNaN(v)) {
             total += v; counted++;
             const g = grade(v);
@@ -638,7 +673,7 @@ export function createResultsApi(supabase, gradingApi) {
         return {
           student_id: s.id, admission_no: s.admission_no, full_name: s.full_name, gender: s.gender || '',
           stream_id: s.stream_id || '', stream_name: streamMap[s.stream_id] || '',
-          scores, grades, total: Math.round(total * 100) / 100, counted, subject_count: counted,
+          scores, grades, paperScores, subjectPct, total: Math.round(total * 100) / 100, counted, subject_count: counted,
           average,
           total_points: pointsCounted ? Math.round(pointsTotal * 100) / 100 : null,
           mean_points: pointsCounted ? Math.round((pointsTotal / pointsCounted) * 100) / 100 : null,
@@ -705,7 +740,15 @@ export function createResultsApi(supabase, gradingApi) {
 
       return ok(null, {
         exam: { id: exam.id, name: exam.name, out_of: exam.out_of, exam_type: exam.exam_type },
-        subjects: subjects.map((s) => ({ id: s.id, name: s.name, code: s.code, submission_status: statusBySubject[s.id] || 'draft' })),
+        subjects: subjects.map((s) => ({
+          id: s.id, name: s.name, code: s.code, submission_status: statusBySubject[s.id] || 'draft',
+          // Learning Area Papers (0020_learning_area_papers.sql): [] for a
+          // subject scored as one combined mark this exam (the common
+          // case) — non-empty means the Mark List should render one raw
+          // column per paper plus a combined % column instead of a single
+          // score column for this subject.
+          papers: (papersBySubject[s.id] || []).map((p) => ({ id: p.id, name: p.name, out_of: p.out_of }))
+        })),
         students: rows,
         class_average: classAverage,
         ranking_criteria: rankCriteria,
@@ -910,6 +953,25 @@ export function createResultsApi(supabase, gradingApi) {
       }
       rows.sort((a, b) => String(a.class_name).localeCompare(String(b.class_name)));
       return ok(rows);
+    },
+
+    /** Every subject actually being examined in this exam — the union of
+     *  every subject assigned (per-stream, class-wide fallback) to any of
+     *  the classes sitting this exam — what the Learning Area Papers setup
+     *  screen lists. Scoping to the exam's own classes (rather than every
+     *  subject in the school) keeps the screen relevant: a Grade 9 exam
+     *  only shows Grade 9-ish subjects, not the whole school's catalogue. */
+    async listExamSubjects(examId) {
+      if (!examId) return err('Please choose an exam.');
+      const { data: examClassRows } = await supabase.from('exam_classes').select('class_id').eq('exam_id', examId);
+      const classIds = [...new Set((examClassRows || []).map((r) => r.class_id).filter(Boolean))];
+      if (!classIds.length) return ok([]);
+      const idsByClass = await getEffectiveClassSubjectIdsBatch(supabase, classIds);
+      const subjectIds = [...new Set(Object.values(idsByClass).flat())];
+      if (!subjectIds.length) return ok([]);
+      const { data: subjects, error } = await supabase.from('subjects').select('id, name, code').in('id', subjectIds);
+      if (error) return err(error.message);
+      return ok((subjects || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name))));
     },
 
     /** Every class NOT yet added to this exam — the exam-edit modal's "add

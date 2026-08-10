@@ -67,6 +67,27 @@ function cell(score, gr) {
   return `<td class="num mark-cell"><b>${score}</b>${gr && gr.grade_label ? ` <span class="mark-grade">${esc(gr.grade_label)}</span>` : ''}</td>`;
 }
 
+/** Plain-number cell for one paper's raw score — no grade badge (Learning
+ *  Area Papers brief: "per-paper rows are NOT graded individually"; the
+ *  combined % column carries the grade instead). */
+function paperCell(score) {
+  return score === null || score === undefined ? '<td class="num">—</td>' : `<td class="num">${score}</td>`;
+}
+
+function subjectHeaderHtml(sub) {
+  if (!sub.papers || !sub.papers.length) return `<th class="num subj-col">${esc(sub.code || sub.name)}</th>`;
+  const paperHeaders = sub.papers.map((p) => `<th class="num subj-col">${esc(sub.code || sub.name)} ${esc(p.name)}</th>`).join('');
+  return `${paperHeaders}<th class="num subj-col">${esc(sub.code || sub.name)} %</th>`;
+}
+
+function subjectRowCellsHtml(sub, student) {
+  if (!sub.papers || !sub.papers.length) return cell(student.scores[sub.id], student.grades[sub.id]);
+  const raw = (student.paperScores && student.paperScores[sub.id]) || {};
+  const paperCells = sub.papers.map((p) => paperCell(raw[p.id] === undefined ? null : raw[p.id])).join('');
+  const pct = student.subjectPct ? student.subjectPct[sub.id] : null;
+  return `${paperCells}${cell(pct === null || pct === undefined ? null : pct, student.grades[sub.id])}`;
+}
+
 async function load(root, classes, sel) {
   const sheetEl = root.querySelector('#bs-sheet');
   sheetEl.innerHTML = loader();
@@ -100,12 +121,12 @@ async function load(root, classes, sel) {
       </div>
       <div class="card-b table-wrap"><table class="mark-list-grid">
         <thead><tr><th class="id-col">Adm. No.</th><th class="name-col">Name</th><th class="str-col">Arm</th>
-          ${res.subjects.map((s) => `<th class="num subj-col">${esc(s.code || s.name)}</th>`).join('')}
+          ${res.subjects.map((s) => subjectHeaderHtml(s)).join('')}
           <th class="num sum-col">SBJ</th><th class="num sum-col">TT MKS</th><th class="num sum-col">MN MKS</th><th class="num sum-col">PL</th>
           <th class="num sum-col">TT PTS</th><th class="num sum-col">MN PTS</th><th class="num sum-col">DEV</th><th class="num sum-col">ARM POS</th><th class="num sum-col">OVR POS</th></tr></thead>
         <tbody>${res.students.map((s) => `<tr>
           <td class="id-col">${esc(s.admission_no)}</td><td class="name-col">${esc(s.full_name)}</td><td class="str-col">${esc(s.stream_name || '—')}</td>
-          ${res.subjects.map((sub) => cell(s.scores[sub.id], s.grades[sub.id])).join('')}
+          ${res.subjects.map((sub) => subjectRowCellsHtml(sub, s)).join('')}
           <td class="num sum-col">${s.subject_count}</td>
           <td class="num sum-col"><b>${s.total}</b></td><td class="num sum-col">${s.average}</td>
           <td class="num sum-col"><span class="badge blue">${esc(s.overall_grade || '—')}</span></td>

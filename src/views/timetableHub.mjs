@@ -7,9 +7,12 @@
 import { viewTimetable } from './timetable.mjs';
 import { viewTimetableSetup } from './timetableSetup.mjs';
 
+// Setup comes first — a school needs a period grid, subjects, and teachers
+// configured before "Generate & View" does anything meaningful, so that's
+// what they should land on and work through first.
 const TABS = [
-  { key: 'view', label: 'Generate & View', render: viewTimetable },
-  { key: 'setup', label: 'Setup', render: viewTimetableSetup }
+  { key: 'setup', label: 'Setup', render: viewTimetableSetup },
+  { key: 'view', label: 'Generate & View', render: viewTimetable }
 ];
 
 export async function viewTimetableHub(root) {

@@ -11,7 +11,7 @@
  * Marks Entry panel; it's its own tab now, but the underlying
  * renderBulkUpload()/renderBulkPreview() logic is unchanged.
  */
-import { esc, toast, options, loader, confirmAction, modal, closeModal, state, withBusy } from '../app.js';
+import { esc, toast, loader, confirmAction, modal, closeModal, state, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { SUBMISSION_STATUS_LABELS } from '../lib/api/results.mjs';
 import { buildMarkColumns, buildMarksTemplateCsv, parseMarksCsv, matchAndValidate, scoresByColumn } from '../lib/marksCsv.mjs';
@@ -184,7 +184,7 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
   gridEl.innerHTML = loader();
 
   let paperId = '';
-  const papersRes = await Db.subjectPapers.list(subject.id);
+  const papersRes = await Db.subjectPapers.list(examId, subject.id);
   const papers = papersRes.ok ? papersRes.data : [];
   if (papers.length) paperId = papers[0].id;
 
@@ -246,7 +246,17 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
       </div>` : '';
 
     const canEdit = isAdmin || status === 'draft';
-    const paperPicker = papers.length ? `<select id="mk-paper" style="margin-left:10px">${options(papers, 'id', 'name', paperId)}</select>` : '';
+    // Step 1/2 of the brief's marks-entry flow ("ask which paper, then show
+    // its out of") — a clear "which paper?" chip row when there's an actual
+    // choice to make; a single-paper subject needs no picker at all (there's
+    // nothing to choose), it's just named inline in the heading instead so
+    // it's still obvious what's being entered.
+    const paperName = paperId ? (papers.find((p) => p.id === paperId) || {}).name : '';
+    const paperPicker = papers.length > 1 ? `
+      <div class="card-b" style="padding-top:0;padding-bottom:0">
+        <p class="hint" style="margin:0 0 8px">Which paper are these marks for?</p>
+        <div class="chips" id="mk-paper-chips">${papers.map((p) => `<span class="chip ${p.id === paperId ? 'on' : ''}" data-paper="${p.id}">${esc(p.name)} <small style="opacity:.8">out of ${p.out_of}</small></span>`).join('')}</div>
+      </div>` : '';
     const statusNote = status === 'draft' ? '' : `<div class="card-b" style="padding-top:0;padding-bottom:12px">
         <p class="hint">This subject's results are <b>${esc(SUBMISSION_STATUS_LABELS[status] || status)}</b> for this class.
         ${isAdmin ? 'You can save corrected marks here, or reopen it below to let the workflow run again.' : 'Editing is locked now that this has been submitted — ask an admin to reopen it (in Publish Results) if a correction is needed.'}</p>
@@ -254,13 +264,14 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
 
     gridEl.innerHTML = `
       <div class="card">
-        <div class="card-h"><h3>${esc(subject.name)} — marks (out of ${res.out_of})</h3>${paperPicker}
+        <div class="card-h"><h3>${esc(subject.name)}${paperName ? ` — ${esc(paperName)}` : ''} — marks (out of ${res.out_of})</h3>
           <span class="badge ${STATUS_BADGE_CLASS[status] || 'grey'}" style="margin-left:10px">${esc(SUBMISSION_STATUS_LABELS[status] || status)}</span>
           <div class="spacer"></div>
           ${status === 'draft' && canEdit ? '<button class="btn secondary" id="mk-submit">Submit for approval</button>' : ''}
           ${status !== 'draft' && isAdmin ? '<button class="btn secondary" id="mk-reopen">Reopen</button>' : ''}
           ${hasAnyMarks && status !== 'published' && canEdit ? '<button class="btn danger sm" id="mk-delete-all">🗑️ Delete All Results</button>' : ''}
           ${canEdit ? '<button class="btn" id="mk-save">Save marks</button>' : ''}</div>
+        ${paperPicker}
         ${statusNote}
         ${maxMarksHint}
         <div class="card-b table-wrap"><table class="data">
@@ -273,8 +284,10 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
         </table></div>
       </div>`;
 
-    const paperSel = gridEl.querySelector('#mk-paper');
-    if (paperSel) paperSel.onchange = (e) => { paperId = e.target.value; renderGridForPaper(); };
+    gridEl.querySelectorAll('#mk-paper-chips [data-paper]').forEach((chip) => chip.onclick = () => {
+      paperId = chip.dataset.paper;
+      renderGridForPaper();
+    });
     const maxMarksFixLink = gridEl.querySelector('#mk-maxmarks-fix');
     if (maxMarksFixLink) maxMarksFixLink.onclick = (e) => {
       e.preventDefault();
@@ -359,7 +372,7 @@ async function renderBulkUpload(area, sel, subjectTabs) {
 
   const [studentsRes, papersLists] = await Promise.all([
     Db.students.list({ class_id: sel.class_id, stream_id: sel.stream_id || undefined }),
-    Promise.all(subjectTabs.map((s) => Db.subjectPapers.list(s.id)))
+    Promise.all(subjectTabs.map((s) => Db.subjectPapers.list(sel.exam_id, s.id)))
   ]);
   const students = studentsRes.ok ? studentsRes.data : [];
   const papersBySubjectId = {};

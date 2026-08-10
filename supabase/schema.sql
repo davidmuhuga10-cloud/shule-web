@@ -193,10 +193,16 @@ create trigger trg_subjects_updated_at before update on public.subjects
   for each row execute function public.set_updated_at();
 create index idx_subjects_school on public.subjects(school_id);
 
--- Subject papers (e.g. English Paper 1 + Paper 2) — opt-in per subject; a
--- subject with zero rows here is "single-paper" and works exactly as if
--- this table didn't exist. `weight` is this paper's share of the combined
--- subject score (a subject's papers should have weights summing to 1).
+-- Subject papers (e.g. English Paper 1 + Paper 2) — opt-in per subject, and
+-- (0020_learning_area_papers.sql) scoped to one specific EXAM, not a
+-- permanent property of the subject: a subject with zero rows here for a
+-- given exam is scored as one combined mark, exactly as if this table
+-- didn't exist for it. `weight` is this paper's share of the combined
+-- subject score (a subject's papers for one exam should have weights
+-- summing to 1) — the Learning Area Papers screen shows/collects this as a
+-- 0-100 Ratio and converts it. The `exam_id` column itself is added further
+-- down (see the note right after the `exams` table below) since it
+-- references a table that doesn't exist yet at this point in the script.
 create table public.subject_papers (
   id uuid primary key default gen_random_uuid(),
   school_id uuid not null references public.schools(id) on delete cascade,
@@ -206,8 +212,7 @@ create table public.subject_papers (
   weight numeric not null default 1,
   out_of numeric not null default 100,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (subject_id, paper_no)
+  updated_at timestamptz not null default now()
 );
 create trigger trg_subject_papers_updated_at before update on public.subject_papers
   for each row execute function public.set_updated_at();
@@ -410,12 +415,14 @@ create table public.subject_class_assignments (
   -- is computed from this.
   stream_id uuid references public.streams(id) on delete cascade,
   -- Round 4 §7 (0018_timetable.sql): how many periods a week this subject
-  -- needs for this class/stream, and whether some of them should be double
-  -- lessons — read by the Timetable module's generator. Null periods_per_week
-  -- means "not configured yet"; the generator falls back to a default rather
-  -- than requiring every subject to be set up before anything works.
+  -- needs for this class/stream, and how many of those should be scheduled
+  -- as double lessons (0019_timetable_fixes.sql — a count, not a yes/no, so
+  -- e.g. Math can get exactly 3 doubles a week and the rest as singles) —
+  -- read by the Timetable module's generator. Null periods_per_week means
+  -- "not configured yet"; the generator falls back to a default rather than
+  -- requiring every subject to be set up before anything works.
   periods_per_week integer,
-  is_double boolean not null default false,
+  double_periods_per_week integer not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -512,6 +519,16 @@ create trigger trg_exams_updated_at before update on public.exams
   for each row execute function public.set_updated_at();
 create index idx_exams_school on public.exams(school_id);
 create index idx_exams_deleted_at on public.exams(deleted_at) where deleted_at is not null;
+
+-- 0020_learning_area_papers.sql: subject_papers.exam_id, added here (not in
+-- that table's own create table above) purely because it references this
+-- table, which doesn't exist yet at that earlier point in the script — see
+-- the note above subject_papers' create table. Scopes every paper to one
+-- specific exam so the same subject can have a completely different (or no)
+-- paper setup in a different exam, per the Learning Area Papers brief.
+alter table public.subject_papers add column exam_id uuid references public.exams(id) on delete cascade;
+create index idx_subject_papers_exam on public.subject_papers(exam_id);
+alter table public.subject_papers add constraint subject_papers_exam_subject_paperno_key unique (exam_id, subject_id, paper_no);
 
 -- Phase 2h (brief §7.1): which classes were explicitly chosen to sit a given
 -- exam — purely a "should this class show on the exam's board at all"
@@ -1584,10 +1601,10 @@ create table public.teacher_unavailability (
   id uuid primary key default gen_random_uuid(),
   school_id uuid not null references public.schools(id) on delete cascade,
   staff_id uuid not null references public.staff(id) on delete cascade,
-  day_of_week smallint not null,
+  day_of_week smallint not null,   -- 1=Mon .. 7=Sun (0019_timetable_fixes.sql widened this from 1-6 so Sunday teaching is supported)
   period_index integer not null,
   created_at timestamptz not null default now(),
-  constraint teacher_unavailability_day_check check (day_of_week between 1 and 6)
+  constraint teacher_unavailability_day_check check (day_of_week between 1 and 7)
 );
 create trigger trg_teacher_unavailability_school_id before insert on public.teacher_unavailability
   for each row execute function public.set_school_id();
@@ -1612,7 +1629,7 @@ create table public.timetable_entries (
   room_id uuid references public.rooms(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint timetable_entries_day_check check (day_of_week between 1 and 6)
+  constraint timetable_entries_day_check check (day_of_week between 1 and 7)
 );
 create trigger trg_timetable_entries_updated_at before update on public.timetable_entries
   for each row execute function public.set_updated_at();

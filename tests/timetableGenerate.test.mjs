@@ -19,7 +19,7 @@ function run() {
     const input = {
       days: DAYS, periods: PERIODS,
       streams: [{ stream_id: 'st1', class_id: 'c1', subjects: [
-        { subject_id: 'math', subject_name: 'Mathematics', periods_per_week: 4, is_double: false, staff_id: 'tA' }
+        { subject_id: 'math', subject_name: 'Mathematics', periods_per_week: 4, staff_id: 'tA' }
       ] }],
       unavailable: new Set()
     };
@@ -34,7 +34,7 @@ function run() {
     const input = {
       days: DAYS, periods: PERIODS,
       streams: [{ stream_id: 'st1', class_id: 'c1', subjects: [
-        { subject_id: 'eng', subject_name: 'English', periods_per_week: null, is_double: false, staff_id: null }
+        { subject_id: 'eng', subject_name: 'English', periods_per_week: null, staff_id: null }
       ] }],
       unavailable: new Set()
     };
@@ -48,8 +48,8 @@ function run() {
     const input = {
       days: DAYS, periods: PERIODS,
       streams: [{ stream_id: 'st1', class_id: 'c1', subjects: [
-        { subject_id: 'math', subject_name: 'Mathematics', periods_per_week: 6, is_double: false, staff_id: 'tA' },
-        { subject_id: 'eng', subject_name: 'English', periods_per_week: 6, is_double: false, staff_id: 'tB' }
+        { subject_id: 'math', subject_name: 'Mathematics', periods_per_week: 6, staff_id: 'tA' },
+        { subject_id: 'eng', subject_name: 'English', periods_per_week: 6, staff_id: 'tB' }
       ] }],
       unavailable: new Set()
     };
@@ -68,8 +68,8 @@ function run() {
     const input = {
       days: DAYS, periods: PERIODS,
       streams: [
-        { stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'math', subject_name: 'Mathematics', periods_per_week: 7, is_double: false, staff_id: 'tShared' }] },
-        { stream_id: 'st2', class_id: 'c1', subjects: [{ subject_id: 'math', subject_name: 'Mathematics', periods_per_week: 7, is_double: false, staff_id: 'tShared' }] }
+        { stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'math', subject_name: 'Mathematics', periods_per_week: 7, staff_id: 'tShared' }] },
+        { stream_id: 'st2', class_id: 'c1', subjects: [{ subject_id: 'math', subject_name: 'Mathematics', periods_per_week: 7, staff_id: 'tShared' }] }
       ],
       unavailable: new Set()
     };
@@ -94,7 +94,7 @@ function run() {
     }));
     const input = {
       days: DAYS, periods: PERIODS,
-      streams: [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'math', subject_name: 'Mathematics', periods_per_week: 1, is_double: false, staff_id: 'tA' }] }],
+      streams: [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'math', subject_name: 'Mathematics', periods_per_week: 1, staff_id: 'tA' }] }],
       unavailable
     };
     const { entries, unresolved } = generateTimetable(input);
@@ -106,7 +106,7 @@ function run() {
   {
     const input = {
       days: [1], periods: PERIODS,
-      streams: [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'sci', subject_name: 'Science', periods_per_week: 2, is_double: true, staff_id: 'tA' }] }],
+      streams: [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'sci', subject_name: 'Science', periods_per_week: 2, double_periods_per_week: 1, staff_id: 'tA' }] }],
       unavailable: new Set()
     };
     const { entries, unresolved } = generateTimetable(input);
@@ -116,16 +116,70 @@ function run() {
     check('the two periods are genuinely adjacent (never spanning the break at period 4)', indices[1] - indices[0] === 1 && indices[0] !== 3);
   }
 
-  // ---- odd periods_per_week with is_double: floor(n/2) doubles + remainder singles
+  // ---- odd periods_per_week with a requested double count: exact doubles + remainder singles
   {
     const input = {
       days: [1, 2], periods: PERIODS,
-      streams: [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'sci', subject_name: 'Science', periods_per_week: 5, is_double: true, staff_id: 'tA' }] }],
+      streams: [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'sci', subject_name: 'Science', periods_per_week: 5, double_periods_per_week: 2, staff_id: 'tA' }] }],
       unavailable: new Set()
     };
     const { entries, unresolved } = generateTimetable(input);
-    check('5 periods/week with is_double places all 5 (2 doubles + 1 single)', entries.length === 5);
+    check('5 periods/week with 2 requested doubles places all 5 (2 doubles + 1 single)', entries.length === 5);
     check('nothing unresolved', unresolved.length === 0);
+  }
+
+  // ---- explicit double count: exactly N doubles, not "as many as will fit" -----
+  {
+    // 8 periods/week, only 3 asked for as doubles — previously a plain
+    // is_double=true would have auto-doubled as many pairs as possible
+    // (floor(8/2) = 4 doubles, 0 singles). The fix (bug #3 from the school's
+    // feedback: "what if Math has 3 doubles a week and not one?") is that
+    // the count is exact: 3 doubles (6 periods) + 2 singles = 8.
+    const input = {
+      days: [1, 2, 3], periods: PERIODS,
+      streams: [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'math', subject_name: 'Mathematics', periods_per_week: 8, double_periods_per_week: 3, staff_id: 'tA' }] }],
+      unavailable: new Set()
+    };
+    const { entries, unresolved } = generateTimetable(input);
+    check('places all 8 periods', entries.length === 8);
+    check('nothing unresolved', unresolved.length === 0);
+    // Group placed periods by day to find genuinely-consecutive same-day pairs.
+    const byDay = {};
+    entries.forEach((e) => { (byDay[e.day_of_week] = byDay[e.day_of_week] || []).push(e.period_index); });
+    let doublePairs = 0;
+    Object.values(byDay).forEach((idxs) => {
+      const sorted = idxs.slice().sort((a, b) => a - b);
+      for (let i = 0; i < sorted.length - 1; i++) if (sorted[i + 1] - sorted[i] === 1) { doublePairs++; i++; }
+    });
+    check('exactly 3 double-lesson pairs were formed, not floor(8/2)=4', doublePairs === 3);
+  }
+
+  // ---- requested doubles exceeding what periods_per_week can hold are clamped --
+  {
+    // Asking for 5 doubles on a subject with only 4 periods/week is
+    // impossible (5 doubles would need 10 periods) — the engine clamps to
+    // what's actually possible (floor(4/2)=2 doubles) rather than crashing
+    // or silently producing more periods than requested.
+    const input = {
+      days: [1], periods: PERIODS,
+      streams: [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'math', subject_name: 'Mathematics', periods_per_week: 4, double_periods_per_week: 5, staff_id: 'tA' }] }],
+      unavailable: new Set()
+    };
+    const { entries, unresolved } = generateTimetable(input);
+    check('a double count larger than periods_per_week allows is clamped, never exceeding periods_per_week', entries.length === 4);
+    check('nothing unresolved', unresolved.length === 0);
+  }
+
+  // ---- Sunday (day 7) works like any other teaching day -------------------------
+  {
+    const input = {
+      days: [1, 7], periods: PERIODS, // Monday + Sunday, some schools teach both
+      streams: [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'math', subject_name: 'Mathematics', periods_per_week: 8, staff_id: 'tA' }] }],
+      unavailable: new Set()
+    };
+    const { entries, unresolved } = generateTimetable(input);
+    check('Sunday (day 7) is usable as a teaching day', entries.length === 8 && unresolved.length === 0);
+    check('at least one lesson actually landed on Sunday', entries.some((e) => e.day_of_week === 7));
   }
 
   // ---- infeasible input is reported, never silently dropped or double-booked ----
@@ -134,7 +188,7 @@ function run() {
     const input = {
       days: [1], periods: tinyPeriods,
       streams: [{ stream_id: 'st1', class_id: 'c1', subjects: [
-        { subject_id: 'math', subject_name: 'Mathematics', periods_per_week: 3, is_double: false, staff_id: 'tA' }
+        { subject_id: 'math', subject_name: 'Mathematics', periods_per_week: 3, staff_id: 'tA' }
       ] }],
       unavailable: new Set()
     };
@@ -153,7 +207,7 @@ function run() {
     const onedayPeriods = [{ period_index: 1, is_break: false }, { period_index: 2, is_break: false }, { period_index: 3, is_break: false }];
     const input = {
       days: [1], periods: onedayPeriods,
-      streams: [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'math', subject_name: 'Mathematics', periods_per_week: 3, is_double: false, staff_id: 'tA' }] }],
+      streams: [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'math', subject_name: 'Mathematics', periods_per_week: 3, staff_id: 'tA' }] }],
       unavailable: new Set()
     };
     const { entries, unresolved } = generateTimetable(input);
@@ -189,7 +243,7 @@ function run() {
         const streamId = `c${c}-s${s}`;
         const subjects = SUBJECTS.map((sub) => {
           requiredTotal += sub.weekly;
-          return { subject_id: sub.id, subject_name: sub.id, periods_per_week: sub.weekly, is_double: false, staff_id: `t-${c}-${sub.id}` }; // one teacher per (class, subject), shared across that class's 3 streams
+          return { subject_id: sub.id, subject_name: sub.id, periods_per_week: sub.weekly, staff_id: `t-${c}-${sub.id}` }; // one teacher per (class, subject), shared across that class's 3 streams
         });
         bigStreams.push({ stream_id: streamId, class_id: `c${c}`, subjects });
       }
@@ -240,7 +294,7 @@ function run() {
       for (let s = 0; s < STREAMS_PER_CLASS; s++) {
         bigStreams.push({
           stream_id: `c${c}-s${s}`, class_id: `c${c}`,
-          subjects: [{ subject_id: 'pe', subject_name: 'PE', periods_per_week: 4, is_double: false, staff_id: 'lone-pe-teacher' }]
+          subjects: [{ subject_id: 'pe', subject_name: 'PE', periods_per_week: 4, staff_id: 'lone-pe-teacher' }]
         });
       }
     }

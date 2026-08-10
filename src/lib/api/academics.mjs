@@ -369,46 +369,97 @@ export function createAcademicsApi(supabase) {
       }
     },
 
-    /** Paper 1 / Paper 2 (etc.) weighting per subject — see subject_papers
-     *  in migrations/0005_exam_workflow.sql. A subject with zero rows here
-     *  is "single-paper" and marks entry/broadsheets/report cards all work
-     *  exactly as they always have. */
+    /** Paper 1 / Paper 2 (etc.) weighting per subject, PER EXAM — see
+     *  subject_papers in migrations/0005_exam_workflow.sql and its exam
+     *  scoping in 0020_learning_area_papers.sql. A subject with zero rows
+     *  here for a given exam is "single-paper" for that exam and marks
+     *  entry/broadsheets/report cards all work exactly as they always have.
+     *  Deliberately exam-scoped, not a permanent subject setting — the same
+     *  subject can have a totally different (or no) paper setup in a
+     *  different exam; see the Learning Area Papers screen
+     *  (learningAreaPapers.mjs). */
     subjectPapers: {
-      async list(subjectId) {
-        let q = supabase.from('subject_papers').select('*');
+      /** Papers for ONE subject in ONE exam — what Marks Entry/Bulk Upload
+       *  need to know whether (and how) to split a subject's entry into
+       *  per-paper columns. */
+      async list(examId, subjectId) {
+        if (!examId) return ok([]);
+        let q = supabase.from('subject_papers').select('*').eq('exam_id', examId);
         if (subjectId) q = q.eq('subject_id', subjectId);
         const { data, error } = await q.order('paper_no', { ascending: true });
         if (error) return err(error.message);
         return ok(data || []);
       },
-      async save(payload) {
-        payload = payload || {};
-        if (!payload.subject_id) return err('Please choose the subject this paper belongs to.');
-        const name = String(payload.name || '').trim();
-        if (!name) return err('Paper name is required (e.g. "Paper 1").');
-        const rec = {
-          subject_id: payload.subject_id,
-          name,
-          paper_no: Number(payload.paper_no) || 1,
-          weight: payload.weight === '' || payload.weight === undefined || payload.weight === null ? 1 : Number(payload.weight),
-          out_of: Number(payload.out_of) || 100
-        };
-        if (payload.id) {
-          const { data, error } = await supabase.from('subject_papers').update(rec).eq('id', payload.id).select().single();
-          if (error) return err(error.message);
-          return ok(data);
-        }
-        const { data: dup } = await supabase.from('subject_papers').select('id')
-          .eq('subject_id', payload.subject_id).eq('paper_no', rec.paper_no).maybeSingle();
-        if (dup) return err(`Paper ${rec.paper_no} already exists for this subject.`);
-        const { data, error } = await supabase.from('subject_papers').insert(rec).select().single();
+      /** Every configured paper across every subject for ONE exam, in one
+       *  call — what the Learning Area Papers setup screen renders its
+       *  whole table from, instead of one request per subject. */
+      async listForExam(examId) {
+        if (!examId) return ok([]);
+        const { data, error } = await supabase.from('subject_papers').select('*').eq('exam_id', examId).order('paper_no', { ascending: true });
         if (error) return err(error.message);
-        return ok(data);
+        return ok(data || []);
       },
-      async remove(id) {
-        const { error } = await supabase.from('subject_papers').delete().eq('id', id);
-        if (error) return err(error.message);
-        return ok(true);
+      /** Replace the WHOLE paper list for one (exam, subject) in a single
+       *  call — same "the full set is the unit of change" convention as
+       *  setStreamSubjects()/periods.saveGrid() (Timetable). `papers` =
+       *  [{ id?, name, out_of, ratio }] in display order; ratio is 0-100 (a
+       *  percentage, matching how the setup screen collects it) and is
+       *  stored internally as a 0-1 weight, keeping the existing
+       *  score/out_of*weight combination formula (results.mjs,
+       *  get_report_card()) completely unchanged.
+       *
+       *  An EMPTY array deliberately means "no papers" — deletes every
+       *  existing row for this (exam, subject), reverting it to a single
+       *  combined mark for this exam. That's the intended, easy way to undo
+       *  papers for an exam where this subject shouldn't use them, per the
+       *  brief's "must be decided fresh for each exam" requirement — never
+       *  a one-way door. */
+      async setForSubject(examId, subjectId, papers) {
+        if (!examId) return err('Missing exam.');
+        if (!subjectId) return err('Missing subject.');
+        papers = (papers || []).map((p, i) => ({
+          id: p.id || undefined,
+          name: String(p.name || '').trim() || `Paper ${i + 1}`,
+          paper_no: i + 1,
+          out_of: p.out_of === '' || p.out_of === undefined || p.out_of === null ? 100 : Number(p.out_of),
+          ratio: p.ratio === '' || p.ratio === undefined || p.ratio === null ? 0 : Number(p.ratio)
+        }));
+        if (papers.length) {
+          for (const p of papers) {
+            if (!(p.out_of > 0)) return err(`${p.name}: "Out of" must be a positive number.`);
+          }
+          // A single paper is always the whole subject — its ratio is
+          // locked to 100% regardless of what's on screen, so a school
+          // that's just giving one subject a custom "out of" this exam
+          // (no real combining) never gets blocked by ratio math that
+          // doesn't actually apply to them.
+          if (papers.length === 1) {
+            papers[0].ratio = 100;
+          } else {
+            const ratioTotal = Math.round(papers.reduce((a, p) => a + p.ratio, 0) * 100) / 100;
+            if (ratioTotal !== 100) return err(`Ratios must add up to 100% — currently at ${ratioTotal}%.`);
+          }
+        }
+
+        const { data: existing } = await supabase.from('subject_papers').select('id').eq('exam_id', examId).eq('subject_id', subjectId);
+        const keepIds = new Set(papers.filter((p) => p.id).map((p) => p.id));
+        const toRemove = (existing || []).filter((r) => !keepIds.has(r.id));
+        for (const r of toRemove) {
+          const { error } = await supabase.from('subject_papers').delete().eq('id', r.id);
+          if (error) return err(error.message);
+        }
+
+        for (const p of papers) {
+          const rec = { name: p.name, paper_no: p.paper_no, out_of: p.out_of, weight: p.ratio / 100 };
+          if (p.id) {
+            const { error } = await supabase.from('subject_papers').update(rec).eq('id', p.id);
+            if (error) return err(error.message);
+          } else {
+            const { error } = await supabase.from('subject_papers').insert({ ...rec, exam_id: examId, subject_id: subjectId });
+            if (error) return err(error.message);
+          }
+        }
+        return ok(true, { count: papers.length });
       }
     }
   };

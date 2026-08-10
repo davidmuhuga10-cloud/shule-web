@@ -119,13 +119,13 @@ export async function getEffectiveClassSubjectIdsBatch(supabase, classIds) {
 }
 
 export function createAssignmentsApi(supabase) {
-  // Round 4 §7: also selects id/periods_per_week/is_double (not just
-  // subject_id) so getStreamSubjects() can surface the Timetable module's
-  // per-subject weekly period count alongside everything else this already
-  // resolves — same stream-row-wins-else-class-wide precedence, no
+  // Round 4 §7: also selects id/periods_per_week/double_periods_per_week
+  // (not just subject_id) so getStreamSubjects() can surface the Timetable
+  // module's per-subject weekly period count alongside everything else this
+  // already resolves — same stream-row-wins-else-class-wide precedence, no
   // duplicated logic in timetable.mjs.
   async function effectiveSubjectIdsForStream(streamId, classId) {
-    const cols = 'id, subject_id, periods_per_week, is_double';
+    const cols = 'id, subject_id, periods_per_week, double_periods_per_week';
     const { data: streamRows } = await supabase.from('subject_class_assignments').select(cols).eq('stream_id', streamId);
     if (streamRows && streamRows.length) return { ids: streamRows.map((r) => r.subject_id), rows: streamRows, inherited: false };
     const { data: classWide } = await supabase.from('subject_class_assignments').select(cols).eq('class_id', classId).is('stream_id', null);
@@ -197,7 +197,7 @@ export function createAssignmentsApi(supabase) {
           // what timetable.mjs's requirements.save() targets to update it.
           assignment_id: a.id || null,
           periods_per_week: a.periods_per_week === undefined ? null : a.periods_per_week,
-          is_double: !!a.is_double
+          double_periods_per_week: a.double_periods_per_week || 0
         };
       }).sort((a, b) => String(a.name).localeCompare(String(b.name)));
 

@@ -252,28 +252,63 @@ async function run() {
     check('classes.save clears class_teacher_staff_id when omitted', cleared.data.class_teacher_staff_id === null);
   }
 
-  // ---- subject papers (Paper 1 / Paper 2 weighting, Phase 2a) -------------------
+  // ---- subject papers (Learning Area Papers — exam-scoped, not permanent) ------
   {
-    const sb = createMockSupabase({ subjects: [{ id: 'su1', name: 'English' }] });
+    const sb = createMockSupabase({
+      subjects: [{ id: 'su1', name: 'English' }],
+      exams: [{ id: 'ex1', name: 'Term 1 Exam' }, { id: 'ex2', name: 'Term 2 Exam' }]
+    });
     const api = createAcademicsApi(sb);
-    check('subjectPapers.save requires a subject', (await api.subjectPapers.save({ name: 'Paper 1' })).ok === false);
-    check('subjectPapers.save requires a name', (await api.subjectPapers.save({ subject_id: 'su1' })).ok === false);
 
-    const p1 = await api.subjectPapers.save({ subject_id: 'su1', name: 'Paper 1', paper_no: 1, weight: 0.6, out_of: 100 });
-    check('subjectPapers.save creates a paper', p1.ok === true && p1.data.weight === 0.6);
-    const p2 = await api.subjectPapers.save({ subject_id: 'su1', name: 'Paper 2', paper_no: 2, weight: 0.4, out_of: 50 });
-    check('subjectPapers.save creates a second paper for the same subject', p2.ok === true);
-    const dup = await api.subjectPapers.save({ subject_id: 'su1', name: 'Paper 1 again', paper_no: 1 });
-    check('subjectPapers.save rejects a duplicate paper_no for the same subject', dup.ok === false);
+    check('subjectPapers.setForSubject requires an exam', (await api.subjectPapers.setForSubject(null, 'su1', [])).ok === false);
+    check('subjectPapers.setForSubject requires a subject', (await api.subjectPapers.setForSubject('ex1', null, [])).ok === false);
 
-    const listed = await api.subjectPapers.list('su1');
-    check('subjectPapers.list orders by paper_no', listed.data.length === 2 && listed.data[0].paper_no === 1 && listed.data[1].paper_no === 2);
-    check('subjectPapers.save defaults weight to 1 when not given', (await api.subjectPapers.save({ subject_id: 'su1', name: 'Paper 3', paper_no: 3 })).data.weight === 1);
+    // Zero papers = single combined mark — the default state, and always a
+    // valid save (the "revert to a single mark" escape hatch).
+    const zero = await api.subjectPapers.setForSubject('ex1', 'su1', []);
+    check('setForSubject accepts an empty paper list (single-mark mode)', zero.ok === true);
+    check('list() is empty for a subject with no papers configured', (await api.subjectPapers.list('ex1', 'su1')).data.length === 0);
 
-    const removed = await api.subjectPapers.remove(p1.data.id);
-    check('subjectPapers.remove deletes a paper', removed.ok === true);
-    const afterRemove = await api.subjectPapers.list('su1');
-    check('removed paper no longer appears', afterRemove.data.length === 2);
+    // Ratios that don't add up to 100% are rejected outright, never silently saved.
+    const badRatio = await api.subjectPapers.setForSubject('ex1', 'su1', [
+      { name: 'Paper 1', out_of: 60, ratio: 60 }, { name: 'Paper 2', out_of: 40, ratio: 30 }
+    ]);
+    check('setForSubject rejects ratios that do not sum to 100%', badRatio.ok === false && /100%/.test(badRatio.message));
+
+    const saved = await api.subjectPapers.setForSubject('ex1', 'su1', [
+      { name: 'Paper 1', out_of: 60, ratio: 60 }, { name: 'Paper 2', out_of: 40, ratio: 40 }
+    ]);
+    check('setForSubject saves a valid 2-paper split', saved.ok === true && saved.count === 2);
+
+    const listed = await api.subjectPapers.list('ex1', 'su1');
+    check('list() returns both papers in order, weight converted from the 0-100 ratio', listed.data.length === 2
+      && listed.data[0].name === 'Paper 1' && listed.data[0].weight === 0.6
+      && listed.data[1].name === 'Paper 2' && listed.data[1].weight === 0.4);
+
+    // A single paper's ratio is always locked to 100%, regardless of what's sent.
+    const single = await api.subjectPapers.setForSubject('ex1', 'su1', [{ id: listed.data[0].id, name: 'Paper 1', out_of: 100, ratio: 37 }]);
+    check('setForSubject with just one paper locks its ratio to 100% (no combining needed)', single.ok === true);
+    const afterSingle = await api.subjectPapers.list('ex1', 'su1');
+    check('single remaining paper has weight 1 regardless of the ratio sent', afterSingle.data.length === 1 && afterSingle.data[0].weight === 1);
+    check('setForSubject with one paper removed the other (replace-all, not append)', afterSingle.data.every((p) => p.name === 'Paper 1'));
+
+    // Reverting to zero papers again — the "use single mark instead" path.
+    const reverted = await api.subjectPapers.setForSubject('ex1', 'su1', []);
+    check('setForSubject([]) reverts a configured subject back to single-mark mode', reverted.ok === true);
+    check('no papers remain after reverting', (await api.subjectPapers.list('ex1', 'su1')).data.length === 0);
+
+    // THE critical requirement: the exact same subject has a completely
+    // independent paper setup in a DIFFERENT exam — nothing carries over,
+    // nothing is remembered from ex1.
+    const otherExam = await api.subjectPapers.setForSubject('ex2', 'su1', [
+      { name: 'Paper 1', out_of: 100, ratio: 100 }
+    ]);
+    check('the same subject can have a totally different paper setup in a different exam', otherExam.ok === true);
+    check('exam 1 is unaffected by exam 2\'s paper setup for the same subject', (await api.subjectPapers.list('ex1', 'su1')).data.length === 0);
+    check('exam 2 has its own independent paper', (await api.subjectPapers.list('ex2', 'su1')).data.length === 1);
+
+    check('listForExam returns every paper across every subject for one exam', (await api.subjectPapers.listForExam('ex2')).data.length === 1);
+    check('setForSubject rejects a paper with no positive out_of', (await api.subjectPapers.setForSubject('ex1', 'su1', [{ name: 'Paper 1', out_of: 0, ratio: 100 }])).ok === false);
   }
 
   // ---- subjects + CBC ----------------------------------------------------------

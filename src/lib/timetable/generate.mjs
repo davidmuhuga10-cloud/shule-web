@@ -34,8 +34,8 @@
  * doesn't exist yet and is called out as a follow-up, not attempted here.
  */
 
-export const DAY_LABELS = { 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat' };
-export const DAY_NAMES = { 1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursday', 5: 'Friday', 6: 'Saturday' };
+export const DAY_LABELS = { 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat', 7: 'Sun' };
+export const DAY_NAMES = { 1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursday', 5: 'Friday', 6: 'Saturday', 7: 'Sunday' };
 
 // Used when a subject's periods_per_week hasn't been configured yet (see
 // 0018_timetable.sql's comment on subject_class_assignments.periods_per_week)
@@ -60,14 +60,18 @@ function buildUnits(streams) {
         stream_id: stream.stream_id, class_id: stream.class_id, subject_id: sub.subject_id,
         subject_name: sub.subject_name, staff_id: sub.staff_id || null
       };
-      if (sub.is_double) {
-        const numDoubles = Math.floor(perWeek / 2);
-        const numSingles = perWeek % 2;
-        for (let i = 0; i < numDoubles; i++) doubles.push({ ...base, type: 'double' });
-        for (let i = 0; i < numSingles; i++) singles.push({ ...base, type: 'single' });
-      } else {
-        for (let i = 0; i < perWeek; i++) singles.push({ ...base, type: 'single' });
-      }
+      // How many of this subject's periods should be paired into double
+      // lessons — an explicit count (e.g. "Math gets 3 doubles a week"),
+      // not just yes/no, so a school can mix doubles and singles for the
+      // same subject exactly as they actually timetable it. Clamped to
+      // what perWeek can actually hold so a misconfigured value (more
+      // doubles requested than there are period-pairs available) never
+      // produces more periods than the subject is supposed to have.
+      const requestedDoubles = Number.isFinite(sub.double_periods_per_week) && sub.double_periods_per_week > 0 ? Math.floor(sub.double_periods_per_week) : 0;
+      const numDoubles = Math.min(requestedDoubles, Math.floor(perWeek / 2));
+      const numSingles = perWeek - numDoubles * 2;
+      for (let i = 0; i < numDoubles; i++) doubles.push({ ...base, type: 'double' });
+      for (let i = 0; i < numSingles; i++) singles.push({ ...base, type: 'single' });
     });
   });
   return [...doubles, ...singles];
@@ -89,7 +93,7 @@ function rotatedDays(days, offset) {
 /** input = {
  *   days: [1..6],                                            active weekdays
  *   periods: [{period_index, is_break}],                     full daily template, in any order
- *   streams: [{ stream_id, class_id, subjects: [{ subject_id, subject_name, periods_per_week, is_double, staff_id }] }],
+ *   streams: [{ stream_id, class_id, subjects: [{ subject_id, subject_name, periods_per_week, double_periods_per_week, staff_id }] }],
  *   unavailable: Set<"staffId|day|period">                   from teacher_unavailability
  * }
  * returns { entries: [{day_of_week, period_index, subject_id, class_id, stream_id, staff_id}], unresolved: [{...unit, reason}] }
