@@ -603,6 +603,26 @@ table.data td.num,table.data th.num{text-align:center}
    be unreliable across browsers (reported bug: printed a blank page). */
 @page{size:A4;margin:12mm}
 @media print{
+  /* Root cause of "on-screen it's perfect, printed/downloaded it loses all
+     its color" (reported on the Report Form, but this applies to every
+     printable screen — Mark List/Class List/Score Sheet/Exam Analysis all
+     use background-color fills too): Chrome and most other browsers do NOT
+     print background colors/gradients by default — there's a "Background
+     graphics" checkbox in the print dialog's "More settings" that's
+     unchecked out of the box, and window.print()/Download (see app.js's
+     printWithOptions() — Download is just window.print(), no separate PDF
+     pipeline) both go through that same dialog. Borders and text print
+     fine regardless (they're not "background"), which is exactly the
+     "colors gone, borders/text still there" symptom. print-color-adjust:
+     exact (plus the older -webkit- prefix Chrome/Safari still want) tells
+     the browser to print backgrounds AS IF that box were ticked, without
+     the person printing ever having to find and check it themselves. `*`
+     so it's not an easy-to-miss per-element opt-in — every background
+     color anywhere in a printed page (the report's teal title bar and
+     avatar, its grey summary tiles/table headers/remark boxes, the motto
+     strip, every other report's shaded table headers) is covered by one
+     rule instead of needing to be listed out and kept in sync by hand. */
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
   .sidebar,.topbar,.no-print{display:none!important}
   .main{margin-left:0}.content{padding:0;max-width:none}
   .report{border:none;box-shadow:none;max-width:none}
