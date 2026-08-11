@@ -21,6 +21,20 @@ import { Db } from '../lib/api/index.mjs';
 import { isContactInfoComplete, renderMissingContactInfo } from '../lib/printHeader.mjs';
 import { timetableGridPageHtml } from './_timetableGrid.mjs';
 
+/** Round 6 §9: the version-history panel used to show raw, ever-climbing
+ *  `version_number`s ("Version 7", "Version 8" ...) even though only the
+ *  last 3 are ever kept (older ones are hard-deleted — see Round 5 §10's
+ *  DB-level pruning, which this doesn't change). Reading "Version 8" made
+ *  it look like versions 1-7 still existed somewhere. `versions` here is
+ *  already sorted newest-first (see listVersions()), so position alone is
+ *  enough to give each one a fixed, always-accurate label regardless of
+ *  what the underlying version_number happens to be. */
+function versionLabel(idx, total) {
+  if (idx === 0) return 'Newest';
+  if (idx === total - 1) return total > 2 ? 'First' : 'Previous';
+  return 'Previous';
+}
+
 function pickDefaultYearTerm(years, termsByYear) {
   const activeYear = years.find((y) => y.status === 'active') || years[0];
   if (!activeYear) return { year_id: '', term_id: '' };
@@ -76,7 +90,7 @@ function render(root, state) {
         <div class="field"></div>
       </div>
     </div>
-    <div class="tabs" style="margin-bottom:16px">
+    <div class="tabs no-print" style="margin-bottom:16px">
       <button data-mode="stream" class="${sel.mode === 'stream' ? 'active' : ''}">By Class / Arm</button>
       <button data-mode="teacher" class="${sel.mode === 'teacher' ? 'active' : ''}">By Teacher</button>
     </div>
@@ -107,21 +121,23 @@ function render(root, state) {
     if (!sel.year_id || !sel.term_id) { box.innerHTML = ''; return; }
     const res = await Db.timetable.entries.listVersions(sel.year_id, sel.term_id);
     if (!res.ok || res.data.length < 2) { box.innerHTML = ''; return; }
-    const items = res.data.map((v) => {
+    const items = res.data.map((v, idx) => {
+      const label = versionLabel(idx, res.data.length);
       const when = v.created_at ? new Date(v.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
-      if (v.is_active) return `<span class="tt-ver-pill tt-ver-active">Version ${v.version_number} — current${when ? ` (${esc(when)})` : ''}</span>`;
-      return `<button type="button" class="tt-ver-pill tt-ver-switch" data-version="${v.version_number}">Version ${v.version_number}${when ? ` — ${esc(when)}` : ''} · Reactivate</button>`;
+      if (v.is_active) return `<span class="tt-ver-pill tt-ver-active">${label} — current${when ? ` (${esc(when)})` : ''}</span>`;
+      return `<button type="button" class="tt-ver-pill tt-ver-switch" data-version="${v.version_number}" data-label="${esc(label)}">${label}${when ? ` — ${esc(when)}` : ''} · Reactivate</button>`;
     }).join('');
     box.innerHTML = `<div class="card" style="margin-bottom:16px"><div class="card-b">
       <p class="hint" style="margin:0 0 8px">Timetable history for this term — the last ${res.data.length} generated version${res.data.length === 1 ? '' : 's'} are kept. Switch back to an older one if a regenerate made things worse.</p>
       <div class="tt-ver-list">${items}</div>
     </div></div>`;
     box.querySelectorAll('.tt-ver-switch').forEach((btn) => {
-      btn.onclick = () => confirmAction(`Switch the active timetable back to Version ${btn.dataset.version}? This becomes the one everyone sees, prints, and edits — nothing is deleted, the current version stays available too.`, async () => {
+      const label = btn.dataset.label;
+      btn.onclick = () => confirmAction(`Switch the active timetable back to the "${label}" version? This becomes the one everyone sees, prints, and edits — nothing is deleted, the current version stays available too.`, async () => {
         await withBusy(btn, async () => {
           const r = await Db.timetable.entries.reactivateVersion(sel.year_id, sel.term_id, Number(btn.dataset.version));
           if (!r.ok) { toast(r.message, 'err'); return; }
-          toast(`Switched to Version ${btn.dataset.version}.`, 'ok');
+          toast(`Switched to the "${label}" version.`, 'ok');
           loadVersions();
           loadView();
         }, 'Switching…');

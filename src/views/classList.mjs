@@ -1,4 +1,4 @@
-import { esc, options, renderPrereq, loader, toast, go, printOptionsHtml, wirePrintOptions } from '../app.js';
+import { esc, options, renderPrereq, renderPrereqOrConnectivity, loader, toast, go, printOptionsHtml, wirePrintOptions } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { downloadXlsx } from '../lib/xlsxUtil.mjs';
 import { takeNavIntent } from '../lib/navIntent.mjs';
@@ -15,7 +15,9 @@ const CL_COLS = [
 
 export async function viewClassList(root) {
   const classesRes = await Db.classes.list();
-  const classes = classesRes.ok ? classesRes.data : [];
+  // Round 6 §5 (recurring BUG): see examAnalysis.mjs for the full story.
+  if (!classesRes.ok) { renderPrereqOrConnectivity(root, { ok: false, onRetry: () => viewClassList(root) }); return; }
+  const classes = classesRes.data;
   if (!classes.length) { renderPrereq(root, 'No classes found', 'Please create a class first.', 'classes', 'Go to Classes'); return; }
   // A "🖨️ Print" click from the Students module hands off the class/stream
   // currently filtered there — see navIntent.mjs.

@@ -256,6 +256,15 @@ async function run() {
     check('re-running generate() succeeds', res2.ok === true);
     const entriesAfter = await timetable.entries.list({ academic_year_id: 'y1', term_id: 't1' });
     check('re-running generate() replaces the scope instead of duplicating it', entriesAfter.data.length === 18);
+
+    // Round 6 §3 (BUG: "regenerate produces nearly identical output"):
+    // Db.timetable.generate() now feeds the engine a `seed` derived from
+    // the next version_number (Round 5 §10), so two back-to-back
+    // regenerates of the exact same input genuinely reshuffle instead of
+    // converging on the same layout — verified here end to end through
+    // the API layer, not just the pure engine function.
+    const layout = (rows) => rows.map((e) => `${e.subject_id}:${e.stream_id}:${e.day_of_week}:${e.period_index}`).sort().join(',');
+    check('Round 6 §3: regenerating the exact same input produces a genuinely different layout, not the same one every time', layout(entries.data) !== layout(entriesAfter.data));
   }
 
   // ---- generate(): Round 2 §7 upfront capacity check ---------------------------

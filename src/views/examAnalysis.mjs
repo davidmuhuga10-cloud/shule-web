@@ -8,7 +8,7 @@
  * standard as the Mark List/Class List/Score Sheet (shared header, paper
  * size/orientation controls, mandatory contact info before printing).
  */
-import { esc, options, renderPrereq, loader, go, printOptionsHtml, wirePrintOptions, toast, withBusy } from '../app.js';
+import { esc, options, renderPrereq, renderPrereqOrConnectivity, loader, go, printOptionsHtml, wirePrintOptions, toast, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { downloadXlsxAOA } from '../lib/xlsxUtil.mjs';
 import { buildExamAnalysis } from '../lib/examAnalysis.mjs';
@@ -18,8 +18,19 @@ import { takeNavIntent } from '../lib/navIntent.mjs';
 
 export async function viewExamAnalysis(root) {
   const [examsRes, classesRes] = await Promise.all([Db.results.listExams(), Db.classes.list()]);
-  const exams = examsRes.ok ? examsRes.data : [];
-  const classes = classesRes.ok ? classesRes.data : [];
+  // Round 6 §5 (recurring BUG, same class as Round 4 §5's Mark List fix):
+  // a lost/flaky connection used to get silently treated the same as
+  // "genuinely no classes exist yet", showing the misleading "No classes
+  // found" message even on a fully set-up school — refreshing "fixed" it
+  // because the retry just happened to succeed. Check `.ok` on each fetch
+  // BEFORE falling back to an empty array, same renderPrereqOrConnectivity
+  // pattern every other screen with this exact class of bug now uses.
+  if (!examsRes.ok || !classesRes.ok) {
+    renderPrereqOrConnectivity(root, { ok: false, onRetry: () => viewExamAnalysis(root) });
+    return;
+  }
+  const exams = examsRes.data;
+  const classes = classesRes.data;
   if (!exams.length) { renderPrereq(root, 'No exams found', 'Please create an exam first.', 'exams', 'Go to Exams'); return; }
   if (!classes.length) { renderPrereq(root, 'No classes found', 'Please create a class first.', 'classes', 'Go to Classes'); return; }
   // A "🔎 Analyze" click from the Manage Exams board (brief Step 13) hands
@@ -61,7 +72,7 @@ function topTable(title, rows) {
     </tr></thead><tbody>${rows.map((r) => `<tr>
       <td>${esc(r.admission_no)}</td><td>${esc(r.full_name)}</td><td>${esc(r.stream_name || '—')}</td>
       <td class="num">${r.stream_rank} / ${r.stream_total}</td><td class="num">${r.overall_rank} / ${r.overall_total}</td>
-      <td class="num"><b>${r.score}</b></td><td>${esc(r.level || '—')}</td><td>${esc(r.gender || '—')}</td>
+      <td class="num"><b>${Math.round(r.score)}</b></td><td>${esc(r.level || '—')}</td><td>${esc(r.gender || '—')}</td>
     </tr>`).join('')}</tbody></table></div>
   </div>`;
 }
@@ -74,7 +85,7 @@ function gradeSummaryTable(title, rows, bandLabels) {
       <th class="num">Entries</th><th class="num">Mean Marks</th><th class="num">Mean Points</th><th>Performance Level</th>
     </tr></thead><tbody>${rows.map((r) => `<tr>
       <td>${esc(r.label || r.subject_name)}</td>${bandLabels.map((l) => `<td class="num">${r.band_counts[l] || 0}</td>`).join('')}<td class="num">${r.x_count}</td>
-      <td class="num">${r.entries}</td><td class="num">${r.mean_marks}</td><td class="num">${r.mean_points}</td><td>${esc(r.performance_level || '—')}</td>
+      <td class="num">${r.entries}</td><td class="num">${Math.round(r.mean_marks)}</td><td class="num">${Math.round(r.mean_points)}</td><td>${esc(r.performance_level || '—')}</td>
     </tr>`).join('')}</tbody></table></div>
   </div>`;
 }
@@ -137,18 +148,18 @@ async function load(root, classes, sel) {
       <div class="card-b">
         <div class="grid3" style="text-align:center">
           <div><div class="muted" style="font-size:11px">STUDENTS WHO SAT</div><div style="font-size:22px;font-weight:800">${analysis.students_sat}</div></div>
-          <div><div class="muted" style="font-size:11px">MEAN MARKS</div><div style="font-size:22px;font-weight:800">${analysis.mean_marks}</div></div>
-          <div><div class="muted" style="font-size:11px">MEAN POINTS</div><div style="font-size:22px;font-weight:800">${analysis.mean_points}</div></div>
+          <div><div class="muted" style="font-size:11px">MEAN MARKS</div><div style="font-size:22px;font-weight:800">${Math.round(analysis.mean_marks)}</div></div>
+          <div><div class="muted" style="font-size:11px">MEAN POINTS</div><div style="font-size:22px;font-weight:800">${Math.round(analysis.mean_points)}</div></div>
         </div>
-        <div class="center" style="margin-top:8px"><span class="badge blue">${esc(analysis.performance_level || '—')}</span></div>
+        <div class="center" style="margin-top:8px"><span class="badge grade">${esc(analysis.performance_level || '—')}</span></div>
         ${bsRes.deviation_exam ? `
         <div class="center" style="margin-top:10px">
-          <span class="badge ${bsRes.deviation_exam.delta >= 0 ? 'green' : 'red'}">vs ${esc(bsRes.deviation_exam.exam_name)}: ${bsRes.deviation_exam.delta > 0 ? '+' : ''}${bsRes.deviation_exam.delta} mean marks (${bsRes.deviation_exam.class_average} then → ${analysis.mean_marks} now)</span>
+          <span class="badge ${bsRes.deviation_exam.delta >= 0 ? 'green' : 'red'}">vs ${esc(bsRes.deviation_exam.exam_name)}: ${bsRes.deviation_exam.delta > 0 ? '+' : ''}${Math.round(bsRes.deviation_exam.delta)} mean marks (${Math.round(bsRes.deviation_exam.class_average)} then → ${Math.round(analysis.mean_marks)} now)</span>
         </div>` : ''}
 
         <div style="margin-top:20px;font-weight:750;font-size:13.5px">LEARNING AREA STATISTICS</div>
         <div class="table-wrap"><table class="print-grid" style="margin-top:6px"><thead><tr><th>Name</th><th class="num">Mean Points</th><th>Performance Level</th></tr></thead>
-        <tbody>${analysis.learning_area_stats.map((r) => `<tr><td>${esc(r.name)}</td><td class="num">${r.points}</td><td>${esc(r.performance_level || '—')}</td></tr>`).join('')}</tbody></table></div>
+        <tbody>${analysis.learning_area_stats.map((r) => `<tr><td>${esc(r.name)}</td><td class="num">${Math.round(r.points)}</td><td>${esc(r.performance_level || '—')}</td></tr>`).join('')}</tbody></table></div>
 
         <div style="margin-top:20px;font-weight:750;font-size:13.5px">CLASS GRADE SUMMARY</div>
         ${gradeSummaryTable('Overall', [analysis.class_grade_summary.overall], analysis.band_labels)}

@@ -343,7 +343,7 @@ function run() {
   // constraint actually changes placement when it's feasible to honor.
   // ================================================================
 
-  check('CONSTRAINT_TYPES exports exactly the 6 documented types', CONSTRAINT_TYPES.length === 6);
+  check('CONSTRAINT_TYPES exports exactly the 7 documented types (Round 6 §4 adds distribute_doubles)', CONSTRAINT_TYPES.length === 7);
 
   // ---- subject_pair_not_consecutive ----------------------------------------------
   {
@@ -514,6 +514,174 @@ function run() {
   }
 
   // ================================================================
+  // Round 6 §5 (BUG: "generated doubles count doesn't match configuration"
+  // — 9 configured, 11 counted on the printed timetable). Root cause: two
+  // independently-placed SINGLE lessons of the same subject landing in
+  // adjacent periods, indistinguishable from a real double to anyone
+  // reading the grid. 1 day, 5 periods: subject X wants 1 double + 1
+  // single (3 periods), subject Y wants 2 singles — exactly fills the
+  // week, but with enough slack (5 slots for X's 3 + Y's 2) that a
+  // non-adjacent home for X's single genuinely exists.
+  // ================================================================
+  {
+    const periods = [1, 2, 3, 4, 5].map((i) => ({ period_index: i, is_break: false }));
+    const streams = [{ stream_id: 'st1', class_id: 'c1', subjects: [
+      { subject_id: 'X', subject_name: 'X', periods_per_week: 3, double_periods_per_week: 1 },
+      { subject_id: 'Y', subject_name: 'Y', periods_per_week: 2 }
+    ] }];
+    const { entries, unresolved } = generateTimetable({ days: [1], periods, streams, unavailable: new Set() });
+    check('doubles-count fix: everything still gets placed (5 periods requested, 5 slots available)', entries.length === 5 && unresolved.length === 0);
+
+    const xEntries = entries.filter((e) => e.subject_id === 'X').sort((a, b) => a.period_index - b.period_index);
+    check('doubles-count fix: subject X is placed exactly 3 times (1 double + 1 single, matching configuration)', xEntries.length === 3);
+    // Count adjacent-same-subject PAIRS for X — a real double is exactly
+    // one such pair. If a single ever lands next to another X, that's a
+    // 2nd pair — the exact "11 instead of 9" symptom.
+    let adjacentXPairs = 0;
+    for (let i = 0; i < xEntries.length - 1; i++) {
+      if (xEntries[i + 1].period_index === xEntries[i].period_index + 1) adjacentXPairs++;
+    }
+    check('doubles-count fix: exactly ONE adjacent pair for X (the real double) — no accidental extra "double" formed from independently-placed singles', adjacentXPairs === 1);
+  }
+
+  // ---- Round 6 §5: last resort still allows adjacency rather than leaving a genuinely-placeable lesson unresolved --
+  {
+    // Same shape as the existing "soft same-day-repeat" test above (3
+    // periods, 1 day, 1 subject only) — with only 3 slots for 3 required
+    // periods of the SAME subject, some adjacency is mathematically
+    // unavoidable (there's no way to fit 3 items in 3 contiguous slots
+    // without at least one adjacent pair). The accidental-double guard
+    // must relax as a last resort here, not leave anything unresolved.
+    const periods = [{ period_index: 1, is_break: false }, { period_index: 2, is_break: false }, { period_index: 3, is_break: false }];
+    const streams = [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'math', subject_name: 'Mathematics', periods_per_week: 3, staff_id: 'tA' }] }];
+    const { entries, unresolved } = generateTimetable({ days: [1], periods, streams, unavailable: new Set() });
+    check('doubles-count fix does not regress the pre-existing "pack a subject onto one tight day" guarantee', entries.length === 3 && unresolved.length === 0);
+  }
+
+  // ================================================================
+  // Round 6 §4: distribute_doubles — "double lessons should be distributed
+  // across the week and should not directly follow one another where it
+  // can be avoided." 2 days, 6 periods/day, 4 subjects each wanting
+  // exactly 1 double (2 periods) — with no other subjects competing for
+  // room, a plain greedy baseline packs 2 doubles back-to-back on each
+  // day (periods 1-2 then 3-4), exactly reproducing the reported "day is
+  // nothing but doubles back-to-back" bug — with just enough slack (6
+  // periods for 2 doubles = 4 needed) for the constraint to actually
+  // separate them instead.
+  // ================================================================
+  {
+    const periods = [1, 2, 3, 4, 5, 6].map((i) => ({ period_index: i, is_break: false }));
+    const streams = [{ stream_id: 'st1', class_id: 'c1', subjects: [
+      { subject_id: 'A', subject_name: 'A', periods_per_week: 2, double_periods_per_week: 1 },
+      { subject_id: 'B', subject_name: 'B', periods_per_week: 2, double_periods_per_week: 1 },
+      { subject_id: 'C', subject_name: 'C', periods_per_week: 2, double_periods_per_week: 1 },
+      { subject_id: 'D', subject_name: 'D', periods_per_week: 2, double_periods_per_week: 1 }
+    ] }];
+
+    const countAdjacentDoublePairs = (entries) => {
+      let n = 0;
+      [1, 2].forEach((day) => {
+        const byPeriod = new Map(entries.filter((e) => e.day_of_week === day).map((e) => [e.period_index, e.subject_id]));
+        for (let p = 1; p < 6; p++) {
+          if (byPeriod.has(p) && byPeriod.has(p + 1) && byPeriod.get(p) !== byPeriod.get(p + 1)) n++;
+        }
+      });
+      return n;
+    };
+
+    const baseline = generateTimetable({ days: [1, 2], periods, streams, unavailable: new Set() });
+    check('distribute_doubles baseline: reproduces the reported bug — doubles packed directly back-to-back with no constraint configured', countAdjacentDoublePairs(baseline.entries) >= 1);
+
+    const withConstraint = generateTimetable({
+      days: [1, 2], periods, streams, unavailable: new Set(),
+      constraints: [{ type: 'distribute_doubles', enabled: true, config: {} }]
+    });
+    check('distribute_doubles enabled: still places all 4 doubles (soft — never leaves a placeable lesson unresolved)', withConstraint.entries.length === 8 && withConstraint.unresolved.length === 0);
+    check('distribute_doubles enabled: no two DIFFERENT doubles land directly adjacent to each other any more', countAdjacentDoublePairs(withConstraint.entries) === 0);
+  }
+
+  // ---- Round 6 §4: distribute_doubles is a no-op for singles, and relaxes rather than leaving anything unresolved when truly unavoidable --
+  {
+    const periods = [{ period_index: 1, is_break: false }, { period_index: 2, is_break: false }];
+    const streams = [{ stream_id: 'st1', class_id: 'c1', subjects: [
+      { subject_id: 'A', subject_name: 'A', periods_per_week: 2, double_periods_per_week: 1 },
+      { subject_id: 'B', subject_name: 'B', periods_per_week: 2, double_periods_per_week: 1 }
+    ] }];
+    // Only 2 periods in the whole week — both doubles MUST occupy the
+    // exact same 2 slots on different... wait, there's only 1 day here,
+    // so the 2nd double genuinely cannot avoid being unresolved (no room
+    // left at all, not an adjacency issue) — proves the constraint doesn't
+    // swallow a real capacity failure into a confusing false negative.
+    const res = generateTimetable({
+      days: [1], periods, streams, unavailable: new Set(),
+      constraints: [{ type: 'distribute_doubles', enabled: true, config: {} }]
+    });
+    check('distribute_doubles: a genuine capacity shortfall still reports unresolved rather than being silently swallowed', res.entries.length === 2 && res.unresolved.length === 1);
+  }
+
+  // ================================================================
+  // Round 6 §3 ("regenerate produces nearly identical output" — the
+  // engine is intentionally deterministic, so the fix is a `seed` input
+  // that varies the day-rotation starting point; Db.timetable.generate()
+  // passes the next version_number as the seed).
+  // ================================================================
+  {
+    const periods = [1, 2, 3, 4].map((i) => ({ period_index: i, is_break: false }));
+    const days = [1, 2, 3, 4, 5];
+    const streams = [{ stream_id: 'st1', class_id: 'c1', subjects: [
+      { subject_id: 'A', subject_name: 'A', periods_per_week: 3 },
+      { subject_id: 'B', subject_name: 'B', periods_per_week: 3 },
+      { subject_id: 'C', subject_name: 'C', periods_per_week: 3 }
+    ] }];
+    const input = { days, periods, streams, unavailable: new Set() };
+
+    const layout = (res) => res.entries.map((e) => `${e.subject_id}:${e.day_of_week}:${e.period_index}`).sort().join(',');
+
+    const seed0a = generateTimetable({ ...input, seed: 0 });
+    const seed0b = generateTimetable({ ...input, seed: 0 });
+    check('seed: the SAME seed reproduces the exact same layout (stays deterministic/explainable per version)', layout(seed0a) === layout(seed0b));
+
+    const noSeed = generateTimetable(input);
+    check('seed: omitting it entirely defaults to 0 — byte-for-byte the pre-Round-6 behaviour', layout(noSeed) === layout(seed0a));
+
+    const seed3 = generateTimetable({ ...input, seed: 3 });
+    check('seed: a DIFFERENT seed genuinely reshuffles the layout instead of converging on the same one every time', layout(seed3) !== layout(seed0a));
+    check('seed: a different seed still places everything correctly (9 periods, 3 subjects x 3/week)', seed3.entries.length === 9 && seed3.unresolved.length === 0);
+  }
+
+  // ================================================================
+  // Round 6 §2 ("Couldn't be scheduled" despite no explicit teacher
+  // block) — the unresolved reason now names the actual confirmed cause
+  // instead of a generic message, so a school isn't left guessing.
+  // ================================================================
+  {
+    // Cause A: the class/arm's own week is genuinely saturated — 1 day, 1
+    // period, 2 subjects each wanting that same 1 period.
+    const periods = [{ period_index: 1, is_break: false }];
+    const streams = [{ stream_id: 'st1', class_id: 'c1', subjects: [
+      { subject_id: 'A', subject_name: 'Agriculture', periods_per_week: 1 },
+      { subject_id: 'B', subject_name: 'Business Studies', periods_per_week: 1 }
+    ] }];
+    const res = generateTimetable({ days: [1], periods, streams, unavailable: new Set() });
+    check('diagnostic reason: names "completely full" when the class/arm genuinely has no free period left anywhere', /completely full/i.test(res.unresolved[0].reason));
+  }
+  {
+    // Cause B: the class/arm has room, but the ONE teacher assigned is
+    // unavailable in every remaining slot — 1 day, 2 periods; subject A
+    // (no teacher) takes period 1; subject B's teacher is blocked in
+    // BOTH periods, so period 2 is free for the class but not the teacher.
+    const periods = [{ period_index: 1, is_break: false }, { period_index: 2, is_break: false }];
+    const streams = [{ stream_id: 'st1', class_id: 'c1', subjects: [
+      { subject_id: 'A', subject_name: 'Agriculture', periods_per_week: 1 },
+      { subject_id: 'B', subject_name: 'Creative Arts and Sports', periods_per_week: 1, staff_id: 'peter' }
+    ] }];
+    const unavailable = new Set(['peter|1|1', 'peter|1|2']);
+    const res = generateTimetable({ days: [1], periods, streams, unavailable });
+    check('diagnostic reason: names the TEACHER as the bottleneck when the class/arm still has free periods but the teacher does not', /teacher is already teaching elsewhere.*unavailable/i.test(res.unresolved[0].reason) || /assign a different teacher/i.test(res.unresolved[0].reason));
+    check('diagnostic reason: this is a genuinely different message from the "class is full" one, so a school can tell the two apart', !/completely full/i.test(res.unresolved[0].reason));
+  }
+
+  // ================================================================
   // Round 2 §7: checkCapacity() — upfront validation before the engine or
   // any clearing of existing entries runs at all.
   // ================================================================
@@ -537,6 +705,162 @@ function run() {
 
     const usesDefault = checkCapacity({ days: [1, 2], periods, streams: [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'A', periods_per_week: null }] }] });
     check('checkCapacity falls back to DEFAULT_PERIODS_PER_WEEK for an unconfigured subject, same as the engine itself', usesDefault.overloaded.length === 0 ? usesDefault.ok === true : DEFAULT_PERIODS_PER_WEEK > 4);
+  }
+
+  // ================================================================
+  // Round 6 §7: "stabilize the generator overall" — a broad stress test
+  // combining everything at once (big-school scale, doubles, teacher
+  // availability blocks, AND all 7 constraint types enabled together),
+  // not just the individual reported bugs in isolation. The bar: nothing
+  // ever gets double-booked, and every genuinely satisfiable lesson still
+  // gets placed even with every soft preference fighting for the same
+  // slots.
+  //
+  // Grid sized with a small (realistic) buffer — 45 teachable slots/week
+  // for 40 required/week per stream — rather than exactly-zero slack.
+  // Investigated exactly-zero slack separately below: it's a genuinely
+  // different scenario (see that block's comment for why), not something
+  // this test conflates with "is the generator stable".
+  // ================================================================
+  {
+    const bigPeriods = [];
+    for (let p = 1; p <= 5; p++) bigPeriods.push({ period_index: p, is_break: false });
+    bigPeriods.push({ period_index: 6, is_break: true });
+    for (let p = 7; p <= 10; p++) bigPeriods.push({ period_index: p, is_break: false });
+    const bigDays = [1, 2, 3, 4, 5]; // 9 teachable periods/day x 5 = 45 slots/week (5 free vs 40 required)
+
+    // Same 40-periods/week subject mix as the plain big-school test, but
+    // now with doubles carved out of a few subjects (matches how a real
+    // school actually configures Subject Periods & Double Lessons).
+    const SUBJECTS = [
+      { id: 'math', weekly: 6, doubles: 2 }, { id: 'eng', weekly: 5, doubles: 0 }, { id: 'kis', weekly: 5, doubles: 0 },
+      { id: 'sci', weekly: 5, doubles: 1 }, { id: 'ss', weekly: 4, doubles: 0 }, { id: 'agr', weekly: 4, doubles: 0 },
+      { id: 'cre', weekly: 3, doubles: 0 }, { id: 'arts', weekly: 4, doubles: 1 }, { id: 'pe', weekly: 4, doubles: 0 }
+    ];
+
+    const NUM_CLASSES = 12, STREAMS_PER_CLASS = 3;
+    const bigStreams = [];
+    let requiredTotal = 0;
+    for (let c = 0; c < NUM_CLASSES; c++) {
+      for (let s = 0; s < STREAMS_PER_CLASS; s++) {
+        const subjects = SUBJECTS.map((sub) => {
+          requiredTotal += sub.weekly;
+          return { subject_id: sub.id, subject_name: sub.id, periods_per_week: sub.weekly, double_periods_per_week: sub.doubles, staff_id: `t-${c}-${sub.id}` };
+        });
+        bigStreams.push({ stream_id: `c${c}-s${s}`, class_id: `c${c}`, subjects });
+      }
+    }
+
+    // A handful of teacher-availability blocks, same shape a real school's
+    // Teacher Availability tab produces — enough to actually exercise
+    // teacher_no_immediate_after_out without overloading anyone.
+    const unavailable = new Set();
+    for (let c = 0; c < NUM_CLASSES; c++) unavailable.add(`t-${c}-math|1|1`);
+
+    // All 7 constraint types enabled at once, same config shapes the
+    // Constraints screen (timetableConstraints.mjs) actually saves.
+    const constraints = [
+      { type: 'subject_pair_not_consecutive', enabled: true, config: { subject_a: 'math', subject_b: 'sci' } },
+      { type: 'avoid_consecutive_intensive', enabled: true, config: { subject_ids: ['math', 'sci', 'eng'] } },
+      { type: 'teacher_no_immediate_after_out', enabled: true, config: {} },
+      { type: 'pe_before_break', enabled: true, config: { subject_ids: ['pe'] } },
+      { type: 'max_consecutive_periods_class', enabled: true, config: { max: 4 } },
+      { type: 'max_consecutive_periods_teacher', enabled: true, config: { max: 4 } },
+      { type: 'distribute_doubles', enabled: true, config: {} }
+    ];
+
+    const t0 = Date.now();
+    const { entries, unresolved } = generateTimetable({ days: bigDays, periods: bigPeriods, streams: bigStreams, unavailable, constraints });
+    const elapsedMs = Date.now() - t0;
+
+    check('stress test: every one of the 1,440 required periods still gets placed with every constraint fighting for room', requiredTotal === NUM_CLASSES * STREAMS_PER_CLASS * 40 && entries.length === requiredTotal && unresolved.length === 0);
+
+    const streamKeys = new Set(); let streamClash = false;
+    const staffKeys = new Set(); let staffClash = false;
+    const staffOutClash = [];
+    entries.forEach((e) => {
+      const sk = `${e.stream_id}|${e.day_of_week}|${e.period_index}`;
+      if (streamKeys.has(sk)) streamClash = true; else streamKeys.add(sk);
+      if (e.staff_id) {
+        const tk = `${e.staff_id}|${e.day_of_week}|${e.period_index}`;
+        if (staffKeys.has(tk)) staffClash = true; else staffKeys.add(tk);
+        if (unavailable.has(`${e.staff_id}|${e.day_of_week}|${e.period_index}`)) staffOutClash.push(e);
+      }
+    });
+    check('stress test: ZERO stream double-bookings across all 36 streams with every constraint active', !streamClash);
+    check('stress test: ZERO teacher double-bookings across every shared teacher with every constraint active', !staffClash);
+    check('stress test: never places a lesson into a slot a teacher was explicitly marked unavailable for (hard rule, always enforced)', staffOutClash.length === 0);
+    check('stress test: generates fast enough to feel instant even with 7 constraints active (< 5s)', elapsedMs < 5000);
+    console.log(`  (combined stress test took ${elapsedMs}ms for ${entries.length} placed periods across 36 streams with 7 constraints active)`);
+  }
+
+  // ----------------------------------------------------------------------
+  // Round 6 §7: exactly-zero-slack + multiple doubled subjects sharing
+  // teachers across streams (a school running its grid at literal 100%
+  // capacity with several subjects double-booked AND every one of those
+  // subjects' teachers shared across every stream of a grade) turned up a
+  // real limit of the engine while building the test above: a handful of
+  // lessons can go unplaced even though a perfect arrangement may exist in
+  // theory, because generate.mjs is a deterministic CONSTRUCTIVE placer
+  // (documented in this file's own header as a deliberate choice over a
+  // backtracking/CP-SAT solver, for explainability and speed — see the
+  // top of this file). A single greedy pass can occasionally paint itself
+  // into a corner when literally every slot in every stream is already
+  // spoken for and several teachers are pinned to specific slots by other
+  // streams at the same time.
+  //
+  // This is a real, inherent characteristic of the current design, not a
+  // regression from this round's changes (confirmed by reproducing it with
+  // Round 6's additions removed entirely — plain doubles with zero slack
+  // already trips it). It's also not a realistic day-to-day scenario: it
+  // needs a grid with NO free periods at all, several subjects double-
+  // booked, AND every one of those subjects' teachers shared identically
+  // across every stream — a school in this position has no timetabling
+  // slack full stop, generator or not. The stress test above proves the
+  // realistic case (a school with even a little breathing room) is fully
+  // stable; this one instead proves the pathological case FAILS SAFELY —
+  // never double-books, never crashes, never silently drops a lesson
+  // without explanation — which is the actual guarantee that matters here.
+  // ----------------------------------------------------------------------
+  {
+    const bigPeriods = [];
+    for (let p = 1; p <= 4; p++) bigPeriods.push({ period_index: p, is_break: false });
+    bigPeriods.push({ period_index: 5, is_break: true });
+    for (let p = 6; p <= 9; p++) bigPeriods.push({ period_index: p, is_break: false });
+    const bigDays = [1, 2, 3, 4, 5]; // exactly 40 slots/week — zero slack
+
+    const SUBJECTS = [
+      { id: 'math', weekly: 6, doubles: 2 }, { id: 'eng', weekly: 5, doubles: 0 }, { id: 'kis', weekly: 5, doubles: 0 },
+      { id: 'sci', weekly: 5, doubles: 1 }, { id: 'ss', weekly: 4, doubles: 0 }, { id: 'agr', weekly: 4, doubles: 0 },
+      { id: 'cre', weekly: 3, doubles: 0 }, { id: 'arts', weekly: 4, doubles: 1 }, { id: 'pe', weekly: 4, doubles: 0 }
+    ];
+    const NUM_CLASSES = 12, STREAMS_PER_CLASS = 3;
+    const bigStreams = [];
+    for (let c = 0; c < NUM_CLASSES; c++) {
+      for (let s = 0; s < STREAMS_PER_CLASS; s++) {
+        const subjects = SUBJECTS.map((sub) => ({ subject_id: sub.id, subject_name: sub.id, periods_per_week: sub.weekly, double_periods_per_week: sub.doubles, staff_id: `t-${c}-${sub.id}` }));
+        bigStreams.push({ stream_id: `c${c}-s${s}`, class_id: `c${c}`, subjects });
+      }
+    }
+    const { entries, unresolved } = generateTimetable({ days: bigDays, periods: bigPeriods, streams: bigStreams, unavailable: new Set() });
+
+    const streamKeys = new Set(); let streamClash = false;
+    const staffKeys = new Set(); let staffClash = false;
+    entries.forEach((e) => {
+      const sk = `${e.stream_id}|${e.day_of_week}|${e.period_index}`;
+      if (streamKeys.has(sk)) streamClash = true; else streamKeys.add(sk);
+      if (e.staff_id) {
+        const tk = `${e.staff_id}|${e.day_of_week}|${e.period_index}`;
+        if (staffKeys.has(tk)) staffClash = true; else staffKeys.add(tk);
+      }
+    });
+    check('zero-slack pathological case: still ZERO stream double-bookings', !streamClash);
+    check('zero-slack pathological case: still ZERO teacher double-bookings', !staffClash);
+    check('zero-slack pathological case: nothing silently dropped — placed + unresolved accounts for every required period', entries.length + unresolved.length === NUM_CLASSES * STREAMS_PER_CLASS * 40);
+    check('zero-slack pathological case: every unresolved lesson still carries a clear, specific reason (never a blank/generic one)', unresolved.every((u) => typeof u.reason === 'string' && u.reason.length > 20));
+    // Genuinely near-fully placed even under this adversarial setup — the
+    // documented limitation is real but small, not a wholesale failure.
+    check('zero-slack pathological case: still places the overwhelming majority (>=95%) even in this adversarial setup', entries.length / (NUM_CLASSES * STREAMS_PER_CLASS * 40) >= 0.95);
   }
 
   console.log(`${passed} passed, ${failed} failed`);

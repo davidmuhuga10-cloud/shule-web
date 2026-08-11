@@ -1,4 +1,4 @@
-import { esc, options, renderPrereq, loader } from '../app.js';
+import { esc, options, renderPrereq, renderPrereqOrConnectivity, loader } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { LEAVING_REASON_LABELS } from '../lib/api/students.mjs';
 
@@ -10,7 +10,9 @@ import { LEAVING_REASON_LABELS } from '../lib/api/students.mjs';
  *  archive them from the Students screen when it's official. */
 export async function viewCertificates(root) {
   const classesRes = await Db.classes.list();
-  const classes = classesRes.ok ? classesRes.data : [];
+  // Round 6 §5 (recurring BUG): see examAnalysis.mjs for the full story.
+  if (!classesRes.ok) { renderPrereqOrConnectivity(root, { ok: false, onRetry: () => viewCertificates(root) }); return; }
+  const classes = classesRes.data;
   if (!classes.length) { renderPrereq(root, 'No classes found', 'Please create a class first.', 'classes', 'Go to Classes'); return; }
   render(root, classes);
 }

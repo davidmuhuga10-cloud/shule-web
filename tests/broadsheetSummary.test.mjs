@@ -37,7 +37,10 @@ function run() {
   const bRow = classSummary.find((r) => r.grade === 'B');
   check('Class Grade Summary counts 2 students in grade A', aRow.count === 2);
   check('Class Grade Summary counts 1 student in grade B', bRow.count === 1);
-  check('Class Grade Summary percentage is of ranked students only (2/3)', Math.abs(aRow.pct - 66.7) < 0.1);
+  // Round 6 §1: whole number now (2/3 = 66.7%, rounds to 67), not one
+  // decimal place — "no subject should ever report marks as a decimal"
+  // extends to every figure the summary tables show.
+  check('Class Grade Summary percentage is of ranked students only (2/3, rounded to a whole number)', aRow.pct === 67);
 
   // ---- Gender Grade Summary ----------------------------------------------------------
   const genderA = genderSummary.find((r) => r.grade === 'A');

@@ -1,4 +1,4 @@
-import { esc, options, renderPrereq, loader, toast, go, printOptionsHtml, wirePrintOptions, withBusy } from '../app.js';
+import { esc, options, renderPrereq, renderPrereqOrConnectivity, loader, toast, go, printOptionsHtml, wirePrintOptions, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { renderReportCard } from './_reportCard.mjs';
 import { takeNavIntent } from '../lib/navIntent.mjs';
@@ -8,8 +8,15 @@ const BATCH_VALUE = '__all__';
 
 export async function viewReports(root) {
   const [examsRes, classesRes, settingsRes] = await Promise.all([Db.results.listExams(), Db.classes.list(), Db.settings.get()]);
-  const exams = examsRes.ok ? examsRes.data : [];
-  const classes = classesRes.ok ? classesRes.data : [];
+  // Round 6 §5 (recurring BUG, same class as Round 4 §5's Mark List fix,
+  // now also applied to examAnalysis.mjs): a lost/flaky connection used to
+  // be silently treated as "genuinely no classes exist yet" here too.
+  if (!examsRes.ok || !classesRes.ok) {
+    renderPrereqOrConnectivity(root, { ok: false, onRetry: () => viewReports(root) });
+    return;
+  }
+  const exams = examsRes.data;
+  const classes = classesRes.data;
   if (!exams.length) { renderPrereq(root, 'No exams found', 'Please create an exam first.', 'exams', 'Go to Exams'); return; }
   if (!classes.length) { renderPrereq(root, 'No classes found', 'Please create a class first.', 'classes', 'Go to Classes'); return; }
   // A "Go to Report Forms" click straight after a full publish hands off
@@ -75,8 +82,12 @@ function render(root, exams, classes, intent, settings) {
     if (!res.ok) { toast(res.message, 'err'); return; }
     toast('Dates saved.', 'ok');
     // A report already on screen should reflect the new dates immediately
-    // (loadExtra() below always re-fetches settings fresh) — not just the
-    // next time one's generated.
+    // — not just the next time one's generated. Round 6 §6 made tryLoad()
+    // reuse a cached loadExtra() (which is where `settings` comes from)
+    // across student switches within the same exam/class/stream, so that
+    // cache has to be explicitly dropped here or this save would appear
+    // to do nothing until a different exam/class/stream was picked.
+    extraCacheKey = '';
     if (root.querySelector('#rf-student') && root.querySelector('#rf-student').value) tryLoad();
   }, 'Saving…');
 
@@ -173,6 +184,18 @@ function render(root, exams, classes, intent, settings) {
     };
   };
 
+  // Round 6 §6 (performance): loadExtra() does 4 round trips including
+  // getBroadsheet() — a whole-class, every-subject query — to build the
+  // teacher-names/class-averages/settings/bands context every report card
+  // needs. None of that depends on WHICH student is selected, only on
+  // (exam, class, stream) — but tryLoad() used to call loadExtra() fresh
+  // on every single call, including just picking the next student off the
+  // same class+exam one at a time (the normal "check this student, then
+  // the next" workflow), re-running that whole-class query for a single
+  // student's report every time. Cached here so switching students within
+  // the same exam/class/stream reuses the last fetch — the actual
+  // per-student generate (Db.results.getReportCard) is still always live.
+  let extraCache = null, extraCacheKey = '';
   const tryLoad = async () => {
     const examId = root.querySelector('#rf-exam').value, studentId = root.querySelector('#rf-student').value;
     const classId = root.querySelector('#rf-class').value;
@@ -180,7 +203,9 @@ function render(root, exams, classes, intent, settings) {
     if (!examId || !studentId) return;
     const cardEl = root.querySelector('#rf-card');
     cardEl.innerHTML = loader();
-    const extra = await loadExtra(examId, classId, streamId);
+    const cacheKey = `${examId}|${classId}|${streamId}`;
+    if (extraCacheKey !== cacheKey) { extraCache = await loadExtra(examId, classId, streamId); extraCacheKey = cacheKey; }
+    const extra = extraCache;
     // Round 4 §3: "the rule that blocks printing until a school's
     // header/contact details are set already works correctly elsewhere...
     // but not under Report Forms specifically." Same gate Mark List/Class
@@ -251,18 +276,41 @@ function render(root, exams, classes, intent, settings) {
     wirePrintOptions(printBar, 'rf', `Report Form — ${res.data.student ? res.data.student.full_name : ''}`);
   };
 
+  // Round 6 §6 (performance/perceived-freeze): the class/arm selects used
+  // to stay fully interactive (not disabled, no visual change at all)
+  // while their onchange handler's fetches were still in flight — clicking
+  // around during that window did nothing visible, which read as the
+  // screen having frozen rather than as "still loading". Disabling the
+  // select that was just changed for the duration of its own refresh gives
+  // the same "please wait" feedback every other button in the app now has
+  // (see Timetable's Round 6 §8), and incidentally also stops a second
+  // change firing a second overlapping refresh mid-flight.
   root.querySelector('#rf-class').onchange = async (e) => {
     const cid = e.target.value;
-    // Round 4 §4: Exam is now scoped to the chosen class — refreshed
-    // alongside Arm/Student on every class change, not just once up front.
-    const [, noExams] = await Promise.all([refreshStreams(cid), refreshExams(cid)]);
-    await refreshStudents(cid, '', '');
-    if (noExams) root.querySelector('#rf-student').disabled = true;
-    wireStudentSelect();
+    e.target.disabled = true;
+    try {
+      // Round 4 §4: Exam is now scoped to the chosen class — refreshed
+      // alongside Arm/Student on every class change, not just once up front.
+      // Round 6 §6 (performance): these three don't actually depend on one
+      // another (all three only need `cid`) — firing them together turns 2
+      // round trips in sequence into 1 round trip's worth of wait, same
+      // "why serialize independent fetches" fix Round 3 §12 already applied
+      // to the batch report-card generation below.
+      const [, noExams] = await Promise.all([refreshStreams(cid), refreshExams(cid), refreshStudents(cid, '', '')]);
+      if (noExams) root.querySelector('#rf-student').disabled = true;
+      wireStudentSelect();
+    } finally {
+      e.target.disabled = false;
+    }
   };
   root.querySelector('#rf-stream').onchange = async (e) => {
-    await refreshStudents(root.querySelector('#rf-class').value, '', e.target.value);
-    wireStudentSelect();
+    e.target.disabled = true;
+    try {
+      await refreshStudents(root.querySelector('#rf-class').value, '', e.target.value);
+      wireStudentSelect();
+    } finally {
+      e.target.disabled = false;
+    }
   };
   root.querySelector('#rf-exam').onchange = tryLoad;
   function wireStudentSelect() {

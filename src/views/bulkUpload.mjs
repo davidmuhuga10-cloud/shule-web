@@ -23,7 +23,7 @@
  *     guarantees every class has at least one arm (a class can no longer
  *     exist with zero arms), so there's always something valid to type in.
  */
-import { esc, toast, options, renderPrereq, $ } from '../app.js';
+import { esc, toast, options, renderPrereq, renderPrereqOrConnectivity, $ } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { downloadXlsx, readXlsxFile } from '../lib/xlsxUtil.mjs';
 
@@ -57,7 +57,12 @@ const SAMPLE_ROW = {
 
 export async function viewBulkUpload(root) {
   const classesRes = await Db.classes.list();
-  const classes = classesRes.ok ? classesRes.data : [];
+  // Round 6 §5 (recurring BUG): see examAnalysis.mjs for the full story.
+  if (!classesRes.ok) {
+    renderPrereqOrConnectivity(root, { ok: false, onRetry: () => viewBulkUpload(root) });
+    return;
+  }
+  const classes = classesRes.data;
   if (!classes.length) {
     renderPrereq(root, 'No classes found', 'Please create a class before bulk-uploading students.', 'classes', 'Go to Classes');
     return;

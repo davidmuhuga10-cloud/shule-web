@@ -1,4 +1,4 @@
-import { esc, options, renderPrereq, loader } from '../app.js';
+import { esc, options, renderPrereq, renderPrereqOrConnectivity, loader } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 
 /** Transcript — one student's academic history across every exam they have
@@ -8,7 +8,9 @@ import { Db } from '../lib/api/index.mjs';
  *  so a school can see a student's trend over time at a glance. */
 export async function viewTranscript(root) {
   const classesRes = await Db.classes.list();
-  const classes = classesRes.ok ? classesRes.data : [];
+  // Round 6 §5 (recurring BUG): see examAnalysis.mjs for the full story.
+  if (!classesRes.ok) { renderPrereqOrConnectivity(root, { ok: false, onRetry: () => viewTranscript(root) }); return; }
+  const classes = classesRes.data;
   if (!classes.length) { renderPrereq(root, 'No classes found', 'Please create a class first.', 'classes', 'Go to Classes'); return; }
   render(root, classes, {});
 }
@@ -103,7 +105,7 @@ async function load(root, studentId) {
           <tbody>${rows.map((r) => `<tr>
             <td>${esc(r.academic_year_name)}</td><td>${esc(r.term_name)}</td><td>${esc(r.exam_name)}</td>
             <td class="num">${r.total}</td><td class="num">${r.average}</td>
-            <td><span class="badge blue">${esc(r.overall_grade || '—')}</span></td>
+            <td><span class="badge grade">${esc(r.overall_grade || '—')}</span></td>
             <td class="num">${r.position ? `${r.position} of ${r.class_size}` : '—'}</td>
           </tr>`).join('') || '<tr><td colspan="7" class="muted center">No accessible exam results.</td></tr>'}</tbody>
         </table>

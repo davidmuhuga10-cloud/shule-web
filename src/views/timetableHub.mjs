@@ -31,9 +31,14 @@ export async function viewTimetableHub(root) {
   // and silently overrides a later, unrelated visit to View.
   let handoff = null;
 
+  // Round 6 (BUG): this hub's own title band and Setup/Generate/View tab
+  // bar were missing no-print, so window.print() from the View tab picked
+  // them up in the printed output along with the actual timetable — only
+  // elements explicitly marked no-print are excluded (see main.css's
+  // `.sidebar,.topbar,.no-print{display:none!important}` print rule).
   root.innerHTML = `
-    <div class="page-head"><div><h2>Timetable</h2><p>Generate a conflict-free school timetable, view it by class or by teacher, and print it.</p></div></div>
-    <div class="tabs settings-tabs">
+    <div class="page-head no-print"><div><h2>Timetable</h2><p>Generate a conflict-free school timetable, view it by class or by teacher, and print it.</p></div></div>
+    <div class="tabs settings-tabs no-print">
       ${TABS.map((t) => `<button data-tab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</button>`).join('')}
     </div>
     <div id="tt-hub-body"></div>

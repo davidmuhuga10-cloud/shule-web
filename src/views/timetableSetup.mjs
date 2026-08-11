@@ -16,7 +16,7 @@
  */
 import { esc, options, toast, loader, withBusy, confirmAction } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
-import { DAY_LABELS } from '../lib/timetable/generate.mjs';
+import { DAY_LABELS, DEFAULT_PERIODS_PER_WEEK } from '../lib/timetable/generate.mjs';
 import { generatePeriods, cascadeTimes } from '../lib/timetable/scheduleGrid.mjs';
 import { renderTimetableConstraints } from './timetableConstraints.mjs';
 
@@ -230,8 +230,16 @@ async function renderRooms(root) {
 
 /* --------------------------------------------------------- requirements --- */
 async function renderRequirements(root) {
-  const [classesRes] = await Promise.all([Db.classes.list()]);
+  const [classesRes, daysRes, periodsRes] = await Promise.all([Db.classes.list(), Db.timetable.days.get(), Db.timetable.periods.list()]);
   const classes = classesRes.ok ? classesRes.data : [];
+  // Round 6 §6: how many teaching slots a class/arm's week actually holds —
+  // teaching days × non-break periods per day — so the running total below
+  // has something real to compare against. Falls back to the same 5-day
+  // default renderGrid/renderAvailability already assume when nothing's
+  // been saved yet.
+  const days = daysRes.ok ? daysRes.data : [1, 2, 3, 4, 5];
+  const teachablePeriods = (periodsRes.ok ? periodsRes.data : []).filter((p) => !p.is_break);
+  const weeklyCapacity = days.length * teachablePeriods.length;
   root.innerHTML = `
     <div class="card">
       <div class="card-h"><h3>Subject Periods & Double Lessons</h3></div>
@@ -269,21 +277,77 @@ async function renderRequirements(root) {
         ${rows.map((r) => `<tr data-assignment="${r.assignment_id || ''}">
           <td>${esc(r.name)}</td>
           <td>${esc(r.teacher_name || '—')}</td>
-          <td><input type="number" min="0" max="20" class="req-periods" style="width:80px" placeholder="5" value="${r.periods_per_week === null ? '' : r.periods_per_week}" ${r.assignment_id ? '' : 'disabled'}></td>
+          <td><input type="number" min="0" max="20" class="req-periods" style="width:80px" placeholder="5" value="${r.periods_per_week === null ? '' : r.periods_per_week}" data-saved="${r.periods_per_week === null ? '' : r.periods_per_week}" ${r.assignment_id ? '' : 'disabled'}></td>
           <td><input type="number" min="0" max="10" class="req-double" style="width:80px" placeholder="0" value="${r.double_periods_per_week ? r.double_periods_per_week : ''}" ${r.assignment_id ? '' : 'disabled'}></td>
         </tr>`).join('')}
       </tbody></table>
+      <p id="req-total" class="hint" style="margin:10px 0 0;font-weight:600"></p>
     `;
+
+    // Round 6 §6: a live running total of periods/week configured so far
+    // against how many teaching slots the week's grid actually holds
+    // (weeklyCapacity, computed once above from Teaching Days & Periods) —
+    // recomputed on every keystroke, not just on blur/change, so the number
+    // updates as the school types rather than only after they tab away.
+    // Doubles/week isn't added separately: buildUnits() in generate.mjs
+    // carves doubles OUT of periods_per_week (a "3 doubles" subject with
+    // periods_per_week=6 uses exactly 6 slots, not 6+3), so only the
+    // Periods/week column counts toward the grid total.
+    function recomputeTotal() {
+      let total = 0;
+      table.querySelectorAll('tr[data-assignment] .req-periods').forEach((inp) => {
+        const raw = inp.value.trim();
+        const n = raw === '' ? DEFAULT_PERIODS_PER_WEEK : Number(raw);
+        if (Number.isFinite(n) && n > 0) total += n;
+      });
+      const over = weeklyCapacity > 0 && total > weeklyCapacity;
+      const totalEl = table.querySelector('#req-total');
+      if (totalEl) {
+        totalEl.innerHTML = weeklyCapacity > 0
+          ? `Periods used this week: <b>${total}</b> / ${weeklyCapacity} available${over
+            ? ` — <span style="color:var(--danger)">${total - weeklyCapacity} too many. Reduce a subject's periods, or add more periods under Teaching Days &amp; Periods.</span>`
+            : ` (${weeklyCapacity - total} free)`}`
+          : `Periods used this week: <b>${total}</b> — set up the period grid under Teaching Days &amp; Periods to see how much room this class/arm's week has.`;
+      }
+      return { total, over };
+    }
+    recomputeTotal();
+    table.querySelectorAll('.req-periods').forEach((inp) => inp.oninput = recomputeTotal);
+
     table.querySelectorAll('tr[data-assignment]').forEach((tr) => {
       const assignmentId = tr.dataset.assignment;
       if (!assignmentId) return;
-      const save = () => {
-        const periods = tr.querySelector('.req-periods').value;
-        const doubles = tr.querySelector('.req-double').value;
-        Db.timetable.requirements.save(assignmentId, periods, doubles).then((r) => { if (!r.ok) toast(r.message, 'err'); });
+      const periodsInp = tr.querySelector('.req-periods');
+      const doublesInp = tr.querySelector('.req-double');
+      const save = async () => {
+        const { over } = recomputeTotal();
+        if (over && weeklyCapacity > 0) {
+          // Round 6 §6: refuse to save a configuration that would ask the
+          // generator for more periods than the week's grid can physically
+          // hold — revert this field to its last-saved value rather than
+          // leaving an unsaved, over-budget number sitting on screen.
+          toast(`Lessons exceed the number of periods set for this class/arm's week. Reduce this subject's periods/week, or add more periods to the grid under Teaching Days & Periods.`, 'err');
+          periodsInp.value = periodsInp.dataset.saved;
+          recomputeTotal();
+          return;
+        }
+        const periods = periodsInp.value;
+        const doubles = doublesInp.value;
+        // Round 6 §8: these two fields auto-save on blur with no separate
+        // "Save" button to show a busy state on — disabling them for the
+        // brief moment the request is in flight is this row's equivalent
+        // "please wait" feedback.
+        periodsInp.disabled = true; doublesInp.disabled = true;
+        try {
+          const r = await Db.timetable.requirements.save(assignmentId, periods, doubles);
+          if (!r.ok) { toast(r.message, 'err'); return; }
+          periodsInp.dataset.saved = periodsInp.value;
+        } finally {
+          periodsInp.disabled = false; doublesInp.disabled = false;
+        }
       };
-      tr.querySelector('.req-periods').onchange = save;
-      tr.querySelector('.req-double').onchange = save;
+      periodsInp.onchange = save;
+      doublesInp.onchange = save;
     });
   }
 }

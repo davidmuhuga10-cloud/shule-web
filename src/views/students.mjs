@@ -19,7 +19,7 @@
  *      filters, print, download Excel
  *   3. renderStudentProfile — one student's full profile + results
  */
-import { esc, modal, closeModal, toast, confirmAction, options, renderPrereq, loader, go } from '../app.js';
+import { esc, modal, closeModal, toast, confirmAction, options, renderPrereq, renderPrereqOrConnectivity, loader, go } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { LEAVING_REASON_LABELS } from '../lib/api/students.mjs';
 import { setNavIntent } from '../lib/navIntent.mjs';
@@ -47,7 +47,12 @@ function genderBadge(g) {
 
 export async function viewStudents(root) {
   const classesRes = await Db.classes.list();
-  const classes = classesRes.ok ? classesRes.data : [];
+  // Round 6 §5 (recurring BUG): see examAnalysis.mjs for the full story.
+  if (!classesRes.ok) {
+    renderPrereqOrConnectivity(root, { ok: false, onRetry: () => viewStudents(root) });
+    return;
+  }
+  const classes = classesRes.data;
   if (!classes.length) {
     renderPrereq(root, 'No classes found', 'Please create a class before adding students.', 'classes', 'Go to Classes');
     return;

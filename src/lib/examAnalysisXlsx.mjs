@@ -4,13 +4,16 @@
  * `buildExamAnalysis()` output (see examAnalysis.mjs) the on-screen report
  * renders from.
  */
+// Round 6 §1: every mark/mean figure this export shows is rounded to a
+// whole number, same as the on-screen Exam Analysis report (views/
+// examAnalysis.mjs) — "no subject should ever report marks as a decimal".
 function topTableRows(title, rows) {
   const out = [[title], ['Admno', 'Name', 'Arm', 'Arm Rank', 'Ovrl Rank', 'Score', 'Performance Level', 'Gender']];
   rows.forEach((r) => {
     out.push([
       r.admission_no, r.full_name, r.stream_name,
       `${r.stream_rank || ''} / ${r.stream_total || ''}`, `${r.overall_rank || ''} / ${r.overall_total || ''}`,
-      r.score, r.level, r.gender
+      Math.round(r.score), r.level, r.gender
     ]);
   });
   out.push([]);
@@ -20,7 +23,7 @@ function topTableRows(title, rows) {
 function gradeSummaryRows(title, rows, bandLabels) {
   const out = [[title], ['Label', ...bandLabels, 'X', 'Entries', 'Mean Marks', 'Mean Points', 'Performance Level']];
   rows.forEach((r) => {
-    out.push([r.label || r.subject_name, ...bandLabels.map((l) => r.band_counts[l] || 0), r.x_count, r.entries, r.mean_marks, r.mean_points, r.performance_level]);
+    out.push([r.label || r.subject_name, ...bandLabels.map((l) => r.band_counts[l] || 0), r.x_count, r.entries, Math.round(r.mean_marks), Math.round(r.mean_points), r.performance_level]);
   });
   out.push([]);
   return out;
@@ -41,14 +44,14 @@ export function buildExamAnalysisAoa({ settings, exam, cls, analysis }) {
   aoa.push([]);
 
   aoa.push(['Students who sat', analysis.students_sat]);
-  aoa.push(['Mean Marks', analysis.mean_marks]);
-  aoa.push(['Mean Points', analysis.mean_points]);
+  aoa.push(['Mean Marks', Math.round(analysis.mean_marks)]);
+  aoa.push(['Mean Points', Math.round(analysis.mean_points)]);
   aoa.push(['Performance Level', analysis.performance_level]);
   aoa.push([]);
 
   aoa.push(['LEARNING AREA STATISTICS']);
   aoa.push(['Name', 'Mean Points', 'Performance Level']);
-  analysis.learning_area_stats.forEach((r) => aoa.push([r.name, r.points, r.performance_level]));
+  analysis.learning_area_stats.forEach((r) => aoa.push([r.name, Math.round(r.points), r.performance_level]));
   aoa.push([]);
 
   aoa.push(['CLASS GRADE SUMMARY']);

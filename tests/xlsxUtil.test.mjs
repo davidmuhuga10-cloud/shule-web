@@ -54,7 +54,8 @@ function run() {
   check('buildBroadsheetAoa student row starts with admission no, name, stream', studentRow[0] === '101' && studentRow[1] === 'Amos Otieno' && studentRow[2] === 'East');
   check('buildBroadsheetAoa combines score + grade into one cell', studentRow.includes('78 (A-)'));
   check('buildBroadsheetAoa shows an em-dash for a missing score', studentRow.includes('—'));
-  check('buildBroadsheetAoa trailing row reports the class average', bsAoa[bsAoa.length - 1][0] === 'Class average:' && bsAoa[bsAoa.length - 1][1] === 65.4);
+  // Round 6 §1: class average rounded to a whole number for display too (65.4 -> 65).
+  check('buildBroadsheetAoa trailing row reports the class average, rounded', bsAoa[bsAoa.length - 1][0] === 'Class average:' && bsAoa[bsAoa.length - 1][1] === 65);
 
   const bsAoaNoContact = buildBroadsheetAoa({ settings: { school_name: 'No Contact School' }, exam, cls: null, streamName: '', subjects: [], students: [], class_average: 0 });
   check('buildBroadsheetAoa omits the contact row when no contact fields are set', bsAoaNoContact[1][0] === 'Term 2 Mid-Term — Mark List — ');
@@ -109,7 +110,8 @@ function run() {
     check('TOTAL sums a Learning Area Paper\'s own column (30 + 20 = 50)', totalRow[5] === 50);
     check('TOTAL sums the Learning Area Papers % column, rounded (55.4 + 44.6 = 100)', totalRow[7] === 100);
     check('AVERAGE averages the Learning Area Papers % column, rounded ((55.4+44.6)/2 = 50)', avgRow[7] === 50);
-    check('the blank spacer and Class average row still follow immediately after', aoa[9].length === 0 && aoa[10][0] === 'Class average:' && aoa[10][1] === 63.3);
+    // Round 6 §1: class average rounded here too (63.3 -> 63).
+    check('the blank spacer and Class average row still follow immediately after', aoa[9].length === 0 && aoa[10][0] === 'Class average:' && aoa[10][1] === 63);
 
     // A totally empty class (no students) doesn't blow up — every column dashes out.
     const emptyAoa = buildBroadsheetAoa({ settings, exam, cls, streamName: 'East', subjects: comboSubjects, students: [], class_average: 0 });

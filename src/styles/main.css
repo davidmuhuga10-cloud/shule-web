@@ -287,7 +287,7 @@ table.data td.num,table.data th.num{text-align:center}
    blowing the sheet past printable landscape width. Every column type below
    gets an explicit width so switching to fixed layout doesn't just squash
    the Name column or the summary columns instead. */
-.mark-list-grid{border-collapse:collapse;font-size:12px;table-layout:fixed;width:100%;color:var(--grid-text)}
+.mark-list-grid{border-collapse:collapse;font-size:12.5px;table-layout:fixed;width:100%;color:var(--grid-text)}
 .mark-list-grid th,.mark-list-grid td{border:1.3px solid var(--grid-ink);padding:7px 8px}
 /* Header-truncation fix (feature brief §6): "Total Marks" was printing as
    "Total Mk" and "Stream Position" as "Stream Po..." because every header
@@ -305,7 +305,7 @@ table.data td.num,table.data th.num{text-align:center}
    the specificity fight; overflow-wrap:break-word then wraps normally at
    word boundaries and only breaks inside a single long word if that word
    alone doesn't fit the column. */
-.mark-list-grid th{font-size:10px;font-weight:800;color:var(--grid-text);background:#f7f9fb;text-transform:uppercase;letter-spacing:.3px;text-align:left;white-space:normal;word-break:normal;overflow-wrap:break-word;vertical-align:bottom;overflow:visible}
+.mark-list-grid th{font-size:10.5px;font-weight:800;color:var(--grid-text);background:#f7f9fb;text-transform:uppercase;letter-spacing:.3px;text-align:left;white-space:normal;word-break:normal;overflow-wrap:break-word;vertical-align:bottom;overflow:visible}
 .mark-list-grid td{white-space:nowrap;overflow:hidden}
 .mark-list-grid td.num,.mark-list-grid th.num{text-align:center}
 .mark-list-grid th.id-col,.mark-list-grid td.id-col{width:64px}
@@ -316,6 +316,10 @@ table.data td.num,table.data th.num{text-align:center}
    stretching the column horizontally. */
 .mark-list-grid th.subj-col{width:70px}
 .mark-list-grid th.sum-col,.mark-list-grid td.sum-col{width:50px}
+/* Round 6 §3: TT MKS now reads "earned/possible" (e.g. "830/1230") instead
+   of a bare number — noticeably longer, so it gets a bit more room than
+   the other sum-col columns rather than clipping against the same 50px. */
+.mark-list-grid th.tt-mks-col,.mark-list-grid td.tt-mks-col{width:66px}
 .mark-list-grid tr:last-child td{border-bottom:1.3px solid var(--grid-ink)}
 .mark-cell .mark-grade{color:var(--grid-text);font-weight:600;font-size:10.5px}
 /* Round 5 §2: the TOTAL/AVERAGE rows at the very bottom of the Merit List —
@@ -323,12 +327,21 @@ table.data td.num,table.data th.num{text-align:center}
    student rows. */
 .mark-list-grid .bs-agg-row td{background:#f7f9fb;font-weight:700}
 /* System Fixes brief §15: Mark List summary stat tables (Class Grade
-   Summary / Gender Grade Summary side by side, Grade Breakdown by Subject
-   below), replacing the old single "Class average" line. */
+   Summary / Gender Grade Summary / Grade Breakdown by Subject), replacing
+   the old single "Class average" line.
+   Round 6 §4: redesigned as bordered tiles in ONE auto-fit grid — 2 across
+   when there's room (minmax(320px,1fr) means a tile never squeezes below
+   320px, so a narrow viewport or a portrait print naturally drops to 1
+   column on its own, no separate breakpoint rule needed) — using the same
+   black grid-ink border every other printed report on this app uses
+   (main.css's .print-grid/.mark-list-grid), replacing the grey table.data
+   look these three tables used to have, which read as inconsistent with
+   the rest of the Mark List sitting right above them. */
 .bs-summary{padding:16px 18px}
 .bs-summary-h{font-weight:700;font-size:12.5px;margin-bottom:6px}
-.bs-summary-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
-@media (max-width:720px){.bs-summary-grid{grid-template-columns:1fr}}
+.bs-summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;align-items:start}
+.bs-summary-tile{border:1.3px solid var(--grid-ink);border-radius:6px;padding:12px 14px}
+.bs-summary-tile .table-wrap{margin:0}
 
 /* Shared printable-report header (feature brief §2/§4; Round 5 §2/§3): logo
    far left, school name centered, address block far right — same layout for
@@ -369,6 +382,14 @@ table.data td.num,table.data th.num{text-align:center}
 .badge.green{background:var(--ok-bg);color:var(--ok)}.badge.grey{background:#eef1f5;color:var(--muted)}
 .badge.amber{background:var(--warn-bg);color:var(--warn)}.badge.blue{background:#e7f0fe;color:#2563eb}
 .badge.red{background:var(--danger-bg);color:var(--danger)}
+/* Round 6 §2 (BUG): Achievement/Performance Level badges (EE1, EE2, ME1...)
+   on the Mark List, Report Form, Exam Analysis and Transcript were all using
+   .badge.blue — the same "informational" blue used for genuinely unrelated
+   status pills elsewhere. A grade isn't informational metadata, it's the
+   result itself, so it gets its own neutral variant: plain black text on
+   the same light-grey pill every other neutral badge uses (--grid-text is
+   the pure-black token these reports already use throughout). */
+.badge.grade{background:#eef1f5;color:var(--grid-text)}
 
 /* ---------- Status buttons (attendance marking) ---------- */
 .status-btn{border:1px solid var(--line);background:#fff;color:var(--muted);padding:6px 12px;border-radius:7px;
@@ -730,6 +751,12 @@ table.data td.num,table.data th.num{text-align:center}
 .tt-switch-slider::before{content:"";position:absolute;width:16px;height:16px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.15s;box-shadow:0 1px 2px rgba(0,0,0,.25)}
 .tt-switch input:checked + .tt-switch-slider{background:var(--brand-2)}
 .tt-switch input:checked + .tt-switch-slider::before{transform:translateX(16px)}
+/* Round 6 §8: a "please wait" state for the toggle switches themselves —
+   textContent swap (withBusy's usual trick) doesn't apply to a
+   checkbox+span control, so this is a lighter opacity/cursor treatment
+   applied to the wrapping .tt-switch while its save is in flight. */
+.tt-switch.busy{opacity:.55;cursor:wait}
+.tt-switch.busy input{cursor:wait}
 
 /* Brief §8/§9: printed reports should have sane margins/page sizing and
    never require scrolling on paper. @page sets a consistent margin on every

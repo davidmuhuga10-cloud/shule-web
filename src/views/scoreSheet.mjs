@@ -11,7 +11,7 @@
  * dropdowns (avoids inventing and maintaining a whole new data model just
  * for labels that only ever appear on a printed sheet).
  */
-import { esc, options, renderPrereq, loader, toast, go, printOptionsHtml, wirePrintOptions } from '../app.js';
+import { esc, options, renderPrereq, renderPrereqOrConnectivity, loader, toast, go, printOptionsHtml, wirePrintOptions } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { downloadXlsxAOA } from '../lib/xlsxUtil.mjs';
 import { buildScoreSheetAoa } from '../lib/scoreSheetXlsx.mjs';
@@ -19,8 +19,14 @@ import { printHeaderHtml, reportTitleBarHtml, isContactInfoComplete, renderMissi
 
 export async function viewScoreSheet(root) {
   const [classesRes, subjectsRes] = await Promise.all([Db.classes.list(), Db.subjects.list()]);
-  const classes = classesRes.ok ? classesRes.data : [];
-  const subjects = subjectsRes.ok ? subjectsRes.data : [];
+  // Round 6 §5 (recurring BUG): don't conflate a lost/flaky connection with
+  // "genuinely nothing set up yet" — see examAnalysis.mjs for the full story.
+  if (!classesRes.ok || !subjectsRes.ok) {
+    renderPrereqOrConnectivity(root, { ok: false, onRetry: () => viewScoreSheet(root) });
+    return;
+  }
+  const classes = classesRes.data;
+  const subjects = subjectsRes.data;
   if (!classes.length) { renderPrereq(root, 'No classes found', 'Please create a class first.', 'classes', 'Go to Classes'); return; }
   if (!subjects.length) { renderPrereq(root, 'No learning areas found', 'Please add a subject first.', 'classes', 'Go to Classes & Arms'); return; }
   render(root, classes, subjects, {});

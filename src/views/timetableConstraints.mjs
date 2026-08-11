@@ -48,6 +48,11 @@ const GROUPS = [
         title: 'PE Lessons Before Break',
         desc: 'Schedules PE right before a break where possible, so students transition smoothly between activity and rest.',
         needsSubjects: true, minSubjects: 1, subjectsLabel: 'Which subject(s) are PE?'
+      },
+      {
+        type: 'distribute_doubles',
+        title: 'Spread Out Double Lessons',
+        desc: "Avoids stacking double lessons directly back-to-back, so a class/arm's day isn't wall-to-wall doubles. On by default for every school."
       }
     ]
   },
@@ -92,6 +97,24 @@ export async function renderTimetableConstraints(root) {
 
   function firstOfType(type) { return constraints.find((c) => c.type === type); }
   function subjectName(id) { return (subjects.find((s) => s.id === id) || {}).name || '(subject not found)'; }
+
+  // Round 6 §8: withBusy (app.js) swaps a button's textContent, which
+  // doesn't work for a toggle switch (checkbox + styled span, no text of
+  // its own) — this is the equivalent "please wait" treatment for these
+  // switches: disable the input and dim the wrapping .tt-switch label
+  // while the save is in flight, exactly like every other Timetable button
+  // now does in its own way.
+  async function withSwitchBusy(labelEl, checkboxEl, fn) {
+    if (checkboxEl.disabled) return;
+    checkboxEl.disabled = true;
+    labelEl.classList.add('busy');
+    try {
+      await fn();
+    } finally {
+      checkboxEl.disabled = false;
+      labelEl.classList.remove('busy');
+    }
+  }
 
   function draw() {
     root.innerHTML = `
@@ -180,9 +203,11 @@ export async function renderTimetableConstraints(root) {
           return;
         }
       }
-      const ok = await saveRow(turningOn, hasConfig ? readConfig() : undefined);
-      if (!ok) { toggleEl.checked = !turningOn; return; }
-      toast(turningOn ? 'Enabled.' : 'Disabled.', 'ok');
+      await withSwitchBusy(toggleEl.closest('.tt-switch'), toggleEl, async () => {
+        const ok = await saveRow(turningOn, hasConfig ? readConfig() : undefined);
+        if (!ok) { toggleEl.checked = !turningOn; return; }
+        toast(turningOn ? 'Enabled.' : 'Disabled.', 'ok');
+      });
     };
 
     if (hasConfig) {
@@ -241,22 +266,26 @@ export async function renderTimetableConstraints(root) {
     }, 'Adding…');
 
     root.querySelectorAll('.pair-enabled').forEach((chk) => chk.onchange = async () => {
-      const id = chk.closest('[data-pair-id]').dataset.pairId;
-      const row = constraints.find((c) => c.id === id);
-      const res = await Db.timetable.constraints.save({ id, type: row.type, enabled: chk.checked, config: row.config });
-      if (!res.ok) { toast(res.message, 'err'); chk.checked = !chk.checked; return; }
-      row.enabled = chk.checked;
-      toast('Saved.', 'ok');
+      await withSwitchBusy(chk.closest('.tt-switch'), chk, async () => {
+        const id = chk.closest('[data-pair-id]').dataset.pairId;
+        const row = constraints.find((c) => c.id === id);
+        const res = await Db.timetable.constraints.save({ id, type: row.type, enabled: chk.checked, config: row.config });
+        if (!res.ok) { toast(res.message, 'err'); chk.checked = !chk.checked; return; }
+        row.enabled = chk.checked;
+        toast('Saved.', 'ok');
+      });
     });
     root.querySelectorAll('.pair-remove').forEach((b) => b.onclick = () => {
       const id = b.closest('[data-pair-id]').dataset.pairId;
       confirmAction('Remove this pair?', async () => {
-        const res = await Db.timetable.constraints.remove(id);
-        if (!res.ok) { toast(res.message, 'err'); return; }
-        const i = constraints.findIndex((c) => c.id === id);
-        if (i > -1) constraints.splice(i, 1);
-        toast('Removed.', 'ok');
-        draw();
+        await withBusy(b, async () => {
+          const res = await Db.timetable.constraints.remove(id);
+          if (!res.ok) { toast(res.message, 'err'); return; }
+          const i = constraints.findIndex((c) => c.id === id);
+          if (i > -1) constraints.splice(i, 1);
+          toast('Removed.', 'ok');
+          draw();
+        }, 'Removing…');
       }, true);
     });
   }

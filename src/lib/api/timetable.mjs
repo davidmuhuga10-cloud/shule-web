@@ -489,6 +489,24 @@ export function createTimetableApi(supabase, settingsApi) {
       // enforced, not a hard failure).
       generateInput.constraints = constraintsRes.ok ? constraintsRes.data : [];
 
+      // Round 5 §10's version tracking doubles as Round 6 §3's fix for
+      // "regenerate produces nearly identical output": the engine is
+      // deterministic by design (generate.mjs's header comment), so without
+      // something to vary between runs the exact same input always
+      // produces the exact same layout. The next version_number this
+      // generate will become is a natural, already-tracked value that's
+      // guaranteed to differ every time — passed as the engine's `seed`, it
+      // genuinely reshuffles the placement each regenerate while staying
+      // fully deterministic/reproducible for that specific version.
+      // Queried here (before running the engine) so it's ready in time;
+      // reused below instead of querying it a second time.
+      const { data: existingVersionRows, error: versErr } = await supabase.from('timetable_entries')
+        .select('version_number').eq('academic_year_id', academicYearId).eq('term_id', termId);
+      if (versErr) return err(versErr.message);
+      const existingVersions = [...new Set((existingVersionRows || []).map((r) => Number(r.version_number) || 1))];
+      const nextVersion = existingVersions.length ? Math.max(...existingVersions) + 1 : 1;
+      generateInput.seed = nextVersion;
+
       const { entries, unresolved } = generateTimetable(generateInput);
 
       // Round 5 §10: a total placement failure (nothing at all could be
@@ -508,12 +526,6 @@ export function createTimetableApi(supabase, settingsApi) {
       // this regenerate turns out worse via entries.reactivateVersion()),
       // insert this result as a fresh version, then prune anything older
       // than the 3 most recent versions so the table doesn't grow forever.
-      const { data: existingVersionRows, error: versErr } = await supabase.from('timetable_entries')
-        .select('version_number').eq('academic_year_id', academicYearId).eq('term_id', termId);
-      if (versErr) return err(versErr.message);
-      const existingVersions = [...new Set((existingVersionRows || []).map((r) => Number(r.version_number) || 1))];
-      const nextVersion = existingVersions.length ? Math.max(...existingVersions) + 1 : 1;
-
       const { error: deactErr } = await supabase.from('timetable_entries').update({ is_active: false })
         .eq('academic_year_id', academicYearId).eq('term_id', termId).eq('is_active', true);
       if (deactErr) return err(deactErr.message);

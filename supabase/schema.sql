@@ -1311,6 +1311,16 @@ begin
       (p_school_id, v_year_id, 'Term 3', 'upcoming')
     on conflict (academic_year_id, name) do nothing;
   end if;
+
+  -- Round 6 §4: distribute_doubles is the one Timetable Constraint that's
+  -- ON by default for every school (see 0027_distribute_doubles.sql's
+  -- header comment for why) — no unique constraint to hang an ON CONFLICT
+  -- off (same situation as the grading_scales guard above), so an explicit
+  -- existence check instead.
+  if not exists (select 1 from public.timetable_constraints where school_id = p_school_id and type = 'distribute_doubles') then
+    insert into public.timetable_constraints (school_id, type, enabled, config)
+    values (p_school_id, 'distribute_doubles', true, '{}'::jsonb);
+  end if;
 end;
 $$;
 
@@ -1827,9 +1837,11 @@ create table public.timetable_constraints (
   config jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  -- Round 6 §4 adds distribute_doubles — see 0027_distribute_doubles.sql.
   constraint timetable_constraints_type_check check (type in (
     'subject_pair_not_consecutive', 'avoid_consecutive_intensive', 'teacher_no_immediate_after_out',
-    'pe_before_break', 'max_consecutive_periods_class', 'max_consecutive_periods_teacher'
+    'pe_before_break', 'max_consecutive_periods_class', 'max_consecutive_periods_teacher',
+    'distribute_doubles'
   ))
 );
 create trigger trg_timetable_constraints_updated_at before update on public.timetable_constraints
@@ -2027,6 +2039,14 @@ create policy results_parent_read on public.results for select
 -- results only, for every student in the cohort, regardless of who's
 -- asking — so a position never depends on what a staff member happens to
 -- be mid-editing, and is always a fair, stable, apples-to-apples number.
+--
+-- Round 6 §1 (BUG, see migrations/0028_round_report_card.sql): every
+-- subject's `score`, `total` and `average` here are now rounded to a WHOLE
+-- number (was 2 decimal places) — a combined subject (Subject Combination,
+-- e.g. SST/CRE) or a plain subject's own raw mark was still displaying a
+-- decimal on the Report Form. Purely a display change: nothing here fed
+-- into ranking even before this (the `cohort`/`ranked` CTEs below compute
+-- their own independent, unrounded totals for that).
 create or replace function public.get_report_card(p_exam_id uuid, p_student_id uuid)
 returns jsonb
 language plpgsql
@@ -2181,7 +2201,7 @@ begin
   select
     coalesce(jsonb_agg(jsonb_build_object(
       'subject_id', subject_id, 'subject_name', subject_name,
-      'score', round(effective_score, 2), 'grade_label', coalesce(grade_label, ''),
+      'score', round(effective_score), 'grade_label', coalesce(grade_label, ''),
       'points', points, 'remark', coalesce(remark, '')
     ) order by subject_name), '[]'::jsonb),
     coalesce(sum(effective_score), 0),
@@ -2189,7 +2209,7 @@ begin
   into v_subjects, v_total, v_count
   from graded;
 
-  v_average := case when v_count > 0 then round(v_total / v_count, 2) else 0 end;
+  v_average := case when v_count > 0 then round(v_total / v_count) else 0 end;
 
   select grade_label into v_overall_grade
     from public.grade_ranges gr
@@ -2294,7 +2314,7 @@ begin
     ),
     'exam', jsonb_build_object('name', v_exam.name, 'out_of', v_exam.out_of, 'exam_type', v_exam.exam_type),
     'session_name', coalesce(v_year.name, ''), 'term_name', coalesce(v_term.name, ''),
-    'subjects', v_subjects, 'total', v_total, 'average', v_average,
+    'subjects', v_subjects, 'total', round(v_total), 'average', v_average,
     'overall_grade', coalesce(v_overall_grade, ''), 'position', v_position,
     'class_size', coalesce(v_class_size, 0), 'below_minimum', v_below_minimum
   );

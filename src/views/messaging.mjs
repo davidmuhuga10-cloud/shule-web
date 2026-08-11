@@ -6,7 +6,7 @@
  * SMS" tab since the real Africa's Talking billing integration is a later
  * sprint.
  */
-import { esc, options, toast, renderPrereq, loader, fmtDate, withBusy } from '../app.js';
+import { esc, options, toast, renderPrereq, renderPrereqOrConnectivity, loader, fmtDate, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { groupMessagesByBatch } from '../lib/api/messaging.mjs';
 import { takeNavIntent } from '../lib/navIntent.mjs';
@@ -35,10 +35,15 @@ export async function viewMessaging(root) {
   const [classesRes, studentsRes, staffRes, examsRes] = await Promise.all([
     Db.classes.list(), Db.students.list({}), Db.staff.list(), Db.results.listExams()
   ]);
-  const classes = classesRes.ok ? classesRes.data : [];
-  const students = studentsRes.ok ? studentsRes.data : [];
-  const staff = staffRes.ok ? staffRes.data : [];
-  const exams = examsRes.ok ? examsRes.data : [];
+  // Round 6 §5 (recurring BUG): see examAnalysis.mjs for the full story.
+  if (!classesRes.ok || !studentsRes.ok || !staffRes.ok || !examsRes.ok) {
+    renderPrereqOrConnectivity(root, { ok: false, onRetry: () => viewMessaging(root) });
+    return;
+  }
+  const classes = classesRes.data;
+  const students = studentsRes.data;
+  const staff = staffRes.data;
+  const exams = examsRes.data;
   if (!classes.length) { renderPrereq(root, 'No classes found', 'Please create a class first.', 'classes', 'Go to Classes'); return; }
   // A "📨 Send Results" click from the Manage Exams board (brief Step 13)
   // hands off straight to the exam_results scope, pre-filled with exactly

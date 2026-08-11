@@ -64,7 +64,10 @@ export function computeGradeSummaries(students, subjects, bands) {
 
   const classSummary = gradeOrder.map((grade) => {
     const count = ranked.filter((s) => s.overall_grade === grade).length;
-    return { grade, count, pct: totalRanked ? Math.round((count / totalRanked) * 1000) / 10 : 0 };
+    // Round 6 §1: whole number, not one decimal place — "no subject should
+    // ever report marks as a decimal" extends to every figure the Mark
+    // List's summary tables show, this percentage included.
+    return { grade, count, pct: totalRanked ? Math.round((count / totalRanked) * 100) : 0 };
   });
 
   const genderSummary = gradeOrder.map((grade) => {

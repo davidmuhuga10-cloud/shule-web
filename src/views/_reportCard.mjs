@@ -49,7 +49,14 @@ export function renderReportCard(container, data, extra) {
 
   const pointsCounted = subjects.filter((x) => x.points !== null && x.points !== undefined && x.points !== '');
   const totalPoints = pointsCounted.length ? pointsCounted.reduce((a, x) => a + Number(x.points), 0) : null;
-  const meanPoints = pointsCounted.length ? Math.round((totalPoints / pointsCounted.length) * 100) / 100 : null;
+  // Round 6 §1: whole number, not 2dp — same "no subject should ever
+  // report marks as a decimal" fix as the Mark List (views/broadsheet.mjs),
+  // applied here to the Report Form's own summary boxes. get_report_card()
+  // (schema.sql / migrations/0028_round_report_card.sql) now rounds
+  // `total`/`average`/each subject's `score` the same way at the source —
+  // this JS-side rounding is a defensive backstop so the display is
+  // correct even against an older, not-yet-migrated database.
+  const meanPoints = pointsCounted.length ? Math.round(totalPoints / pointsCounted.length) : null;
   const outOfTotal = (Number(exam.out_of) || 100) * (subjects.length || 1);
 
   const initials = (s.full_name || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
@@ -84,8 +91,8 @@ export function renderReportCard(container, data, extra) {
       </div>
       <div class="r-summary">
         <div class="box"><div class="v">${esc(data.overall_grade || '—')}</div><div class="l">Performance Level</div></div>
-        <div class="box"><div class="v">${data.total} / ${outOfTotal}</div><div class="l">Total Marks</div></div>
-        <div class="box"><div class="v">${totalPoints === null ? '—' : totalPoints}</div><div class="l">Total Points</div></div>
+        <div class="box"><div class="v">${Math.round(data.total)} / ${outOfTotal}</div><div class="l">Total Marks</div></div>
+        <div class="box"><div class="v">${totalPoints === null ? '—' : Math.round(totalPoints)}</div><div class="l">Total Points</div></div>
         <div class="box"><div class="v">${meanPoints === null ? '—' : meanPoints}</div><div class="l">Mean Points</div></div>
       </div>
       <div class="r-body">
@@ -98,12 +105,12 @@ export function renderReportCard(container, data, extra) {
           <thead><tr><th>Learning Area</th><th class="num">Marks</th>${hasDeviation ? `<th class="num" title="This subject's score minus the class average for the same subject, in this exam only.">Dev. (vs Class)</th>` : ''}<th class="num">Grade</th><th>Performance Level</th><th>Teacher</th></tr></thead>
           <tbody>${subjects.map((sub) => {
             const dev = hasDeviation && classAvgBySubject[sub.subject_id] !== undefined && classAvgBySubject[sub.subject_id] !== null
-              ? Math.round((sub.score - classAvgBySubject[sub.subject_id]) * 100) / 100 : null;
+              ? Math.round(sub.score - classAvgBySubject[sub.subject_id]) : null;
             const teacher = teacherBySubject[sub.subject_id] || '—';
             return `<tr>
-              <td>${esc(sub.subject_name)}</td><td class="num">${sub.score}</td>
+              <td>${esc(sub.subject_name)}</td><td class="num">${Math.round(sub.score)}</td>
               ${hasDeviation ? `<td class="num">${dev === null ? '—' : `${dev > 0 ? '+' : ''}${dev}`}</td>` : ''}
-              <td class="num"><span class="badge blue">${esc(sub.grade_label || '—')}</span></td>
+              <td class="num"><span class="badge grade">${esc(sub.grade_label || '—')}</span></td>
               <td>${esc(sub.remark || '—')}</td><td>${esc(teacher)}</td>
             </tr>`;
           }).join('') || `<tr><td colspan="${hasDeviation ? 6 : 5}" class="muted center">No marks recorded for this exam.</td></tr>`}</tbody>

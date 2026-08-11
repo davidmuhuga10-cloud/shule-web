@@ -84,6 +84,15 @@
  * All 6 are SOFT — a school's preference, never allowed to leave a
  * genuinely placeable lesson unresolved just because honoring every
  * preference at once wasn't possible.
+ *
+ * Round 6 §4 adds a 7th, same SOFT treatment: distribute_doubles — "double
+ * lessons should be spread across the week and shouldn't directly follow
+ * one another where it can be avoided" (reported bug: a school's Wednesday
+ * ended up almost entirely double lessons back-to-back all day). Unlike
+ * the other 6 (opt-in, a school must configure them), this one is seeded
+ * ENABLED by default for every school (0027_distribute_doubles.sql) — the
+ * clustering it prevents is never something a school actually wants, so
+ * there's no reason to make them discover and turn it on themselves.
  * ----------------------------------------------------------------------
  */
 
@@ -96,12 +105,14 @@ export const DAY_NAMES = { 1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursd
 // subject has been individually configured, rather than blocking on setup.
 export const DEFAULT_PERIODS_PER_WEEK = 5;
 
-// Round 2 §7: the 6 constraint types the Constraints module supports —
-// exported so the API layer (timetable.mjs) and UI (timetableSetup.mjs)
-// share one canonical list instead of duplicating the type names.
+// Round 2 §7 (+ Round 6 §4): the constraint types the Constraints module
+// supports — exported so the API layer (timetable.mjs) and UI
+// (timetableSetup.mjs/timetableConstraints.mjs) share one canonical list
+// instead of duplicating the type names.
 export const CONSTRAINT_TYPES = [
   'subject_pair_not_consecutive', 'avoid_consecutive_intensive', 'teacher_no_immediate_after_out',
-  'pe_before_break', 'max_consecutive_periods_class', 'max_consecutive_periods_teacher'
+  'pe_before_break', 'max_consecutive_periods_class', 'max_consecutive_periods_teacher',
+  'distribute_doubles'
 ];
 
 function slotKey(a, b, c) { return `${a}|${b}|${c}`; }
@@ -235,6 +246,30 @@ function buildConstraintCheckers(constraints, ctx) {
         const after = runForward(ctx.staffBusy, unit.staff_id, day, secondPeriod || period, ctx.teachableIndexSet);
         return before + span + after > max;
       });
+    } else if (c.type === 'distribute_doubles') {
+      // Round 6 §4: "double lessons should be distributed across the week
+      // and should not directly follow one another where it can be
+      // avoided" (reported bug: a school's Wednesday ended up almost
+      // entirely double lessons back-to-back all day). Only ever evaluated
+      // for 'double' type units (a single never triggers it) — violates
+      // when landing directly adjacent to ANOTHER double already placed
+      // for this stream (immediately before the first period, or
+      // immediately after the second). Deliberately just this one rule,
+      // not also "this day already has a double, try another day first" —
+      // the pass system relaxes an ENTIRE constraint at once, not one rule
+      // within it, so bundling a second rule in would relax "don't touch
+      // an already-double-heavy day" and "don't sit directly next to one"
+      // together the moment a day genuinely runs out of room, throwing
+      // away the (still honorable) adjacency preference for no reason.
+      // Avoiding adjacency alone already pushes later doubles into a
+      // day's remaining slack — or another day entirely once that runs
+      // out — which is what actually spreads them across the week.
+      checkers.push((unit, day, period, secondPeriod) => {
+        if (unit.type !== 'double') return false;
+        const adjacentBefore = ctx.doubleSlot.has(slotKey(unit.stream_id, day, period - 1));
+        const adjacentAfter = ctx.doubleSlot.has(slotKey(unit.stream_id, day, (secondPeriod || period) + 1));
+        return adjacentBefore || adjacentAfter;
+      });
     }
   });
   return checkers;
@@ -272,9 +307,13 @@ export function generateTimetable(input) {
   const staffBusy = new Set();    // `${staff_id}|${day}|${period}`
   const subjectOnDay = new Set(); // `${stream_id}|${subject_id}|${day}`
   const streamSlotSubject = new Map(); // `${stream_id}|${day}|${period}` -> subject_id, for adjacency checks
+  // Round 6 §4 (distribute_doubles): every period that's part of an
+  // already-placed DOUBLE lesson for a stream (both halves) — feeds the
+  // "don't land directly next to another double" checker.
+  const doubleSlot = new Set(); // `${stream_id}|${day}|${period}`
 
   const customCheckers = buildConstraintCheckers(input.constraints, {
-    streamSlotSubject, unavailable, beforeBreakIndexes, teachableIndexSet, streamBusy, staffBusy
+    streamSlotSubject, unavailable, beforeBreakIndexes, teachableIndexSet, streamBusy, staffBusy, doubleSlot
   });
 
   const entries = [];
@@ -302,24 +341,53 @@ export function generateTimetable(input) {
       if (unit.staff_id) staffBusy.add(slotKey(unit.staff_id, day, secondPeriod));
       streamSlotSubject.set(slotKey(unit.stream_id, day, secondPeriod), unit.subject_id);
       entries.push({ day_of_week: day, period_index: secondPeriod, subject_id: unit.subject_id, class_id: unit.class_id, stream_id: unit.stream_id, staff_id: unit.staff_id || null });
+      // Round 6 §4: record both halves as "part of a double" — feeds the
+      // distribute_doubles checker.
+      doubleSlot.add(slotKey(unit.stream_id, day, period));
+      doubleSlot.add(slotKey(unit.stream_id, day, secondPeriod));
     }
   };
 
+  // Round 6 §3 ("regenerate produces nearly identical output"): the engine
+  // is intentionally deterministic (see this file's header comment — no
+  // Math.random(), for explainability/testability), which also means the
+  // exact same input always produced the exact same layout, regenerate
+  // after regenerate. input.seed varies which day each unit's search
+  // starts from — Db.timetable.generate() passes the next version_number
+  // as the seed (Round 5 §10's version tracking), so every regenerate
+  // genuinely reshuffles while staying fully deterministic/reproducible
+  // for that specific version. seed defaults to 0 (byte-for-byte the old
+  // idx-only rotation) when not supplied, e.g. by every existing test.
+  const seed = Number(input.seed) || 0;
+
   units.forEach((unit, idx) => {
-    const dayOrder = rotatedDays(days, idx);
+    const dayOrder = rotatedDays(days, idx + seed);
     let placed = false;
 
-    // Three passes, strictest first, each relaxing one more group of SOFT
+    // Four passes, strictest first, each relaxing one more group of SOFT
     // preferences if the previous pass couldn't fit this unit anywhere:
-    //   pass 0 — same-day-repeat AND every enabled custom Constraint enforced
-    //   pass 1 — same-day-repeat still enforced, custom Constraints relaxed
-    //   pass 2 — everything soft relaxed (hard constraints only)
+    //   pass 0 — same-day-repeat, custom Constraints, AND accidental-double
+    //            adjacency (Round 6 §5, singles only) all enforced
+    //   pass 1 — same-day-repeat + adjacency still enforced, custom
+    //            Constraints relaxed
+    //   pass 2 — same-day-repeat relaxed too; adjacency STILL enforced —
+    //            "yes, repeat this subject today if that's the only way,
+    //            but still don't drop it directly next to an existing
+    //            instance of itself" (that's what silently inflates the
+    //            visible double count beyond what was configured)
+    //   pass 3 — everything soft relaxed, including adjacency (hard
+    //            constraints only) — last resort, so a lesson is never
+    //            left unresolved just to avoid an accidental-looking
+    //            double when there's truly no other way to fit it (e.g. a
+    //            subject needing 3 periods squeezed onto a single
+    //            3-period day has no way to avoid some adjacency at all).
     // A school with no custom Constraints configured sees pass 0 and pass 1
-    // behave identically (nothing to relax between them), so this is
-    // byte-for-byte the same 2-outcome behaviour as before this round.
-    for (let pass = 0; pass < 3 && !placed; pass++) {
-      const allowSameDayRepeat = pass === 2;
+    // behave identically (nothing to relax between them), same as before
+    // this round.
+    for (let pass = 0; pass < 4 && !placed; pass++) {
+      const allowSameDayRepeat = pass >= 2;
       const allowCustomViolation = pass >= 1;
+      const allowOwnSubjectAdjacency = pass === 3;
       for (const day of dayOrder) {
         if (placed) break;
         for (const p of teachable) {
@@ -335,6 +403,21 @@ export function generateTimetable(input) {
             break;
           } else {
             if (!isFree(unit, day, p.period_index)) continue;
+            // Round 6 §5 (BUG: "generated doubles count doesn't match
+            // configuration" — 9 configured, 11 counted on the printout):
+            // root cause was two independently-placed SINGLE lessons of
+            // the same subject landing in adjacent periods (previously
+            // allowed the moment same-day-repeat was relaxed) —
+            // indistinguishable from a real double to anyone reading the
+            // printed grid, which silently inflated the visible double
+            // count beyond what was configured. Avoided here unless pass 3
+            // (last resort) — never left unresolved just to dodge this
+            // when a genuinely non-adjacent slot doesn't exist anywhere.
+            if (!allowOwnSubjectAdjacency) {
+              const prevSubject = streamSlotSubject.get(slotKey(unit.stream_id, day, p.period_index - 1));
+              const nextSubject = streamSlotSubject.get(slotKey(unit.stream_id, day, p.period_index + 1));
+              if (prevSubject === unit.subject_id || nextSubject === unit.subject_id) continue;
+            }
             if (!allowCustomViolation && violatesCustom(unit, day, p.period_index)) continue;
             place(unit, day, p.period_index);
             placed = true;
@@ -348,14 +431,68 @@ export function generateTimetable(input) {
       unresolved.push({
         stream_id: unit.stream_id, class_id: unit.class_id, subject_id: unit.subject_id,
         subject_name: unit.subject_name, staff_id: unit.staff_id, type: unit.type,
-        reason: unit.type === 'double'
-          ? 'No two consecutive free periods left for this stream/teacher.'
-          : 'No free period left for this stream/teacher.'
+        reason: diagnoseUnresolved(unit, days, teachable, streamBusy, staffBusy, unavailable)
       });
     }
   });
 
   return { entries, unresolved };
+}
+
+/** Round 6 §2 ("Couldn't be scheduled" despite no explicit teacher block):
+ *  the old generic "No free period left for this stream/teacher" reason
+ *  left a school unable to tell whether the CLASS's week was genuinely
+ *  full, or the TEACHER was the actual bottleneck — two different causes
+ *  needing two different fixes (add more periods to the grid, vs.
+ *  reassign/free up the teacher). This confirms which one actually
+ *  happened by scanning every remaining slot, rather than guessing. */
+function diagnoseUnresolved(unit, days, teachable, streamBusy, staffBusy, unavailable) {
+  const teacherFreeAt = (day, period) => !unit.staff_id
+    || (!staffBusy.has(slotKey(unit.staff_id, day, period)) && !unavailable.has(slotKey(unit.staff_id, day, period)));
+
+  if (unit.type === 'double') {
+    let anyStreamAdjacentFree = false;
+    let anyStreamAndTeacherAdjacentFree = false;
+    days.forEach((day) => {
+      teachable.forEach((p) => {
+        const nextTeachable = teachable.find((t) => t.period_index === p.period_index + 1);
+        if (!nextTeachable) return;
+        const streamFree = !streamBusy.has(slotKey(unit.stream_id, day, p.period_index)) && !streamBusy.has(slotKey(unit.stream_id, day, nextTeachable.period_index));
+        if (!streamFree) return;
+        anyStreamAdjacentFree = true;
+        if (teacherFreeAt(day, p.period_index) && teacherFreeAt(day, nextTeachable.period_index)) anyStreamAndTeacherAdjacentFree = true;
+      });
+    });
+    if (!anyStreamAdjacentFree) {
+      return "This class/arm has no two consecutive free periods left anywhere in the week — its timetable is essentially full. Add more periods to the grid, or free up a slot by moving another lesson.";
+    }
+    if (unit.staff_id && !anyStreamAndTeacherAdjacentFree) {
+      return "The class/arm still has free double-length slots, but the assigned teacher is already teaching elsewhere (or marked unavailable) in every one of them — assign a different teacher, reduce their other lessons, or clear an availability block.";
+    }
+    return "No two consecutive free periods lined up for both the class/arm and its teacher at the same time, even after every other placement preference was relaxed.";
+  }
+
+  // Note: the placement loop's last-resort pass (pass 3) drops even the
+  // accidental-double adjacency guard, so if this function is reached at
+  // all, a slot free for both stream and teacher genuinely doesn't exist
+  // anywhere in the week — there's no separate "blocked only by
+  // adjacency" case left to distinguish here.
+  let freeStreamCount = 0;
+  let freeStreamAndTeacherCount = 0;
+  days.forEach((day) => {
+    teachable.forEach((p) => {
+      if (streamBusy.has(slotKey(unit.stream_id, day, p.period_index))) return;
+      freeStreamCount++;
+      if (teacherFreeAt(day, p.period_index)) freeStreamAndTeacherCount++;
+    });
+  });
+  if (freeStreamCount === 0) {
+    return "This class/arm's timetable is completely full — there is no free period left anywhere in the week. Add more periods to the grid, or free up a slot by moving another lesson.";
+  }
+  if (unit.staff_id && freeStreamAndTeacherCount === 0) {
+    return `The class/arm still has ${freeStreamCount} free period${freeStreamCount === 1 ? '' : 's'} left this week, but the assigned teacher is already teaching elsewhere (or marked unavailable) in every one of them — assign a different teacher, reduce their other lessons, or clear an availability block.`;
+  }
+  return "No free period lined up for both the class/arm and its teacher, even after every other placement preference was relaxed.";
 }
 
 /** Round 2 §7: upfront capacity validation — "compare total teachable slots

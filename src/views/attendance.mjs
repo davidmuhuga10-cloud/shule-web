@@ -4,7 +4,7 @@
  * to both admin and teacher (see NAV in app.js) — Zeraki-style, marking
  * attendance is a day-to-day teacher action, not admin-only.
  */
-import { esc, options, toast, renderPrereq, loader, state, withBusy } from '../app.js';
+import { esc, options, toast, renderPrereq, renderPrereqOrConnectivity, loader, state, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { computeAttendanceFlags } from '../lib/staffAttendance.mjs';
 
@@ -22,7 +22,9 @@ function todayStr() {
 
 export async function viewAttendance(root) {
   const classesRes = await Db.classes.list();
-  const classes = classesRes.ok ? classesRes.data : [];
+  // Round 6 §5 (recurring BUG): see examAnalysis.mjs for the full story.
+  if (!classesRes.ok) { renderPrereqOrConnectivity(root, { ok: false, onRetry: () => viewAttendance(root) }); return; }
+  const classes = classesRes.data;
   if (!classes.length) { renderPrereq(root, 'No classes found', 'Please create a class before marking attendance.', 'classes', 'Go to Classes'); return; }
   render(root, classes, { tab: 'mark-students', class_id: classes[0].id, date: todayStr() });
 }
