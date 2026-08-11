@@ -14,7 +14,7 @@
  * to actually look at what a partial timetable is missing, exactly as
  * before.
  */
-import { options, toast, withBusy, confirmAction, esc } from '../app.js';
+import { options, toast, withBusy, confirmAction, esc, renderPrereqOrConnectivity } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 
 function pickDefaultYearTerm(years, termsByYear) {
@@ -27,8 +27,14 @@ function pickDefaultYearTerm(years, termsByYear) {
 
 export async function viewTimetableGenerate(root, onGenerated) {
   const [yearsRes, periodsRes] = await Promise.all([Db.academicYears.list(), Db.timetable.periods.list()]);
-  const years = yearsRes.ok ? yearsRes.data : [];
-  const periods = periodsRes.ok ? periodsRes.data : [];
+  // Round 5 §5 (BUG): don't conflate a failed fetch (usually a lost/flaky
+  // connection) with "genuinely not configured yet".
+  if (!yearsRes.ok || !periodsRes.ok) {
+    renderPrereqOrConnectivity(root, { ok: false, onRetry: () => viewTimetableGenerate(root, onGenerated) });
+    return;
+  }
+  const years = yearsRes.data;
+  const periods = periodsRes.data;
 
   if (!years.length) { root.innerHTML = `<div class="card"><div class="card-b"><div class="empty warn"><div class="e-ico">⚠️</div><h3>No academic years found</h3><p>Set up an academic year and term first (Settings → Academic Years &amp; Terms).</p></div></div></div>`; return; }
   if (!periods.length) { root.innerHTML = `<div class="card"><div class="card-b"><div class="empty warn"><div class="e-ico">⚠️</div><h3>Set up your period grid first</h3><p>Go to the Setup tab and define your school's daily periods before generating a timetable.</p></div></div></div>`; return; }
@@ -48,7 +54,7 @@ export async function viewTimetableGenerate(root, onGenerated) {
           <div class="field"><label>Academic Year</label><select id="tt-year">${options(years, 'id', 'name', sel.year_id, 'Choose a year')}</select></div>
           <div class="field"><label>Term</label><select id="tt-term">${options(terms, 'id', 'name', sel.term_id, 'Choose a term')}</select></div>
           <div class="field"><label>&nbsp;</label><button class="btn" id="tt-generate">🔄 Generate Timetable</button></div>
-          <div class="field"><label>&nbsp;</label><p class="hint" style="margin:0">Regenerating replaces this term's whole timetable — existing entries for it are cleared first. Once done, you'll be taken straight to the View tab.</p></div>
+          <div class="field"><label>&nbsp;</label><p class="hint" style="margin:0">Regenerating replaces this term's active timetable — the last 3 versions are kept, so you can switch back on the View tab if this one turns out worse. Once done, you'll be taken straight there.</p></div>
         </div>
       </div>
       <div id="tt-gen-result"></div>
@@ -60,7 +66,7 @@ export async function viewTimetableGenerate(root, onGenerated) {
 
     root.querySelector('#tt-generate').onclick = () => {
       if (!sel.year_id || !sel.term_id) { toast('Choose an academic year and term first.', 'err'); return; }
-      confirmAction('Generate a fresh timetable for this term? This replaces any existing timetable already saved for it.', async () => {
+      confirmAction('Generate a fresh timetable for this term? This becomes the active one everyone sees — the current version is kept and can be switched back to from the View tab if needed.', async () => {
         await withBusy(root.querySelector('#tt-generate'), async () => {
           const res = await Db.timetable.generate(sel.year_id, sel.term_id);
           if (!res.ok) {

@@ -19,7 +19,7 @@ import { computeGradeSummaries } from '../lib/broadsheetSummary.mjs';
 import { downloadXlsxAOA } from '../lib/xlsxUtil.mjs';
 import { buildBroadsheetAoa } from '../lib/broadsheetXlsx.mjs';
 import { applyMeritListDisplayPrefs } from '../lib/meritListPrefs.mjs';
-import { printHeaderHtml, isContactInfoComplete, renderMissingContactInfo } from '../lib/printHeader.mjs';
+import { printHeaderHtml, reportTitleBarHtml, isContactInfoComplete, renderMissingContactInfo } from '../lib/printHeader.mjs';
 
 export async function viewBroadsheet(root) {
   const [examsRes, classesRes] = await Promise.all([Db.results.listExams(), Db.classes.list()]);
@@ -82,11 +82,57 @@ function subjectHeaderHtml(sub) {
 }
 
 function subjectRowCellsHtml(sub, student) {
-  if (!sub.papers || !sub.papers.length) return cell(student.scores[sub.id], student.grades[sub.id]);
+  if (!sub.papers || !sub.papers.length) {
+    // Round 5 §2: a Subject Combination's combined score is a weighted sum
+    // across differently-scaled member subjects, so it very often lands on
+    // a decimal (e.g. 74.35) — round it for DISPLAY only here; the exact
+    // value keeps feeding total/average/ranking unchanged (see results.mjs,
+    // where `scores` is computed).
+    const score = student.scores[sub.id];
+    const displayScore = sub.is_combination && score !== null && score !== undefined ? Math.round(score) : score;
+    return cell(displayScore, student.grades[sub.id]);
+  }
   const raw = (student.paperScores && student.paperScores[sub.id]) || {};
   const paperCells = sub.papers.map((p) => paperCell(raw[p.id] === undefined ? null : raw[p.id])).join('');
   const pct = student.subjectPct ? student.subjectPct[sub.id] : null;
   return `${paperCells}${cell(pct === null || pct === undefined ? null : pct, student.grades[sub.id])}`;
+}
+
+/** Round 5 §2: the TOTAL/AVERAGE rows at the very bottom of the Merit List —
+ *  one figure per subject column (each Learning Area Paper's own
+ *  sub-column, and its combined % column, get their own total/average too),
+ *  summed/averaged across whichever students are currently shown (respects
+ *  the active class/arm filter — same set the grid above renders). Ranks,
+ *  grades and the other summary columns (SBJ..OVR POS) aren't meaningful to
+ *  sum or average, so they're left blank on these two rows. */
+function aggregate(nums, mode) {
+  if (!nums.length) return null;
+  const sum = nums.reduce((a, v) => a + v, 0);
+  return mode === 'sum' ? sum : sum / nums.length;
+}
+function subjectAggCellsHtml(sub, students, mode) {
+  if (!sub.papers || !sub.papers.length) {
+    const nums = students.map((s) => s.scores[sub.id]).filter((v) => v !== null && v !== undefined && !isNaN(v));
+    const val = aggregate(nums, mode);
+    if (val === null) return '<td class="num">—</td>';
+    const rounded = sub.is_combination ? Math.round(val) : Math.round(val * 100) / 100;
+    return `<td class="num"><b>${rounded}</b></td>`;
+  }
+  const paperCells = sub.papers.map((p) => {
+    const nums = students.map((s) => (s.paperScores && s.paperScores[sub.id] ? s.paperScores[sub.id][p.id] : undefined)).filter((v) => v !== null && v !== undefined && !isNaN(v));
+    const val = aggregate(nums, mode);
+    return val === null ? '<td class="num">—</td>' : `<td class="num">${Math.round(val * 100) / 100}</td>`;
+  }).join('');
+  const pctNums = students.map((s) => s.subjectPct && s.subjectPct[sub.id]).filter((v) => v !== null && v !== undefined && !isNaN(v));
+  const pctVal = aggregate(pctNums, mode);
+  const pctCell = pctVal === null ? '<td class="num">—</td>' : `<td class="num"><b>${Math.round(pctVal)}</b></td>`;
+  return `${paperCells}${pctCell}`;
+}
+function aggRowHtml(label, subjects, students, mode) {
+  return `<tr class="bs-agg-row"><td class="id-col"></td><td class="name-col"><b>${esc(label)}</b></td><td class="str-col"></td>
+    ${subjects.map((sub) => subjectAggCellsHtml(sub, students, mode)).join('')}
+    <td class="num sum-col" colspan="9"></td>
+  </tr>`;
 }
 
 async function load(root, classes, sel) {
@@ -124,7 +170,8 @@ async function load(root, classes, sel) {
     </div>
     <div class="card">
       <div class="card-b" style="border-bottom:1px solid var(--line);padding-bottom:12px">
-        ${printHeaderHtml(settings, `${res.exam.name} — Mark List — ${cls ? cls.name : ''}`)}
+        ${printHeaderHtml(settings)}
+        ${reportTitleBarHtml(`${res.exam.name} — Mark List — ${cls ? cls.name : ''}`)}
       </div>
       <div class="card-b table-wrap"><table class="mark-list-grid">
         <thead><tr><th class="id-col">Adm. No.</th><th class="name-col">Name</th><th class="str-col">Arm</th>
@@ -140,7 +187,7 @@ async function load(root, classes, sel) {
           <td class="num sum-col">${s.total_points === null ? '—' : s.total_points}</td><td class="num sum-col">${s.mean_points === null ? '—' : s.mean_points}</td>
           <td class="num sum-col">${s.deviation > 0 ? '+' : ''}${s.deviation}</td>
           <td class="num sum-col">${s.stream_position || '—'}</td><td class="num sum-col"><b>${s.position || '—'}</b></td>
-        </tr>`).join('')}</tbody>
+        </tr>`).join('')}${aggRowHtml('TOTAL', res.subjects, res.students, 'sum')}${aggRowHtml('AVERAGE', res.subjects, res.students, 'avg')}</tbody>
       </table></div>
       ${summaryTablesHtml(res.students, res.subjects, bands)}
     </div>

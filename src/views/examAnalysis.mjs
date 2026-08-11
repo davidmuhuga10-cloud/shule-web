@@ -13,7 +13,7 @@ import { Db } from '../lib/api/index.mjs';
 import { downloadXlsxAOA } from '../lib/xlsxUtil.mjs';
 import { buildExamAnalysis } from '../lib/examAnalysis.mjs';
 import { buildExamAnalysisAoa } from '../lib/examAnalysisXlsx.mjs';
-import { printHeaderHtml, isContactInfoComplete, renderMissingContactInfo } from '../lib/printHeader.mjs';
+import { printHeaderHtml, reportTitleBarHtml, isContactInfoComplete, renderMissingContactInfo } from '../lib/printHeader.mjs';
 import { takeNavIntent } from '../lib/navIntent.mjs';
 
 export async function viewExamAnalysis(root) {
@@ -131,7 +131,8 @@ async function load(root, classes, sel) {
     </div>
     <div class="card">
       <div class="card-b" style="border-bottom:1px solid var(--line);padding-bottom:12px">
-        ${printHeaderHtml(settings, `${bsRes.exam.name} — Exam Analysis — ${cls ? cls.name : ''}`)}
+        ${printHeaderHtml(settings)}
+        ${reportTitleBarHtml(`${bsRes.exam.name} — Exam Analysis — ${cls ? cls.name : ''}`)}
       </div>
       <div class="card-b">
         <div class="grid3" style="text-align:center">

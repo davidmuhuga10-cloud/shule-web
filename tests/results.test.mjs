@@ -184,6 +184,24 @@ async function run() {
     check('a student\'s paperScores has no entry for a non-papers subject', !('su2' in (janeRow.paperScores || {})));
   }
 
+  // ---- Round 5 §2: Learning Area Papers % is rounded to a whole number ------------
+  {
+    const { sb, results } = freshApis();
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', class_ids: ['c1'] })).data;
+    sb._tables.subject_papers.push(
+      { id: 'p1', exam_id: exam.id, class_id: 'c1', subject_id: 'su1', name: 'Paper 1', paper_no: 1, weight: 0.5, out_of: 100 },
+      { id: 'p2', exam_id: exam.id, class_id: 'c1', subject_id: 'su1', name: 'Paper 2', paper_no: 2, weight: 0.5, out_of: 100 }
+    );
+    // 77*0.5 + 78*0.5 = 77.5 -> would have shown as 77.5 before Round 5;
+    // now rounds to a whole number (77.5 rounds up to 78) for display.
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', paper_id: 'p1', scores: [{ student_id: 's1', score: '77' }] });
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', paper_id: 'p2', scores: [{ student_id: 's1', score: '78' }] });
+    const sheet = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1', includeUnpublished: true });
+    const jane = sheet.students.find((s) => s.student_id === 's1');
+    check('subjectPct rounds a decimal (77.5) to the nearest whole number (78)', jane.subjectPct.su1 === 78);
+    check('the underlying combined score used for totals/ranking stays precise, unrounded', jane.scores.su1 === 77.5);
+  }
+
   // ---- Learning Area Papers: setup is scoped per-exam, not a permanent subject property ----
   {
     const { sb, results } = freshApis();

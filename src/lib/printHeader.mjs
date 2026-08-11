@@ -41,9 +41,12 @@ export function addressLines(settings) {
   return lines;
 }
 
-/** The standard report header: logo far left, school name centered with the
- *  report title below it, address block far right. */
-export function printHeaderHtml(settings, reportTitle) {
+/** The standard report header: logo far left, school name centered, address
+ *  block far right. Round 5 §2/§3: no divider line under this row anymore —
+ *  that line used to run under every report's header except the Report
+ *  Form's (which had already dropped it, see reportTitleBarHtml() below);
+ *  now nothing does. */
+export function printHeaderHtml(settings) {
   settings = settings || {};
   const logoHtml = settings.logo
     ? `<img class="logo-thumb ph-logo-img" src="${settings.logo}">`
@@ -53,10 +56,21 @@ export function printHeaderHtml(settings, reportTitle) {
     <div class="ph-logo">${logoHtml}</div>
     <div class="ph-center">
       <div class="ph-school">${esc(settings.school_name || 'School')}</div>
-      ${reportTitle ? `<div class="ph-title">${esc(reportTitle)}</div>` : ''}
     </div>
     <div class="ph-address">${lines.map((l) => `<div>${esc(l)}</div>`).join('')}</div>
   </div>`;
+}
+
+/** Round 5 §2/§3: the solid brand-green title bar that used to be built by
+ *  hand just for the Report Form (_reportCard.mjs's old bespoke
+ *  `.r-title-bar` div) — pulled out here so every printable report can use
+ *  the exact same "green rectangle" treatment under its header, instead of
+ *  each report inventing its own subtitle styling (previously a small plain
+ *  ph-title text line for everything except Report Forms). Pass whatever
+ *  descriptive title that report already shows (exam name, class, etc). */
+export function reportTitleBarHtml(title) {
+  if (!title) return '';
+  return `<div class="ph-title-bar">${esc(title)}</div>`;
 }
 
 /** The blocking message shown instead of a report when contact info isn't

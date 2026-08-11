@@ -16,7 +16,7 @@
  * the active year/term itself when not given (e.g. navigating to View
  * directly rather than via a redirect).
  */
-import { esc, options, toast, loader, modal, closeModal, confirmAction, printOptionsHtml, wirePrintOptions, withBusy, go } from '../app.js';
+import { esc, options, toast, loader, modal, closeModal, confirmAction, printOptionsHtml, wirePrintOptions, withBusy, go, renderPrereqOrConnectivity } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { isContactInfoComplete, renderMissingContactInfo } from '../lib/printHeader.mjs';
 import { timetableGridPageHtml } from './_timetableGrid.mjs';
@@ -33,11 +33,20 @@ export async function viewTimetableView(root, preselect) {
   const [yearsRes, classesRes, staffRes, roomsRes, periodsRes, daysRes, settingsRes] = await Promise.all([
     Db.academicYears.list(), Db.classes.list(), Db.staff.list(), Db.timetable.rooms.list(), Db.timetable.periods.list(), Db.timetable.days.get(), Db.settings.get()
   ]);
-  const years = yearsRes.ok ? yearsRes.data : [];
+  // Round 5 §5 (BUG): a fetch failure (almost always a lost/flaky
+  // connection, not a genuine "nothing configured" state) used to get
+  // silently swallowed into an empty array here, which then showed the
+  // misleading "No academic years found" message even on a
+  // fully-configured school. Check `.ok` before falling back to `[]`.
+  if (!yearsRes.ok || !periodsRes.ok) {
+    renderPrereqOrConnectivity(root, { ok: false, onRetry: () => viewTimetableView(root, preselect) });
+    return;
+  }
+  const years = yearsRes.data;
   const classes = classesRes.ok ? classesRes.data : [];
   const staff = (staffRes.ok ? staffRes.data : []).filter((s) => s.status === 'active');
   const rooms = roomsRes.ok ? roomsRes.data : [];
-  const periods = periodsRes.ok ? periodsRes.data : [];
+  const periods = periodsRes.data;
   const days = daysRes.ok ? daysRes.data : [1, 2, 3, 4, 5];
   const settings = settingsRes.ok ? settingsRes.data : {};
 
@@ -71,18 +80,54 @@ function render(root, state) {
       <button data-mode="stream" class="${sel.mode === 'stream' ? 'active' : ''}">By Class / Arm</button>
       <button data-mode="teacher" class="${sel.mode === 'teacher' ? 'active' : ''}">By Teacher</button>
     </div>
+    <div id="tt-versions" class="no-print"></div>
     <div class="card no-print" style="margin-bottom:16px" id="tt-picker"></div>
     <div id="tt-view"></div>
   `;
 
   const yearSel = root.querySelector('#tt-year'), termSel = root.querySelector('#tt-term');
   yearSel.onchange = () => { sel.year_id = yearSel.value; sel.term_id = (state.termsByYear[sel.year_id] || [])[0]?.id || ''; render(root, state); };
-  termSel.onchange = () => { sel.term_id = termSel.value; loadView(); };
+  termSel.onchange = () => { sel.term_id = termSel.value; loadVersions(); loadView(); };
 
   root.querySelectorAll('[data-mode]').forEach((b) => b.onclick = () => { sel.mode = b.dataset.mode; render(root, state); });
 
   renderPicker();
+  loadVersions();
   loadView();
+
+  /** Round 5 §10: a regenerate no longer deletes the previous timetable —
+   *  it keeps the last 3 as deactivated "versions". This shows what's
+   *  available for the currently chosen (year, term) and lets someone
+   *  switch back to an older one if a fresh regenerate turns out worse.
+   *  Only shown when there's actually more than one version to choose
+   *  from — a brand-new or once-generated term has nothing to compare. */
+  async function loadVersions() {
+    const box = root.querySelector('#tt-versions');
+    if (!box) return;
+    if (!sel.year_id || !sel.term_id) { box.innerHTML = ''; return; }
+    const res = await Db.timetable.entries.listVersions(sel.year_id, sel.term_id);
+    if (!res.ok || res.data.length < 2) { box.innerHTML = ''; return; }
+    const items = res.data.map((v) => {
+      const when = v.created_at ? new Date(v.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+      if (v.is_active) return `<span class="tt-ver-pill tt-ver-active">Version ${v.version_number} — current${when ? ` (${esc(when)})` : ''}</span>`;
+      return `<button type="button" class="tt-ver-pill tt-ver-switch" data-version="${v.version_number}">Version ${v.version_number}${when ? ` — ${esc(when)}` : ''} · Reactivate</button>`;
+    }).join('');
+    box.innerHTML = `<div class="card" style="margin-bottom:16px"><div class="card-b">
+      <p class="hint" style="margin:0 0 8px">Timetable history for this term — the last ${res.data.length} generated version${res.data.length === 1 ? '' : 's'} are kept. Switch back to an older one if a regenerate made things worse.</p>
+      <div class="tt-ver-list">${items}</div>
+    </div></div>`;
+    box.querySelectorAll('.tt-ver-switch').forEach((btn) => {
+      btn.onclick = () => confirmAction(`Switch the active timetable back to Version ${btn.dataset.version}? This becomes the one everyone sees, prints, and edits — nothing is deleted, the current version stays available too.`, async () => {
+        await withBusy(btn, async () => {
+          const r = await Db.timetable.entries.reactivateVersion(sel.year_id, sel.term_id, Number(btn.dataset.version));
+          if (!r.ok) { toast(r.message, 'err'); return; }
+          toast(`Switched to Version ${btn.dataset.version}.`, 'ok');
+          loadVersions();
+          loadView();
+        }, 'Switching…');
+      });
+    });
+  }
 
   function renderPicker() {
     const picker = root.querySelector('#tt-picker');

@@ -1,5 +1,5 @@
 import { esc } from '../app.js';
-import { printHeaderHtml } from '../lib/printHeader.mjs';
+import { printHeaderHtml, reportTitleBarHtml } from '../lib/printHeader.mjs';
 
 /**
  * Renders a Report Form (report card) into `container` from a
@@ -67,9 +67,9 @@ export function renderReportCard(container, data, extra) {
   container.innerHTML = `
     <div class="report">
       <div class="r-head">
-        ${printHeaderHtml(settings, 'Academic Report Form')}
+        ${printHeaderHtml(settings)}
       </div>
-      <div class="r-title-bar">${esc(s.class_name)}${s.stream_name ? ' ' + esc(s.stream_name) : ''} — ${esc(exam.name)}${data.term_name ? ' · ' + esc(data.term_name) : ''}${data.session_name ? ' · ' + esc(data.session_name) : ''}</div>
+      ${reportTitleBarHtml(`${s.class_name || ''}${s.stream_name ? ' ' + s.stream_name : ''} — ${exam.name || ''}${data.term_name ? ' · ' + data.term_name : ''}${data.session_name ? ' · ' + data.session_name : ''}`)}
       <div class="r-student-row">
         <div class="r-avatar">${esc(initials)}</div>
         <div class="r-meta">

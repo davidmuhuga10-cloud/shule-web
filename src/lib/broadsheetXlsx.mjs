@@ -38,10 +38,44 @@ function columnCell(col, student) {
     const gr = student.grades[col.subject.id];
     return gr && gr.grade_label ? `${pct} (${gr.grade_label})` : String(pct);
   }
-  const score = student.scores[col.subject.id];
+  let score = student.scores[col.subject.id];
   if (score === null || score === undefined) return '—';
+  // Round 5 §2: a combined subject's score is a weighted sum across
+  // differently-scaled member subjects, so it very often lands on a
+  // decimal — round it here too, same as the on-screen Mark List
+  // (views/broadsheet.mjs), so the Excel export and the screen never show
+  // two different numbers for the same combined subject.
+  if (col.subject.is_combination) score = Math.round(score);
   const gr = student.grades[col.subject.id];
   return gr && gr.grade_label ? `${score} (${gr.grade_label})` : String(score);
+}
+
+/** Round 5 §2: same TOTAL/AVERAGE rows the on-screen Mark List now shows at
+ *  the bottom of its grid (views/broadsheet.mjs's aggRowHtml) — one figure
+ *  per subject column, summed/averaged across every student in this export.
+ *  Kept in lockstep with the screen version's rounding rules (whole numbers
+ *  for a Learning Area Papers % column or a combined subject, 2dp
+ *  otherwise) so the download never disagrees with what was on screen. */
+function aggregate(nums, mode) {
+  if (!nums.length) return null;
+  const sum = nums.reduce((a, v) => a + v, 0);
+  return mode === 'sum' ? sum : sum / nums.length;
+}
+function columnAggCell(col, students, mode) {
+  if (col.type === 'paper') {
+    const nums = students.map((s) => s.paperScores && s.paperScores[col.subject.id] ? s.paperScores[col.subject.id][col.paper.id] : undefined).filter((v) => v !== null && v !== undefined && !isNaN(v));
+    const val = aggregate(nums, mode);
+    return val === null ? '—' : Math.round(val * 100) / 100;
+  }
+  if (col.type === 'pct') {
+    const nums = students.map((s) => s.subjectPct && s.subjectPct[col.subject.id]).filter((v) => v !== null && v !== undefined && !isNaN(v));
+    const val = aggregate(nums, mode);
+    return val === null ? '—' : Math.round(val);
+  }
+  const nums = students.map((s) => s.scores[col.subject.id]).filter((v) => v !== null && v !== undefined && !isNaN(v));
+  const val = aggregate(nums, mode);
+  if (val === null) return '—';
+  return col.subject.is_combination ? Math.round(val) : Math.round(val * 100) / 100;
 }
 
 /** Builds the Mark List export as an array-of-arrays: school details first
@@ -83,6 +117,8 @@ export function buildBroadsheetAoa({ settings, exam, cls, streamName, subjects, 
     ]);
   });
 
+  aoa.push(['', 'TOTAL', '', ...columns.map((c) => columnAggCell(c, students, 'sum'))]);
+  aoa.push(['', 'AVERAGE', '', ...columns.map((c) => columnAggCell(c, students, 'avg'))]);
   aoa.push([]);
   aoa.push(['Class average:', class_average]);
   return aoa;

@@ -15,7 +15,7 @@ import { esc, options, renderPrereq, loader, toast, go, printOptionsHtml, wirePr
 import { Db } from '../lib/api/index.mjs';
 import { downloadXlsxAOA } from '../lib/xlsxUtil.mjs';
 import { buildScoreSheetAoa } from '../lib/scoreSheetXlsx.mjs';
-import { printHeaderHtml, isContactInfoComplete, renderMissingContactInfo } from '../lib/printHeader.mjs';
+import { printHeaderHtml, reportTitleBarHtml, isContactInfoComplete, renderMissingContactInfo } from '../lib/printHeader.mjs';
 
 export async function viewScoreSheet(root) {
   const [classesRes, subjectsRes] = await Promise.all([Db.classes.list(), Db.subjects.list()]);
@@ -107,7 +107,8 @@ async function load(root, classes, subjects, sel) {
     </div>
     <div class="card">
       <div class="card-b" style="border-bottom:1px solid var(--line);padding-bottom:12px">
-        ${printHeaderHtml(settings, 'Score Sheet')}
+        ${printHeaderHtml(settings)}
+        ${reportTitleBarHtml('Score Sheet')}
       </div>
       <div class="card-b table-wrap">
         <div class="grid-title-band">${titleBand}</div>

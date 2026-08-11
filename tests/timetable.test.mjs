@@ -338,6 +338,145 @@ async function run() {
     check('generate() queries subject_class_assignments a CONSTANT number of times (2), not once per stream (12 streams here)', scaCalls === 2);
   }
 
+  // ---- Round 5 §10: version history — entries.list/listVersions/reactivateVersion --
+  // Seeded directly rather than through generate(), so the scenario is
+  // fully controlled: version 1 (deactivated) has a Math lesson AND staffA
+  // busy in slot day1/period1; version 2 (active) has a different subject
+  // in that same slot, with staffA free. This is exactly the situation
+  // generate() produces on a regenerate, minus the placement engine.
+  {
+    const { timetable, sb } = freshApis();
+    sb._tables.timetable_entries = [
+      { id: 'e-v1', school_id: 'sch1', academic_year_id: 'y1', term_id: 't1', day_of_week: 1, period_index: 1,
+        subject_id: 'math', class_id: 'c1', stream_id: 'str1', staff_id: 'staffA', room_id: null,
+        version_number: 1, is_active: false, created_at: '2026-01-01T00:00:00.000Z' },
+      { id: 'e-v2', school_id: 'sch1', academic_year_id: 'y1', term_id: 't1', day_of_week: 1, period_index: 1,
+        subject_id: 'eng', class_id: 'c1', stream_id: 'str1', staff_id: null, room_id: null,
+        version_number: 2, is_active: true, created_at: '2026-01-02T00:00:00.000Z' }
+    ];
+
+    const activeList = await timetable.entries.list({ academic_year_id: 'y1', term_id: 't1' });
+    check('entries.list with no version_number defaults to the ACTIVE version only', activeList.ok === true && activeList.data.length === 1 && activeList.data[0].id === 'e-v2');
+
+    const oldList = await timetable.entries.list({ academic_year_id: 'y1', term_id: 't1', version_number: 1 });
+    check('entries.list can preview a specific (deactivated) older version by number', oldList.data.length === 1 && oldList.data[0].id === 'e-v1');
+
+    const versions = await timetable.entries.listVersions('y1', 't1');
+    check('listVersions returns both kept versions, newest first', versions.ok === true && versions.data.map((v) => v.version_number).join(',') === '2,1');
+    check('listVersions correctly flags which one is active', versions.data.find((v) => v.version_number === 2).is_active === true && versions.data.find((v) => v.version_number === 1).is_active === false);
+    check('listVersions requires an academic year/term', (await timetable.entries.listVersions(null, 't1')).ok === false);
+
+    // The whole point of Round 5 §10's clash-check fix: staffA is busy in
+    // the DEACTIVATED version 1 at day1/period1, but that no longer
+    // "occupies" the slot as far as the current (active) timetable is
+    // concerned — a manual edit placing staffA in that same slot on a
+    // DIFFERENT stream must be allowed.
+    const noClash = await timetable.entries.saveEntry({
+      academic_year_id: 'y1', term_id: 't1', day_of_week: 1, period_index: 1,
+      subject_id: 'math', class_id: 'c1', stream_id: 'str2', staff_id: 'staffA'
+    });
+    check('saveEntry only checks clashes against the ACTIVE version, not deactivated older ones', noClash.ok === true);
+    const newRow = sb._tables.timetable_entries.find((r) => r.stream_id === 'str2');
+    check('a new manual entry lands on the currently-active version_number', newRow.version_number === 2 && newRow.is_active === true);
+
+    // A genuine clash WITHIN the active version is still blocked (eng in
+    // version 2 already occupies str1/day1/period1).
+    const realClash = await timetable.entries.saveEntry({
+      academic_year_id: 'y1', term_id: 't1', day_of_week: 1, period_index: 1,
+      subject_id: 'math', class_id: 'c1', stream_id: 'str1', staff_id: 'staffB'
+    });
+    check('saveEntry still blocks a genuine clash within the active version', realClash.ok === false && /stream/i.test(realClash.message));
+
+    const badReactivate = await timetable.entries.reactivateVersion('y1', 't1', 99);
+    check('reactivateVersion rejects a version number that does not exist for this scope', badReactivate.ok === false);
+
+    const reactivated = await timetable.entries.reactivateVersion('y1', 't1', 1);
+    check('reactivateVersion succeeds for a version that does exist', reactivated.ok === true);
+    const afterReactivate = await timetable.entries.list({ academic_year_id: 'y1', term_id: 't1' });
+    check('after reactivating version 1, the default (active-only) list now returns version 1\'s entry', afterReactivate.data.length === 1 && afterReactivate.data[0].id === 'e-v1');
+    const versionsAfter = await timetable.entries.listVersions('y1', 't1');
+    check('reactivateVersion flips is_active — version 1 now active, version 2 now inactive', versionsAfter.data.find((v) => v.version_number === 1).is_active === true && versionsAfter.data.find((v) => v.version_number === 2).is_active === false);
+
+    // A fresh manual entry after reactivating lands on the NEW active version.
+    const afterReactivateInsert = await timetable.entries.saveEntry({
+      academic_year_id: 'y1', term_id: 't1', day_of_week: 2, period_index: 1,
+      subject_id: 'eng', class_id: 'c1', stream_id: 'str1', staff_id: null
+    });
+    check('saveEntry after a reactivation lands on the now-active version', afterReactivateInsert.ok === true);
+    const latestRow = sb._tables.timetable_entries.find((r) => r.day_of_week === 2);
+    check('...specifically version_number 1, not the previously-active 2', latestRow.version_number === 1);
+  }
+
+  // ---- Round 5 §10: generate() keeps the last 3 versions and prunes older ones --
+  {
+    const { timetable } = freshApis();
+    await timetable.periods.saveGrid([
+      { start_time: '08:00', end_time: '08:40' }, { start_time: '08:40', end_time: '09:20' },
+      { start_time: '09:20', end_time: '09:40', is_break: true }, { start_time: '09:40', end_time: '10:20' },
+      { start_time: '10:20', end_time: '11:00' }, { start_time: '11:00', end_time: '11:40' }
+    ]);
+    await timetable.days.save([1, 2, 3, 4, 5]);
+
+    for (let i = 0; i < 4; i++) {
+      const res = await timetable.generate('y1', 't1');
+      check(`generate() call #${i + 1} succeeds`, res.ok === true);
+    }
+
+    const versions = await timetable.entries.listVersions('y1', 't1');
+    check('generate() keeps only the last 3 versions after 4 regenerates', versions.ok === true && versions.data.length === 3);
+    check('the 3 kept versions are the 3 most recent (2, 3, 4) — version 1 was pruned', versions.data.map((v) => v.version_number).sort((a, b) => a - b).join(',') === '2,3,4');
+    check('the most recent version (4) is the active one', versions.data.find((v) => v.version_number === 4).is_active === true);
+
+    const active = await timetable.entries.list({ academic_year_id: 'y1', term_id: 't1' });
+    check('the active version still has the full 18 placed entries', active.data.length === 18);
+
+    // Reactivating an older (but still-kept) version works end to end.
+    const reactivated = await timetable.entries.reactivateVersion('y1', 't1', 2);
+    check('reactivateVersion succeeds for a version generate() kept', reactivated.ok === true);
+    const afterReactivate = await timetable.entries.list({ academic_year_id: 'y1', term_id: 't1' });
+    check('the active (default) list now reflects version 2', afterReactivate.data.length === 18 && afterReactivate.data.every((e) => e.version_number === 2));
+
+    // The pruned version 1 is genuinely gone, not just deactivated.
+    const prunedPreview = await timetable.entries.list({ academic_year_id: 'y1', term_id: 't1', version_number: 1 });
+    check('a pruned version\'s rows are actually deleted, not just hidden', prunedPreview.data.length === 0);
+  }
+
+  // ---- Round 5 §10: a total placement failure leaves the existing timetable untouched --
+  {
+    const { timetable, sb } = freshApis({
+      classes: [{ id: 'c1', name: 'Grade 7' }],
+      streams: [{ id: 'strOnly', class_id: 'c1', name: 'Only' }],
+      subjects: [{ id: 'math', name: 'Mathematics' }],
+      subject_class_assignments: [
+        { id: 'p1', subject_id: 'math', class_id: 'c1', stream_id: 'strOnly', periods_per_week: 1, double_periods_per_week: 0 }
+      ],
+      subject_teacher_assignments: [{ subject_id: 'math', class_id: 'c1', stream_id: 'strOnly', staff_id: 'staffA' }],
+      teacher_unavailability: []
+    });
+    // Exactly one teachable slot in the whole week — just enough capacity
+    // for the 1 period/week this stream needs.
+    await timetable.periods.saveGrid([{ start_time: '08:00', end_time: '08:40' }]);
+    await timetable.days.save([1]);
+
+    const first = await timetable.generate('y1', 't1');
+    check('first generate() succeeds and places the one lesson', first.ok === true && first.data.placed === 1);
+
+    // Now block the only teachable slot for the only teacher who can teach
+    // this subject — capacity still says "1 required, 1 available" (the
+    // upfront check doesn't know about per-teacher unavailability), but the
+    // placement engine will genuinely be unable to place anything.
+    sb._tables.teacher_unavailability = [{ staff_id: 'staffA', day_of_week: 1, period_index: 1 }];
+
+    const second = await timetable.generate('y1', 't1');
+    check('a regenerate that can place NOTHING is rejected rather than wiping the existing timetable', second.ok === false);
+    check('the rejection message reassures that the existing timetable was not touched', /existing timetable/i.test(second.message));
+
+    const stillThere = await timetable.entries.list({ academic_year_id: 'y1', term_id: 't1' });
+    check('the original successful timetable is still there, untouched, after the failed regenerate', stillThere.data.length === 1 && stillThere.data[0].subject_id === 'math');
+    const versions = await timetable.entries.listVersions('y1', 't1');
+    check('no new (empty) version was created by the failed regenerate', versions.data.length === 1 && versions.data[0].version_number === 1);
+  }
+
   console.log(`${passed} passed, ${failed} failed`);
   if (failed) process.exit(1);
 }

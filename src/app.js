@@ -175,6 +175,38 @@ export function renderPrereq(root, title, text, route, label) {
   </div></div></div>`;
   if (route) { const b = $('#prereq-cta', root); if (b) b.onclick = () => go(route); }
 }
+
+/** Round 5 §5 (BUG): a screen that gates on "academic year/term configured
+ *  yet?" used to collapse two very different situations into one message —
+ *  genuinely not configured, AND the check itself failing (almost always a
+ *  lost/flaky internet connection when someone is actively using an
+ *  already-configured school) — both showed "Academic calendar not set up",
+ *  which is actively misleading during a connectivity drop.
+ *
+ *  Call this instead of renderPrereq() directly whenever the "empty" state
+ *  being checked came from a Db.*.list()-style call: pass `ok` straight
+ *  through from that result (or `ok1 && ok2` when checking more than one).
+ *  When the fetch itself failed, this shows a connection-specific message
+ *  with a "Try again" button (wired to `onRetry`) instead of the prereq
+ *  text — the prereq message is only ever shown once we actually KNOW the
+ *  request succeeded and the thing genuinely isn't set up. */
+export function renderPrereqOrConnectivity(root, { ok, title, text, route, label, onRetry }) {
+  if (!ok) {
+    const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    root.innerHTML = `<div class="card"><div class="card-b"><div class="empty warn">
+      <div class="e-ico">📡</div>
+      <h3>${offline ? "You're offline" : "Couldn't load — check your connection"}</h3>
+      <p>${offline
+        ? 'This device has no internet connection right now.'
+        : "We couldn't reach the server just now — this is usually a lost or unstable internet connection, not a setup problem."} Try again once you're back online.</p>
+      <button class="btn" id="prereq-retry">Try again</button>
+    </div></div></div>`;
+    const b = $('#prereq-retry', root);
+    if (b) b.onclick = () => { if (onRetry) onRetry(); };
+    return;
+  }
+  renderPrereq(root, title, text, route, label);
+}
 export function options(list, valKey, labKey, selected, placeholder) {
   let html = placeholder ? `<option value="">${esc(placeholder)}</option>` : '';
   (list || []).forEach((it) => {

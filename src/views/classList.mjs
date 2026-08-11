@@ -2,7 +2,7 @@ import { esc, options, renderPrereq, loader, toast, go, printOptionsHtml, wirePr
 import { Db } from '../lib/api/index.mjs';
 import { downloadXlsx } from '../lib/xlsxUtil.mjs';
 import { takeNavIntent } from '../lib/navIntent.mjs';
-import { printHeaderHtml, isContactInfoComplete, renderMissingContactInfo } from '../lib/printHeader.mjs';
+import { printHeaderHtml, reportTitleBarHtml, isContactInfoComplete, renderMissingContactInfo } from '../lib/printHeader.mjs';
 
 const CL_COLS = [
   { key: 'admission_no', label: 'Admission No.', on: true },
@@ -117,7 +117,8 @@ async function load(root, classes, sel) {
     </div>
     <div class="card">
       <div class="card-b" style="border-bottom:1px solid var(--line);padding-bottom:12px">
-        ${printHeaderHtml(settings, `Class List — ${cls ? cls.name : ''}${streamName ? ' (' + streamName + ')' : ''}`)}
+        ${printHeaderHtml(settings)}
+        ${reportTitleBarHtml(`Class List — ${cls ? cls.name : ''}${streamName ? ' (' + streamName + ')' : ''}`)}
       </div>
       <div class="card-b table-wrap">
         ${students.length ? `

@@ -115,12 +115,13 @@ h1,h2,h3,h4{margin:0;font-weight:650;color:var(--ink)}
    this from Zeraki for inspiration don't build like them"). */
 .hub-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
 /* Round 2 §6 (Exams module): vertical stack instead of a horizontal card
-   grid — one column, so every tile is the full content width. Deliberately
-   NOT capped with a max-width: a hardcoded cap (e.g. 720px) could end up
-   UNDER half the page width on a wide screen, which is exactly what the
-   brief's "at least half the page width" rules out — 100% of the content
-   column always satisfies "at least half," on any viewport. */
-.hub-grid.stack{grid-template-columns:1fr}
+   grid — one column. Round 5 §4: reduced from the full content width to
+   3/4 of it — a PERCENTAGE (not a hardcoded px cap) so it scales correctly
+   at any viewport width instead of risking ending up under/over the
+   intended proportion the way a fixed cap could. Reverts to full width
+   below 960px (see the max-width:960px media query further down) so it
+   doesn't get uncomfortably narrow on small screens. */
+.hub-grid.stack{grid-template-columns:1fr;width:75%}
 .hub-tile{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:18px;cursor:pointer;
   transition:.12s;display:flex;flex-direction:column;gap:6px;text-align:left}
 .hub-tile:hover{border-color:var(--primary);box-shadow:var(--shadow)}
@@ -317,6 +318,10 @@ table.data td.num,table.data th.num{text-align:center}
 .mark-list-grid th.sum-col,.mark-list-grid td.sum-col{width:50px}
 .mark-list-grid tr:last-child td{border-bottom:1.3px solid var(--grid-ink)}
 .mark-cell .mark-grade{color:var(--grid-text);font-weight:600;font-size:10.5px}
+/* Round 5 §2: the TOTAL/AVERAGE rows at the very bottom of the Merit List —
+   shaded like the header row so they read as a summary, not just two more
+   student rows. */
+.mark-list-grid .bs-agg-row td{background:#f7f9fb;font-weight:700}
 /* System Fixes brief §15: Mark List summary stat tables (Class Grade
    Summary / Gender Grade Summary side by side, Grade Breakdown by Subject
    below), replacing the old single "Class average" line. */
@@ -325,17 +330,24 @@ table.data td.num,table.data th.num{text-align:center}
 .bs-summary-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
 @media (max-width:720px){.bs-summary-grid{grid-template-columns:1fr}}
 
-/* Shared printable-report header (feature brief §2/§4): logo far left,
-   school name centered with the report title below it, address block far
-   right — same layout for the Class List, Mark List, Score Sheet and Exam
-   Analysis report. See src/lib/printHeader.mjs. */
-.print-header{display:flex;align-items:center;gap:16px;border-bottom:2px solid var(--grid-ink);padding-bottom:16px;margin-bottom:4px}
+/* Shared printable-report header (feature brief §2/§4; Round 5 §2/§3): logo
+   far left, school name centered, address block far right — same layout for
+   the Class List, Mark List, Score Sheet, Exam Analysis and Report Form.
+   Round 5 dropped the divider line that used to run under this row (it now
+   reads as an unnecessary straight line once the green title bar sits right
+   underneath) and moved the report's own title out into that title bar
+   (.ph-title-bar) instead of the small plain-text subtitle this used to
+   carry — see src/lib/printHeader.mjs's printHeaderHtml()/reportTitleBarHtml(). */
+.print-header{display:flex;align-items:center;gap:16px;padding-bottom:4px;margin-bottom:0}
 .print-header .ph-logo{flex:0 0 auto}
 .print-header .ph-logo-img{width:56px;height:56px}
 .print-header .ph-center{flex:1;min-width:0;text-align:center}
 .print-header .ph-school{font-size:19px;font-weight:800;color:var(--grid-text);line-height:1.25}
-.print-header .ph-title{font-size:13px;font-weight:700;color:var(--grid-text);margin-top:2px}
 .print-header .ph-address{flex:0 0 auto;text-align:right;font-size:11px;color:var(--grid-text);line-height:1.55;white-space:nowrap}
+/* The "green rectangle" title bar — was Report-Form-only (.report
+   .r-title-bar); now the one shared component every printable report uses
+   for its own descriptive title (exam name, class, etc). */
+.ph-title-bar{background:var(--brand);color:#fff;text-align:center;font-weight:750;letter-spacing:.2px;padding:9px 14px;font-size:13.5px;margin-top:10px}
 /* Class List / Score Sheet full-grid print table (feature brief §2: "print
    as a table with clear rows, columns, and borders — the same standard
    already used on the mark list"), plus a shaded title band ("GRADE 8 -
@@ -487,19 +499,18 @@ table.data td.num,table.data th.num{text-align:center}
 /* Redesigned Zeraki-style report form (feature brief "Report Forms and Merit
    List Design" — condensed, gridded, everything fits one printable page). */
 .report{background:#fff;border:1px solid var(--line);border-radius:12px;padding:0;max-width:800px;margin:0 auto;overflow:hidden}
-/* System Fixes brief §9: report form header now uses the same shared
+/* System Fixes brief §9: report form header uses the same shared
    printHeaderHtml() component as Mark List/Class List (logo far left,
    school name centered, address block on the right) instead of its own
-   bespoke left-aligned layout — .print-header (main.css:261) supplies the
-   flex/border/padding, this just adds the report card's own outer inset. */
+   bespoke left-aligned layout — .print-header (main.css) supplies the
+   flex/padding, this just adds the report card's own outer inset. Round 5
+   §2/§3: the divider-drop and green title bar (.ph-title-bar) that used to
+   be bespoke to the Report Form are now the shared default for every
+   printable report's header — see main.css's .print-header/.ph-title-bar
+   and src/lib/printHeader.mjs. .ph-title-bar sits OUTSIDE .r-head (a
+   sibling, not nested) so it stays flush edge-to-edge with the card like
+   before, instead of picking up r-head's own left/right inset. */
 .report .r-head{padding:16px 22px 0}
-/* Follow-up polish: drop the divider line the shared .print-header normally
-   draws under the address block (main.css ~line 300) — on the Report Form
-   specifically it just reads as a stray line sitting above the title bar.
-   Scoped to .report only, so Mark List/Class List/Score Sheet/Exam
-   Analysis (which also use .print-header) keep their divider unchanged. */
-.report .print-header{border-bottom:none;padding-bottom:4px;margin-bottom:0}
-.report .r-title-bar{background:var(--brand);color:#fff;text-align:center;font-weight:750;letter-spacing:.2px;padding:9px 14px;font-size:13.5px;margin-top:12px}
 .report .r-student-row{display:flex;gap:20px;align-items:stretch;padding:16px 22px;border-bottom:1px solid var(--grid-ink)}
 /* Follow-up polish: the row got noticeably taller once the chart grew, and
    the (untouched, per instruction) avatar was left stranded at the very
@@ -595,7 +606,8 @@ table.data td.num,table.data th.num{text-align:center}
    school's motto (Settings already has this field; it just wasn't shown
    anywhere printable before now). Full-bleed edge to edge, so it sits
    OUTSIDE .r-body's padding as its own sibling — see renderReportCard(). */
-.report .r-motto{background:linear-gradient(100deg,var(--brand),var(--brand-2));color:#fff;text-align:right;font-weight:700;font-style:italic;font-size:11.5px;padding:8px 22px;letter-spacing:.2px}
+/* Round 5 §3: was right-aligned — centered within its rectangle instead. */
+.report .r-motto{background:linear-gradient(100deg,var(--brand),var(--brand-2));color:#fff;text-align:center;font-weight:700;font-style:italic;font-size:11.5px;padding:8px 22px;letter-spacing:.2px}
 /* Round 3 §14/§15: the report form previously used the app's light on-screen
    chrome tokens (--line/--muted) for its table borders and secondary text —
    fine for UI chrome, but washed-out grey once printed/saved as a PDF,
@@ -647,26 +659,77 @@ table.data td.num,table.data th.num{text-align:center}
    the other way around). .tt-day-col is the left-hand day label column,
    equivalent to the old .tt-period-col's role but now holding a day name
    instead of a period; .tt-break-col/.tt-break-cell replace the old
-   .tt-break-row now that a break is a whole column, not a whole row. */
-.tt-grid{width:100%;border-collapse:collapse;font-size:12px;color:var(--grid-text)}
-.tt-grid th,.tt-grid td{border:1.3px solid var(--grid-ink);padding:7px 8px;vertical-align:top}
-.tt-grid thead th{font-size:10.5px;font-weight:800;background:#f7f9fb;text-transform:uppercase;letter-spacing:.3px;text-align:center}
-.tt-grid .tt-day-col{width:90px;font-size:11px;white-space:nowrap;background:#fafbfc;text-align:left;vertical-align:middle}
-.tt-grid .tt-period-col{min-width:100px}
-.tt-grid .tt-time{font-size:9.5px;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0}
+   .tt-break-row now that a break is a whole column, not a whole row.
+
+   Round 5 §9: table-layout:fixed + the <colgroup> that
+   _timetableGrid.mjs's colgroupHtml() emits is what makes every normal
+   period column share the remaining width equally, no matter how long a
+   subject name is — the column no longer grows to fit its widest cell,
+   and text wraps within the fixed width instead (see .tt-subject below).
+   Break columns get their own narrow fixed width from that same
+   colgroup and merge via colspan (see .tt-break-merged) instead of
+   sitting side-by-side as separate columns. Font sizes bumped up across
+   the board for print legibility; the black grid lines below are left
+   exactly as they were — not lightened. */
+.tt-grid{width:100%;table-layout:fixed;border-collapse:collapse;font-size:13.5px;color:var(--grid-text)}
+.tt-grid th,.tt-grid td{border:1.3px solid var(--grid-ink);padding:8px 6px;vertical-align:middle}
+.tt-grid thead th{font-size:11.5px;font-weight:800;background:#f7f9fb;text-transform:uppercase;letter-spacing:.3px;text-align:center}
+.tt-grid .tt-day-col{font-size:12.5px;white-space:nowrap;background:#fafbfc;text-align:left;vertical-align:middle}
+.tt-grid .tt-period-col{overflow-wrap:break-word}
+.tt-grid .tt-time{font-size:10.5px;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0}
 .tt-grid .tt-break-col{background:#eef1f5}
-.tt-grid .tt-break-cell{background:#eef1f5;text-align:center;font-weight:700;color:var(--muted);font-size:11px;vertical-align:middle}
-.tt-grid .tt-cell{min-width:100px;text-align:center}
-.tt-grid .tt-subject{font-weight:700;font-size:12px}
-.tt-grid .tt-sub2{font-size:10px;color:var(--muted);margin-top:1px}
-.tt-grid .tt-room{display:inline-block;margin-top:3px;font-size:9px;font-weight:700;color:var(--brand-2);background:#eaf3f2;border-radius:6px;padding:1px 6px}
+.tt-grid .tt-break-cell{background:#eef1f5;text-align:center;font-weight:700;color:var(--muted);font-size:12px;vertical-align:middle;padding:6px 2px}
+/* A merged multi-period break block (colspan>1) reads as one clean cell —
+   no internal border, the full session name centered and rotated to fit
+   the narrow column instead of Zeraki's letter-by-letter split. */
+.tt-grid .tt-break-merged{padding:10px 2px}
+.tt-break-label-v{writing-mode:vertical-rl;transform:rotate(180deg);display:inline-block;white-space:nowrap;font-weight:800;letter-spacing:.4px;font-size:12px;color:var(--muted)}
+.tt-grid .tt-cell{text-align:center}
+.tt-grid .tt-subject{font-weight:700;font-size:14px;line-height:1.2;white-space:normal;overflow-wrap:break-word;word-break:normal}
+.tt-grid .tt-sub2{font-size:11.5px;color:var(--muted);margin-top:2px;white-space:normal;overflow-wrap:break-word}
+.tt-grid .tt-room{display:inline-block;margin-top:4px;font-size:10px;font-weight:700;color:var(--brand-2);background:#eaf3f2;border-radius:6px;padding:1px 6px}
 .tt-grid .tt-editable{cursor:pointer}
 .tt-grid .tt-editable:hover{background:#eef6f5}
+
+/* Round 5 §10: version history pills on the View tab — a regenerate keeps
+   the last 3 versions instead of deleting the previous one, and these are
+   how someone switches back to an older one. */
+.tt-ver-list{display:flex;flex-wrap:wrap;gap:8px}
+.tt-ver-pill{font-size:12px;font-weight:600;border-radius:20px;padding:6px 12px;border:1px solid var(--line)}
+.tt-ver-active{background:#eaf3f2;color:var(--brand-2);border-color:#cfe6e3}
+.tt-ver-switch{background:#fff;color:var(--ink);cursor:pointer}
+.tt-ver-switch:hover{background:#f7f9fb;border-color:var(--primary)}
 /* Teacher Availability click-grid (Setup tab) — not printed, screen-only. */
 .tt-avail-grid th,.tt-avail-grid td{text-align:center}
 .tt-avail-cell{cursor:pointer;font-weight:600;font-size:12px;color:#1a7a4c;user-select:none}
 .tt-avail-cell:hover{background:#f2f8f5}
 .tt-avail-cell.blocked{color:var(--danger);background:#fdf1f1}
+
+/* Round 5 §8: Timetable Constraints restyle — Zeraki-style flat, grouped
+   rows (short bold name + one muted line + a toggle) instead of one big
+   card-with-a-form per constraint. .tt-crow-config is the small inline
+   editor that slides open only for a constraint that actually needs more
+   than on/off (which subjects, a max number) — collapsed by default so the
+   list reads as clean as the reference even though a few rows do need
+   extra setup. */
+.tt-constraint-group .card-h{align-items:flex-start}
+.tt-crow-list{display:flex;flex-direction:column}
+.tt-crow{padding:14px 20px;border-top:1px solid var(--line)}
+.tt-crow-main{display:flex;align-items:center;gap:16px}
+.tt-crow-text{flex:1;min-width:0}
+.tt-crow-title{font-weight:700;font-size:13.5px;color:var(--ink)}
+.tt-crow-desc{font-size:12px;color:var(--muted);margin-top:2px;line-height:1.4}
+.tt-crow-actions{display:flex;align-items:center;gap:10px;flex:none}
+.tt-crow-config{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)}
+/* A real pill toggle switch, not a plain checkbox — matches the reference
+   images' toggles. Built from a hidden checkbox + a styled label, same
+   accessible-checkbox-under-custom-look pattern as .chk elsewhere. */
+.tt-switch{position:relative;display:inline-block;width:38px;height:22px;flex:none;cursor:pointer}
+.tt-switch input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer;z-index:1}
+.tt-switch-slider{position:absolute;inset:0;background:#d5dbe2;border-radius:22px;transition:.15s}
+.tt-switch-slider::before{content:"";position:absolute;width:16px;height:16px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.15s;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.tt-switch input:checked + .tt-switch-slider{background:var(--brand-2)}
+.tt-switch input:checked + .tt-switch-slider::before{transform:translateX(16px)}
 
 /* Brief §8/§9: printed reports should have sane margins/page sizing and
    never require scrolling on paper. @page sets a consistent margin on every
@@ -741,6 +804,7 @@ table.data td.num,table.data th.num{text-align:center}
    2x2) even though nothing here is meant for print. Found while verifying
    the summary-tile redesign against a real print render. */
 @media screen and (max-width:960px){
+  .hub-grid.stack{width:100%}
   .sidebar{transform:translateX(-100%)}
   .sidebar.open{transform:none}
   .main{margin-left:0}

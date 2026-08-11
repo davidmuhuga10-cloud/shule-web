@@ -338,6 +338,74 @@ async function run() {
     check('Grade 1 got its OWN new rows, not a reassignment of Grade 8\'s', g1After.data.length === 3 && g1After.data.every((p) => !g8Papers.some((op) => op.id === p.id)));
   }
 
+  // ---- subject papers: Round 5 §6 (allow editing out_of/ratio after marks
+  // are uploaded, gated on publish status, and validated against
+  // already-recorded marks) --------------------------------------------------
+  {
+    const sb = createMockSupabase({
+      subjects: [{ id: 'su1', name: 'English' }],
+      exams: [{ id: 'ex1', name: 'Term 1 Exam' }],
+      classes: [{ id: 'c1', name: 'Grade 1' }],
+      result_submissions: [],
+      results: []
+    });
+    const api = createAcademicsApi(sb);
+
+    const initial = await api.subjectPapers.setForSubject('ex1', 'su1', 'c1', [
+      { name: 'Paper 1', out_of: 60, ratio: 60 }, { name: 'Paper 2', out_of: 40, ratio: 40 }
+    ]);
+    check('Round 5 §6 setup: initial 2-paper split saves', initial.ok === true);
+    const papers0 = (await api.subjectPapers.list('ex1', 'su1', 'c1')).data;
+    const p1 = papers0.find((p) => p.name === 'Paper 1'), p2 = papers0.find((p) => p.name === 'Paper 2');
+
+    // No marks recorded yet and no submission row at all — free to edit.
+    const freeEdit = await api.subjectPapers.setForSubject('ex1', 'su1', 'c1', [
+      { id: p1.id, name: 'Paper 1', out_of: 50, ratio: 50 }, { id: p2.id, name: 'Paper 2', out_of: 50, ratio: 50 }
+    ]);
+    check('Round 5 §6: editing out_of/ratio with no marks and no submission row succeeds', freeEdit.ok === true);
+
+    // A mark gets recorded against Paper 1 (score 45, within its out_of of 50).
+    sb._tables.results.push({ id: 'r1', exam_id: 'ex1', subject_id: 'su1', class_id: 'c1', paper_id: p1.id, student_id: 's1', score: 45 });
+
+    // Submission status is 'draft' (not published yet) — editing is still allowed, even with marks already entered.
+    sb._tables.result_submissions.push({ id: 'sub1', exam_id: 'ex1', class_id: 'c1', subject_id: 'su1', status: 'draft' });
+    const draftEdit = await api.subjectPapers.setForSubject('ex1', 'su1', 'c1', [
+      { id: p1.id, name: 'Paper 1', out_of: 55, ratio: 50 }, { id: p2.id, name: 'Paper 2', out_of: 50, ratio: 50 }
+    ]);
+    check('Round 5 §6: editing while unpublished (draft) succeeds even with marks already entered', draftEdit.ok === true);
+
+    // Once published, paper setup is locked — must unpublish first.
+    sb._tables.result_submissions.find((r) => r.id === 'sub1').status = 'published';
+    const blockedByPublish = await api.subjectPapers.setForSubject('ex1', 'su1', 'c1', [
+      { id: p1.id, name: 'Paper 1', out_of: 55, ratio: 50 }, { id: p2.id, name: 'Paper 2', out_of: 50, ratio: 50 }
+    ]);
+    check('Round 5 §6: editing paper setup is blocked once results are published', blockedByPublish.ok === false && /published/i.test(blockedByPublish.message));
+
+    // Unpublish (back to draft) so the remaining marks-safety scenarios can be exercised.
+    sb._tables.result_submissions.find((r) => r.id === 'sub1').status = 'draft';
+
+    // Shrinking a paper's out_of below an already-recorded mark must be rejected with a clear reason.
+    const shrinkBlocked = await api.subjectPapers.setForSubject('ex1', 'su1', 'c1', [
+      { id: p1.id, name: 'Paper 1', out_of: 40, ratio: 50 }, { id: p2.id, name: 'Paper 2', out_of: 50, ratio: 50 }
+    ]);
+    check('Round 5 §6: shrinking a paper\'s out_of below an already-recorded mark is rejected', shrinkBlocked.ok === false && /out of/i.test(shrinkBlocked.message));
+    check('the rejected shrink did not change anything', (await api.subjectPapers.list('ex1', 'su1', 'c1')).data.find((p) => p.name === 'Paper 1').out_of === 55);
+
+    // Removing a paper that already has marks recorded must be rejected too.
+    const removeBlocked = await api.subjectPapers.setForSubject('ex1', 'su1', 'c1', [
+      { id: p2.id, name: 'Paper 2', out_of: 100, ratio: 100 }
+    ]);
+    check('Round 5 §6: removing a paper that already has marks recorded is rejected', removeBlocked.ok === false && /already has marks recorded/i.test(removeBlocked.message));
+    check('the rejected removal left both papers in place', (await api.subjectPapers.list('ex1', 'su1', 'c1')).data.length === 2);
+
+    // A non-conflicting edit (raising out_of, re-splitting ratio) still succeeds with marks already present.
+    const okEdit = await api.subjectPapers.setForSubject('ex1', 'su1', 'c1', [
+      { id: p1.id, name: 'Paper 1', out_of: 70, ratio: 60 }, { id: p2.id, name: 'Paper 2', out_of: 30, ratio: 40 }
+    ]);
+    check('Round 5 §6: a non-conflicting edit (raising out_of) succeeds even with marks already entered', okEdit.ok === true);
+    check('the accepted edit actually applied', (await api.subjectPapers.list('ex1', 'su1', 'c1')).data.find((p) => p.name === 'Paper 1').out_of === 70);
+  }
+
   // ---- subjects + CBC ----------------------------------------------------------
   {
     const sb = createMockSupabase({

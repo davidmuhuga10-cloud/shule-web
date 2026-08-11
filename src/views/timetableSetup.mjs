@@ -14,9 +14,10 @@
  *   4. Teacher Availability — click to block a teacher out of specific
  *      slots (part-time hours, other commitments); empty by default.
  */
-import { esc, options, toast, loader, withBusy } from '../app.js';
+import { esc, options, toast, loader, withBusy, confirmAction } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { DAY_LABELS } from '../lib/timetable/generate.mjs';
+import { generatePeriods, cascadeTimes } from '../lib/timetable/scheduleGrid.mjs';
 import { renderTimetableConstraints } from './timetableConstraints.mjs';
 
 const SUB_TABS = [
@@ -80,9 +81,21 @@ async function renderGrid(root) {
         </div>
         <div class="modal-f" style="border-top:1px solid var(--line)"><button class="btn secondary sm" id="tt-days-save">Save teaching days</button></div>
       </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-h"><h3>Quick Generate</h3></div>
+        <div class="card-b">
+          <p class="hint" style="margin:0 0 10px">The fast way to start a period grid: say how many lessons your day has and how long each one is, and every row below gets filled in for you — still fully editable afterward (add breaks, rename periods, adjust times) rather than locking anything in.</p>
+          <div class="grid3">
+            <div class="field"><label>Start time</label><input type="time" id="qg-start" value="08:00"></div>
+            <div class="field"><label>Number of lessons</label><input type="number" id="qg-count" min="1" max="20" placeholder="e.g. 8"></div>
+            <div class="field"><label>Lesson duration (minutes)</label><input type="number" id="qg-duration" min="1" max="240" placeholder="e.g. 40"></div>
+          </div>
+        </div>
+        <div class="modal-f" style="border-top:1px solid var(--line)"><button class="btn secondary sm" id="qg-generate" type="button">⚡ Generate Timeslots</button></div>
+      </div>
       <div class="card">
         <div class="card-h"><h3>Daily Period Grid</h3></div>
-        <div class="card-b"><p class="hint" style="margin:0 0 10px">This same set of periods repeats on every teaching day above — most schools run the same times every day. Add a "Break"/"Lunch" row wherever your school actually has one; the generator never schedules a lesson into a row ticked "Break".</p></div>
+        <div class="card-b"><p class="hint" style="margin:0 0 10px">This same set of periods repeats on every teaching day above — most schools run the same times every day. Add a "Break"/"Lunch" row wherever your school actually has one; the generator never schedules a lesson into a row ticked "Break". Editing a start or end time shifts every row after it to keep following on, each keeping its own length — you only ever have to retype one time, not the whole rest of the day.</p></div>
         <div class="card-b table-wrap"><table class="data" id="tt-period-table">
           <thead><tr><th>#</th><th>Start</th><th>End</th><th>Break?</th><th>Label (optional)</th><th></th></tr></thead>
           <tbody>${rows.map(rowHtml).join('')}</tbody>
@@ -93,6 +106,40 @@ async function renderGrid(root) {
         <div class="modal-f" style="border-top:1px solid var(--line)"><button class="btn" id="tt-period-save">Save period grid</button></div>
       </div>
     `;
+
+    root.querySelector('#qg-generate').onclick = () => {
+      const startTime = root.querySelector('#qg-start').value;
+      const lessonsPerDay = root.querySelector('#qg-count').value;
+      const lessonDuration = root.querySelector('#qg-duration').value;
+      if (!lessonsPerDay || !lessonDuration) { toast('Enter both the number of lessons and the lesson duration.', 'err'); return; }
+      const doGenerate = () => {
+        rows = generatePeriods({ startTime, lessonsPerDay, lessonDuration });
+        draw();
+        toast(`Generated ${rows.length} periods — add any breaks and adjust times below, then save.`, 'ok');
+      };
+      // Only ask for confirmation when there's real existing work to lose —
+      // the single default blank row a fresh setup starts with isn't worth
+      // an extra click to confirm away.
+      const hasRealRows = rows.some((r) => r.start_time || r.end_time || r.label);
+      if (hasRealRows) {
+        confirmAction('Replace the current period grid with freshly generated timeslots? Any breaks or custom labels you already added here will be lost — you can still add them back afterward.', doGenerate);
+      } else {
+        doGenerate();
+      }
+    };
+
+    root.querySelectorAll('.p-start, .p-end').forEach((inp) => {
+      inp.onchange = () => {
+        const i = Number(inp.closest('tr').dataset.row);
+        // Round 5 §7: cascade — capture whatever's in the table right now
+        // (including the edit that just fired this event) before
+        // recomputing every later row from it, same "sync before mutating"
+        // reasoning the existing add/remove handlers already use above.
+        syncRowsFromDom();
+        rows = cascadeTimes(rows, i);
+        draw();
+      };
+    });
 
     root.querySelector('#tt-days-save').onclick = (e) => withBusy(e.currentTarget, async () => {
       const days = [...root.querySelectorAll('.tt-day:checked')].map((el) => Number(el.value));

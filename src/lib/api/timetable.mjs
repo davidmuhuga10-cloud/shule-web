@@ -26,6 +26,18 @@ function parseDays(value) {
   return nums.length ? nums : TIMETABLE_DAYS_DEFAULT.slice();
 }
 
+/** Round 5 §10: which version_number is currently "the" active timetable
+ *  for a scope — used both to keep manual single-cell edits/inserts landing
+ *  on the currently-visible version (rather than silently starting a
+ *  stray untracked one) and as the fallback "start counting from here" for
+ *  a school's very first generate/manual entry. Defaults to 1 when the
+ *  scope has no entries at all yet. */
+async function activeVersionNumber(supabase, academicYearId, termId) {
+  const { data } = await supabase.from('timetable_entries').select('version_number')
+    .eq('academic_year_id', academicYearId).eq('term_id', termId).eq('is_active', true).limit(1);
+  return (data && data.length) ? (Number(data[0].version_number) || 1) : 1;
+}
+
 export function createTimetableApi(supabase, settingsApi) {
   return {
     rooms: {
@@ -218,7 +230,12 @@ export function createTimetableApi(supabase, settingsApi) {
     },
 
     entries: {
-      /** filters: { academic_year_id, term_id, class_id?, stream_id?, staff_id? } */
+      /** filters: { academic_year_id, term_id, class_id?, stream_id?,
+       *  staff_id?, version_number? } — Round 5 §10: with no version_number
+       *  given, this returns only the currently ACTIVE version (what
+       *  everyone sees/prints/edits by default); pass version_number to
+       *  preview a specific kept-but-deactivated older generation instead
+       *  (see listVersions()/reactivateVersion() below). */
       async list(filters) {
         filters = filters || {};
         if (!filters.academic_year_id || !filters.term_id) return err('Missing academic year or term.');
@@ -228,6 +245,8 @@ export function createTimetableApi(supabase, settingsApi) {
         if (filters.class_id) q = q.eq('class_id', filters.class_id);
         if (filters.stream_id) q = q.eq('stream_id', filters.stream_id);
         if (filters.staff_id) q = q.eq('staff_id', filters.staff_id);
+        if (filters.version_number) q = q.eq('version_number', Number(filters.version_number));
+        else q = q.eq('is_active', true);
         const { data, error } = await q;
         if (error) return err(error.message);
         const rows = (data || []).map((r) => ({
@@ -243,17 +262,26 @@ export function createTimetableApi(supabase, settingsApi) {
 
       /** Manual single-cell edit (the Timetable screen's "click a slot" edit
        *  path) — pre-checks the same hard constraints the DB's own unique
-       *  indexes enforce (0018_timetable.sql), so the person gets a plain
-       *  English message ("Mr Otieno already has a lesson then") instead of
-       *  a raw duplicate-key error. The DB constraints stay in place
-       *  regardless — never trust the client-side check alone. */
+       *  indexes enforce (0018_timetable.sql/0026_timetable_versions.sql),
+       *  so the person gets a plain English message ("Mr Otieno already has
+       *  a lesson then") instead of a raw duplicate-key error. The DB
+       *  constraints stay in place regardless — never trust the
+       *  client-side check alone.
+       *
+       *  Round 5 §10: the clash check is scoped to is_active=true only — an
+       *  older, deactivated version's entries no longer "occupy" a slot as
+       *  far as manual edits on the current timetable are concerned. New
+       *  rows (no payload.id) land on whichever version_number is
+       *  currently active, so a manual tweak accumulates onto the visible
+       *  timetable rather than silently starting an untracked version. */
       async saveEntry(payload) {
         payload = payload || {};
         const required = ['academic_year_id', 'term_id', 'day_of_week', 'period_index', 'subject_id', 'class_id', 'stream_id'];
         for (const f of required) if (!payload[f] && payload[f] !== 0) return err('Missing required timetable fields.');
         let q = supabase.from('timetable_entries').select('id, staff_id, room_id, stream_id')
           .eq('academic_year_id', payload.academic_year_id).eq('term_id', payload.term_id)
-          .eq('day_of_week', payload.day_of_week).eq('period_index', payload.period_index);
+          .eq('day_of_week', payload.day_of_week).eq('period_index', payload.period_index)
+          .eq('is_active', true);
         const { data: clashRows } = await q;
         const others = (clashRows || []).filter((r) => r.id !== payload.id);
         const streamClash = others.find((r) => r.stream_id === payload.stream_id);
@@ -277,6 +305,8 @@ export function createTimetableApi(supabase, settingsApi) {
           if (error) return err(error.message);
           return ok(true);
         }
+        rec.version_number = await activeVersionNumber(supabase, payload.academic_year_id, payload.term_id);
+        rec.is_active = true;
         const { error } = await supabase.from('timetable_entries').insert(rec);
         if (error) return err(error.message);
         return ok(true);
@@ -289,12 +319,59 @@ export function createTimetableApi(supabase, settingsApi) {
         return ok(true);
       },
 
-      /** Used right before a fresh Generate — clears only this (year, term)'s
-       *  own rows, never touches any other term's saved timetable. */
+      /** A full, unconditional wipe of every version this scope has ever
+       *  had — unlike generate() (which keeps the last 3, see below), this
+       *  is the "start completely over" escape hatch. Never called by
+       *  generate() itself any more (Round 5 §10). */
       async clearScope(academicYearId, termId) {
         if (!academicYearId || !termId) return err('Missing academic year or term.');
         const { error } = await supabase.from('timetable_entries').delete().eq('academic_year_id', academicYearId).eq('term_id', termId);
         if (error) return err(error.message);
+        return ok(true);
+      },
+
+      /** Round 5 §10: what's available to compare/reactivate for this
+       *  scope — every kept generation (up to the last 3 regenerate()
+       *  keeps around), newest first, with whether it's the one currently
+       *  active and how many lessons it placed. */
+      async listVersions(academicYearId, termId) {
+        if (!academicYearId || !termId) return err('Missing academic year or term.');
+        const { data, error } = await supabase.from('timetable_entries')
+          .select('version_number, is_active, created_at')
+          .eq('academic_year_id', academicYearId).eq('term_id', termId);
+        if (error) return err(error.message);
+        const byVersion = {};
+        (data || []).forEach((r) => {
+          const v = Number(r.version_number) || 1;
+          if (!byVersion[v]) byVersion[v] = { version_number: v, is_active: false, created_at: r.created_at, count: 0 };
+          byVersion[v].count++;
+          if (r.is_active) byVersion[v].is_active = true;
+          if (r.created_at && (!byVersion[v].created_at || r.created_at < byVersion[v].created_at)) byVersion[v].created_at = r.created_at;
+        });
+        const versions = Object.values(byVersion).sort((a, b) => b.version_number - a.version_number);
+        return ok(versions);
+      },
+
+      /** Round 5 §10: switch which kept version is "the" active timetable
+       *  — for when a fresh regenerate turns out worse than what was there
+       *  before. Nothing is deleted or re-generated, just a flip of which
+       *  rows are the visible/editable/printable set: deactivates whatever
+       *  is currently active for this scope, then activates the chosen
+       *  version instead. */
+      async reactivateVersion(academicYearId, termId, versionNumber) {
+        if (!academicYearId || !termId) return err('Missing academic year or term.');
+        const v = Number(versionNumber);
+        if (!Number.isInteger(v)) return err('Missing timetable version.');
+        const { data: existing, error: exErr } = await supabase.from('timetable_entries').select('id')
+          .eq('academic_year_id', academicYearId).eq('term_id', termId).eq('version_number', v).limit(1);
+        if (exErr) return err(exErr.message);
+        if (!existing || !existing.length) return err('That timetable version is no longer available.');
+        const { error: deactErr } = await supabase.from('timetable_entries').update({ is_active: false })
+          .eq('academic_year_id', academicYearId).eq('term_id', termId).eq('is_active', true);
+        if (deactErr) return err(deactErr.message);
+        const { error: actErr } = await supabase.from('timetable_entries').update({ is_active: true })
+          .eq('academic_year_id', academicYearId).eq('term_id', termId).eq('version_number', v);
+        if (actErr) return err(actErr.message);
         return ok(true);
       }
     },
@@ -414,13 +491,45 @@ export function createTimetableApi(supabase, settingsApi) {
 
       const { entries, unresolved } = generateTimetable(generateInput);
 
-      const clearRes = await this.entries.clearScope(academicYearId, termId);
-      if (!clearRes.ok) return err(clearRes.message);
+      // Round 5 §10: a total placement failure (nothing at all could be
+      // scheduled, yet something WAS supposed to be) is the worst possible
+      // regenerate outcome — leave the existing timetable (if any) fully
+      // intact rather than replacing it with an empty one. A genuinely
+      // empty result with nothing unresolved either (e.g. a brand-new
+      // school with classes but no subjects assigned yet) is not this case
+      // and proceeds normally below.
+      if (!entries.length && unresolved.length) {
+        return err('Nothing could be placed — check your subject/teacher/period configuration and try again. Your existing timetable (if any) has not been changed.');
+      }
+
+      // Round 5 §10: keep the last 3 generated timetables per scope instead
+      // of hard-deleting the previous one outright — deactivate whatever's
+      // currently active (kept, not deleted, so it can be reactivated if
+      // this regenerate turns out worse via entries.reactivateVersion()),
+      // insert this result as a fresh version, then prune anything older
+      // than the 3 most recent versions so the table doesn't grow forever.
+      const { data: existingVersionRows, error: versErr } = await supabase.from('timetable_entries')
+        .select('version_number').eq('academic_year_id', academicYearId).eq('term_id', termId);
+      if (versErr) return err(versErr.message);
+      const existingVersions = [...new Set((existingVersionRows || []).map((r) => Number(r.version_number) || 1))];
+      const nextVersion = existingVersions.length ? Math.max(...existingVersions) + 1 : 1;
+
+      const { error: deactErr } = await supabase.from('timetable_entries').update({ is_active: false })
+        .eq('academic_year_id', academicYearId).eq('term_id', termId).eq('is_active', true);
+      if (deactErr) return err(deactErr.message);
 
       if (entries.length) {
-        const rows = entries.map((e) => ({ ...e, academic_year_id: academicYearId, term_id: termId }));
+        const rows = entries.map((e) => ({ ...e, academic_year_id: academicYearId, term_id: termId, version_number: nextVersion, is_active: true }));
         const { error } = await supabase.from('timetable_entries').insert(rows);
         if (error) return err(error.message);
+      }
+
+      const keepVersions = [...existingVersions, nextVersion].sort((a, b) => b - a).slice(0, 3);
+      const pruneVersions = existingVersions.filter((v) => !keepVersions.includes(v));
+      if (pruneVersions.length) {
+        const { error: pruneErr } = await supabase.from('timetable_entries').delete()
+          .eq('academic_year_id', academicYearId).eq('term_id', termId).in('version_number', pruneVersions);
+        if (pruneErr) return err(pruneErr.message);
       }
 
       const unresolvedNamed = unresolved.map((u) => ({

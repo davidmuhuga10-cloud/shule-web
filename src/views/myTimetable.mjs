@@ -7,7 +7,7 @@
  * this just defaults straight to their own staff_id and drops the picker),
  * printable via the same shared print controls as everything else.
  */
-import { esc, options, loader, printOptionsHtml, wirePrintOptions, state, go } from '../app.js';
+import { esc, options, loader, printOptionsHtml, wirePrintOptions, state, go, renderPrereqOrConnectivity } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { isContactInfoComplete, renderMissingContactInfo } from '../lib/printHeader.mjs';
 import { timetableGridPageHtml } from './_timetableGrid.mjs';
@@ -21,7 +21,13 @@ export async function viewMyTimetable(root) {
   const [yearsRes, periodsRes, daysRes, settingsRes] = await Promise.all([
     Db.academicYears.list(), Db.timetable.periods.list(), Db.timetable.days.get(), Db.settings.get()
   ]);
-  const years = yearsRes.ok ? yearsRes.data : [];
+  // Round 5 §5 (BUG): don't conflate a failed fetch (usually a lost/flaky
+  // connection) with "genuinely nothing set up yet".
+  if (!yearsRes.ok) {
+    renderPrereqOrConnectivity(root, { ok: false, onRetry: () => viewMyTimetable(root) });
+    return;
+  }
+  const years = yearsRes.data;
   const periods = periodsRes.ok ? periodsRes.data : [];
   const days = daysRes.ok ? daysRes.data : [1, 2, 3, 4, 5];
   const settings = settingsRes.ok ? settingsRes.data : {};

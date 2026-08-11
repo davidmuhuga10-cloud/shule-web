@@ -25,7 +25,7 @@
  * Deleted Exams (brief §8) is its own module (deletedExams.mjs) and its own
  * nav tile, not part of this file — see examsHub.mjs.
  */
-import { esc, modal, closeModal, toast, confirmAction, options, renderPrereq, loader, go } from '../app.js';
+import { esc, modal, closeModal, toast, confirmAction, options, renderPrereq, renderPrereqOrConnectivity, loader, go } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { EXAM_TYPE_LABELS } from '../lib/api/results.mjs';
 import { setNavIntent } from '../lib/navIntent.mjs';
@@ -39,8 +39,11 @@ const EXAM_TYPE_CHOICES = Object.keys(EXAM_TYPE_LABELS).map((k) => ({ id: k, nam
 
 export async function viewExamDesk(root) {
   const [yearsRes, termsRes] = await Promise.all([Db.academicYears.list(), Db.terms.list()]);
-  const years = yearsRes.ok ? yearsRes.data : [];
-  const terms = termsRes.ok ? termsRes.data : [];
+  if (!yearsRes.ok || !termsRes.ok) {
+    renderPrereqOrConnectivity(root, { ok: false, onRetry: () => viewExamDesk(root) });
+    return;
+  }
+  const years = yearsRes.data, terms = termsRes.data;
   if (!years.length || !terms.length) {
     renderPrereq(root, 'Academic calendar not set up', 'Please create an academic year and a term before adding exams.', 'settings', 'Go to Settings');
     return;
@@ -305,8 +308,8 @@ function classCardHtml(c, selectedIds, lockedIds, minByClass) {
       </div>
       ${isLocked ? '<div class="ex-class-locked-note">🔒 Has marks recorded — can\'t be removed</div>' : ''}
       <div class="ex-class-min">
-        <label>Min. learning areas</label>
-        <input type="number" min="0" data-class-min="${c.id}" title="Minimum learning areas for ${esc(c.name)}" value="${minVal}" placeholder="—">
+        <label>Min. learning areas *</label>
+        <input type="number" min="1" step="1" data-class-min="${c.id}" title="Minimum learning areas for ${esc(c.name)}" value="${minVal}" placeholder="e.g. 7">
       </div>
     </div>`;
 }
@@ -334,7 +337,7 @@ function openExamModal(root, years, terms, classes, existing, currentClassRows) 
       </p>
       <div class="field">
         <label>Which grades are sitting this exam?</label>
-        <p class="hint" style="margin-top:0">Tap a class to include it. Set a minimum number of learning areas per class if you want anyone who sat fewer marked "X" instead of skewing the class mean — leave blank to use the school-wide default. You can add more classes later from the exam card.</p>
+        <p class="hint" style="margin-top:0">Tap a class to include it, then set its minimum number of learning areas — required for every class you select. Anyone who sat fewer than this is marked "X" instead of skewing the class mean, and this class can't be published until at least this many subjects have had marks uploaded. You can add more classes later from the exam card.</p>
         ${classes.length ? `
           <div class="ex-class-toolbar">
             <div class="field" style="flex:1;margin:0"><input type="text" id="ex-class-search" placeholder="Search classes…"></div>
@@ -424,6 +427,25 @@ function openExamModal(root, years, terms, classes, existing, currentClassRows) 
         if (classIds.indexOf(inp.dataset.classMin) === -1) return;
         minSubjectsByClass[inp.dataset.classMin] = inp.value === '' ? null : inp.value;
       });
+
+      // Round 5 §1: a minimum-subjects value is no longer optional — every
+      // class sitting this exam must have one set (>=1) before the exam can
+      // be saved, so the publish gate (publishExam, Round 2 §10) always has
+      // a real minimum to enforce instead of silently falling back to "no
+      // gate" just because the field was left blank at creation time.
+      const missingMin = classIds.filter((cid) => {
+        const v = minSubjectsByClass[cid];
+        return v === null || v === undefined || v === '' || Number(v) < 1;
+      });
+      if (missingMin.length) {
+        const names = missingMin.map((cid) => {
+          const nameEl = document.querySelector(`[data-class-card="${cid}"] .ex-class-name`);
+          return nameEl ? nameEl.textContent : cid;
+        });
+        toast(`Set a minimum number of learning areas for: ${names.join(', ')} — required before this exam can be saved.`, 'err');
+        return;
+      }
+
       const res = await Db.results.saveExam({
         id: existing ? existing.id : undefined,
         name: document.getElementById('ex-name').value,
@@ -451,20 +473,50 @@ function openClassPickerModal(root, exam, currentClassRows, onDone) {
     modal({
       title: `Add classes to "${exam.name}"`,
       body: `
-        <p class="hint" style="margin-top:0">Choose which additional classes are sitting this exam.</p>
-        <div style="max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px">
-          ${choices.map((c) => `<label style="display:flex;align-items:center;gap:8px;padding:4px 0">
-            <input type="checkbox" data-add-class-check value="${c.id}"><span>${esc(c.name)}</span></label>`).join('')}
+        <p class="hint" style="margin-top:0">Choose which additional classes are sitting this exam, and set each one's minimum number of learning areas (required — used to exclude students who sat too few from skewing the class mean, and to gate publishing until enough subjects have marks).</p>
+        <div style="max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px">
+          ${choices.map((c) => `<div style="display:flex;align-items:center;gap:10px;padding:6px 0">
+            <label style="display:flex;align-items:center;gap:8px;flex:1;margin:0"><input type="checkbox" data-add-class-check value="${c.id}"><span>${esc(c.name)}</span></label>
+            <input type="number" min="1" step="1" data-add-class-min="${c.id}" placeholder="Min. learning areas *" style="width:170px" disabled>
+          </div>`).join('')}
         </div>
       `,
       okLabel: 'Add selected',
+      onOpen: () => {
+        document.querySelectorAll('[data-add-class-check]').forEach((cb) => {
+          cb.onchange = () => {
+            const minInp = document.querySelector(`[data-add-class-min="${cb.value}"]`);
+            if (minInp) minInp.disabled = !cb.checked;
+          };
+        });
+      },
       onOk: async () => {
         const toAdd = [...document.querySelectorAll('[data-add-class-check]')].filter((cb) => cb.checked).map((cb) => cb.value);
         if (!toAdd.length) { toast('Choose at least one class.', 'err'); return; }
+        // Round 5 §1: min. learning areas is required for every class being
+        // added here too — this is the second (and only other) place a
+        // class can join an exam, so the mandatory rule has to hold here
+        // exactly as it does in the main Add/Edit Exam modal, or a class
+        // added via "+ Add classes" would slip through with no minimum set.
+        const minSubjectsByClass = {};
+        const missingMin = [];
+        toAdd.forEach((cid) => {
+          const inp = document.querySelector(`[data-add-class-min="${cid}"]`);
+          const v = inp ? inp.value : '';
+          minSubjectsByClass[cid] = v === '' ? null : v;
+          if (v === '' || Number(v) < 1) {
+            const choice = choices.find((c) => String(c.id) === String(cid));
+            missingMin.push(choice ? choice.name : cid);
+          }
+        });
+        if (missingMin.length) {
+          toast(`Set a minimum number of learning areas for: ${missingMin.join(', ')} — required before these classes can be added.`, 'err');
+          return;
+        }
         const existingIds = (currentClassRows || []).map((r) => r.class_id);
         const res2 = await Db.results.saveExam({
           id: exam.id, name: exam.name, academic_year_id: exam.academic_year_id, term_id: exam.term_id,
-          exam_type: exam.exam_type, class_ids: [...existingIds, ...toAdd]
+          exam_type: exam.exam_type, class_ids: [...existingIds, ...toAdd], min_subjects_by_class: minSubjectsByClass
         });
         if (!res2.ok) { toast(res2.message, 'err'); return; }
         closeModal();

@@ -431,6 +431,20 @@ export function createAcademicsApi(supabase) {
         if (!examId) return err('Missing exam.');
         if (!subjectId) return err('Missing subject.');
         if (!classId) return err('Missing class.');
+
+        // Round 5 §6: paper setup ("out of" and ratio) may be reconfigured
+        // at any point WHILE this subject's results for this class are
+        // still unpublished — including after marks have already been
+        // uploaded against it, which used to feel locked/impossible to
+        // change. Once actually PUBLISHED, though, the grading structure
+        // parents/students already saw shouldn't shift under them, so that
+        // one state still blocks a reconfigure.
+        const { data: submission } = await supabase.from('result_submissions').select('status')
+          .eq('exam_id', examId).eq('class_id', classId).eq('subject_id', subjectId).maybeSingle();
+        if (submission && submission.status === 'published') {
+          return err('This subject\'s results are already published for this class — unpublish them first before changing paper setup.');
+        }
+
         papers = (papers || []).map((p, i) => ({
           id: p.id || undefined,
           name: String(p.name || '').trim() || `Paper ${i + 1}`,
@@ -455,7 +469,7 @@ export function createAcademicsApi(supabase) {
           }
         }
 
-        const { data: existing } = await supabase.from('subject_papers').select('id').eq('exam_id', examId).eq('subject_id', subjectId).eq('class_id', classId);
+        const { data: existing } = await supabase.from('subject_papers').select('id, name').eq('exam_id', examId).eq('subject_id', subjectId).eq('class_id', classId);
         const existingIds = new Set((existing || []).map((r) => r.id));
         // Defense in depth: an incoming id is only ever reused as an UPDATE
         // target if it actually belongs to THIS (exam, subject, class).
@@ -468,6 +482,40 @@ export function createAcademicsApi(supabase) {
 
         const keepIds = new Set(papers.filter((p) => p.id).map((p) => p.id));
         const toRemove = (existing || []).filter((r) => !keepIds.has(r.id));
+
+        // Round 5 §6: validate against ALREADY-ENTERED marks BEFORE writing
+        // anything — never delete/update a paper first and only then
+        // discover the change breaks it. Two protections, both following
+        // the brief's "if existing marks would no longer make sense, throw
+        // a clear error" instruction:
+        //   1. removing a paper that already has marks recorded against it
+        //      would silently orphan those marks (paper_id -> null via the
+        //      FK's ON DELETE SET NULL) — refused outright.
+        //   2. shrinking a paper's "out of" below a mark that's already
+        //      been entered against it would leave that score reading as
+        //      more than the new maximum — refused with the exact reason.
+        const touchedIds = [...new Set([...toRemove.map((r) => r.id), ...papers.filter((p) => p.id).map((p) => p.id)])];
+        const resultsByPaper = {};
+        if (touchedIds.length) {
+          const { data: rows } = await supabase.from('results').select('paper_id, score').in('paper_id', touchedIds);
+          (rows || []).forEach((r) => {
+            if (r.score === null || r.score === undefined) return;
+            (resultsByPaper[r.paper_id] = resultsByPaper[r.paper_id] || []).push(Number(r.score));
+          });
+        }
+        for (const r of toRemove) {
+          if ((resultsByPaper[r.id] || []).length) {
+            return err(`Can't remove "${r.name}" — it already has marks recorded. Remove those marks first, or keep the paper and just adjust its "out of"/ratio instead.`);
+          }
+        }
+        for (const p of papers) {
+          if (!p.id) continue; // brand-new paper — nothing entered against it yet
+          const tooHigh = (resultsByPaper[p.id] || []).filter((s) => s > p.out_of);
+          if (tooHigh.length) {
+            return err(`"${p.name}": ${tooHigh.length} student${tooHigh.length === 1 ? '' : 's'} already ha${tooHigh.length === 1 ? 's' : 've'} a mark above the new "out of" of ${p.out_of} — remove or adjust those marks first, or choose a higher "out of".`);
+          }
+        }
+
         for (const r of toRemove) {
           const { error } = await supabase.from('subject_papers').delete().eq('id', r.id);
           if (error) return err(error.message);

@@ -708,7 +708,15 @@ export function createResultsApi(supabase, gradingApi) {
           scores[sub.id] = v;
           if (papersBySubject[sub.id]) {
             paperScores[sub.id] = (paperScoresBySubjectStudent[sub.id] && paperScoresBySubjectStudent[sub.id][s.id]) || {};
-            subjectPct[sub.id] = (v !== null && examOutOf > 0) ? Math.round((v / examOutOf) * 100 * 10) / 10 : null;
+            // Round 5 §2: this % is display-only (never feeds
+            // total/average/ranking — see the comment on `paperScores`
+            // above), so rounding it to a whole number here is purely a
+            // "how it's shown" change, not a data-precision one. Was
+            // rounded to 1 decimal place before; the brief asked for whole
+            // numbers on every Learning Area Papers % and combined-subject
+            // figure the Mark List (and its Excel export, which reads this
+            // same field — see broadsheetXlsx.mjs) shows.
+            subjectPct[sub.id] = (v !== null && examOutOf > 0) ? Math.round((v / examOutOf) * 100) : null;
           }
           if (v !== null && !isNaN(v)) {
             total += v; counted++;

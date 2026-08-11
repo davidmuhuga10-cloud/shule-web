@@ -60,6 +60,62 @@ function run() {
   check('buildBroadsheetAoa omits the contact row when no contact fields are set', bsAoaNoContact[1][0] === 'Term 2 Mid-Term — Mark List — ');
   check('buildBroadsheetAoa handles a null class gracefully', bsAoaNoContact[1][0].includes('Mark List —'));
 
+  // --- Round 5 §2: TOTAL/AVERAGE rows + combined-subject/Learning Area
+  // Papers % rounded to whole numbers on the Excel export too ---
+  {
+    const comboSubjects = [
+      { id: 'sub-1', code: 'MAT' },
+      { id: 'combo:c1', name: 'SST/CRE Combined', is_combination: true },
+      { id: 'sub-lap', code: 'ENG', papers: [{ id: 'p1', name: 'P1' }, { id: 'p2', name: 'P2' }] }
+    ];
+    const multiStudents = [
+      {
+        admission_no: '101', full_name: 'Amos Otieno', stream_name: 'East',
+        scores: { 'sub-1': 70, 'combo:c1': 61.4, 'sub-lap': 55 },
+        grades: { 'sub-1': { grade_label: 'B' }, 'combo:c1': { grade_label: 'B' }, 'sub-lap': { grade_label: 'C+' } },
+        paperScores: { 'sub-lap': { p1: 30, p2: 25 } },
+        // Already whole numbers here, matching what results.mjs's
+        // getBroadsheet() now hands this pure export builder (Round 5 §2
+        // rounds subjectPct to a whole number at the source — see
+        // results.test.mjs for that rounding itself) — this layer just
+        // displays what it's given, same as it already did for `scores`.
+        subjectPct: { 'sub-lap': 55 },
+        subject_count: 3, total: 186.4, average: 62.13, overall_grade: 'B', total_points: 18, mean_points: 6, deviation: 1, stream_position: 1, position: 1
+      },
+      {
+        admission_no: '102', full_name: 'Beatrice Wanjiru', stream_name: 'East',
+        scores: { 'sub-1': 80, 'combo:c1': 68.6, 'sub-lap': 45 },
+        grades: { 'sub-1': { grade_label: 'A-' }, 'combo:c1': { grade_label: 'B+' }, 'sub-lap': { grade_label: 'C' } },
+        paperScores: { 'sub-lap': { p1: 20, p2: 25 } },
+        subjectPct: { 'sub-lap': 45 },
+        subject_count: 3, total: 193.6, average: 64.53, overall_grade: 'B+', total_points: 20, mean_points: 6.7, deviation: 3.4, stream_position: 2, position: 2
+      }
+    ];
+    const aoa = buildBroadsheetAoa({ settings, exam, cls, streamName: 'East', subjects: comboSubjects, students: multiStudents, class_average: 63.3 });
+
+    check('a combined subject\'s score is rounded to a whole number on the export (61.4 -> 61)', aoa[5].includes('61 (B)'));
+    check('a combined subject\'s OTHER student score is rounded too (68.6 -> 69)', aoa[6].includes('69 (B+)'));
+    check('a Learning Area Papers % (already rounded upstream) shows as a whole number on the export', aoa[5].includes('55 (C+)'));
+    check('same for the other student', aoa[6].includes('45 (C)'));
+    // Row order after the header (index 4): 2 student rows, then TOTAL, then AVERAGE, then a blank spacer, then Class average.
+    const totalRow = aoa[7], avgRow = aoa[8];
+    check('a TOTAL row is added right after the student rows, labelled in column 2', totalRow[1] === 'TOTAL');
+    check('an AVERAGE row follows it, labelled in column 2', avgRow[1] === 'AVERAGE');
+    check('TOTAL sums the plain subject column (70 + 80 = 150)', totalRow[3] === 150);
+    check('AVERAGE averages the plain subject column (70 + 80)/2 = 75', avgRow[3] === 75);
+    check('TOTAL sums the combined-subject column, rounded (61.4 + 68.6 = 130)', totalRow[4] === 130);
+    check('AVERAGE averages the combined-subject column, rounded ((61.4+68.6)/2 = 65)', avgRow[4] === 65);
+    // sub-lap columns: P1, P2, then %.
+    check('TOTAL sums a Learning Area Paper\'s own column (30 + 20 = 50)', totalRow[5] === 50);
+    check('TOTAL sums the Learning Area Papers % column, rounded (55.4 + 44.6 = 100)', totalRow[7] === 100);
+    check('AVERAGE averages the Learning Area Papers % column, rounded ((55.4+44.6)/2 = 50)', avgRow[7] === 50);
+    check('the blank spacer and Class average row still follow immediately after', aoa[9].length === 0 && aoa[10][0] === 'Class average:' && aoa[10][1] === 63.3);
+
+    // A totally empty class (no students) doesn't blow up — every column dashes out.
+    const emptyAoa = buildBroadsheetAoa({ settings, exam, cls, streamName: 'East', subjects: comboSubjects, students: [], class_average: 0 });
+    check('TOTAL/AVERAGE rows dash out every column when there are no students', emptyAoa[5].slice(3).every((c) => c === '—') && emptyAoa[6].slice(3).every((c) => c === '—'));
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }
