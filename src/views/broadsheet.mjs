@@ -18,6 +18,7 @@ import { Db } from '../lib/api/index.mjs';
 import { computeGradeSummaries } from '../lib/broadsheetSummary.mjs';
 import { downloadXlsxAOA } from '../lib/xlsxUtil.mjs';
 import { buildBroadsheetAoa } from '../lib/broadsheetXlsx.mjs';
+import { applyMeritListDisplayPrefs } from '../lib/meritListPrefs.mjs';
 import { printHeaderHtml, isContactInfoComplete, renderMissingContactInfo } from '../lib/printHeader.mjs';
 
 export async function viewBroadsheet(root) {
@@ -109,6 +110,12 @@ async function load(root, classes, sel) {
     sheetEl.innerHTML = `<div class="card"><div class="card-b"><div class="empty warn"><div class="e-ico">⚠️</div><h3>No published subjects yet</h3><p>A subject only appears on the Mark List once its results are published — assign subjects and publish results, then come back.</p></div></div></div>`;
     return;
   }
+
+  // Round 2 §1/§2: apply the school's Mark List display preferences once,
+  // right after fetching — everything below (screen grid, summary tables,
+  // Excel export) reads from this SAME adjusted list, so the two can never
+  // disagree with each other.
+  res.subjects = applyMeritListDisplayPrefs(res.subjects, settings);
 
   sheetEl.innerHTML = `
     <div class="report-toolbar no-print">

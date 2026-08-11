@@ -14,7 +14,7 @@
  * research this is built on.
  */
 import { ok, err } from './_util.mjs';
-import { generateTimetable, DEFAULT_PERIODS_PER_WEEK } from '../timetable/generate.mjs';
+import { generateTimetable, checkCapacity, DEFAULT_PERIODS_PER_WEEK, CONSTRAINT_TYPES } from '../timetable/generate.mjs';
 
 export const TIMETABLE_DAYS_DEFAULT = [1, 2, 3, 4, 5];
 
@@ -151,6 +151,72 @@ export function createTimetableApi(supabase, settingsApi) {
       }
     },
 
+    /** Round 2 §7: the Constraints module — school-configured scheduling
+     *  preferences fed into generate.mjs's placement engine as soft
+     *  constraints (see that file's header comment for the full research
+     *  and design rationale, and CONSTRAINT_TYPES for the canonical list
+     *  of the 6 supported types). Every row is independently
+     *  enabled/disabled and independently deletable; `save()` validates
+     *  each type's own `config` shape so the UI gets a clear rejection
+     *  rather than silently saving an inert row the engine will just skip. */
+    constraints: {
+      async list() {
+        const { data, error } = await supabase.from('timetable_constraints').select('*').order('created_at', { ascending: true });
+        if (error) return err(error.message);
+        return ok(data || []);
+      },
+      async save(payload) {
+        payload = payload || {};
+        const type = payload.type;
+        if (!CONSTRAINT_TYPES.includes(type)) return err('Unknown constraint type.');
+        const config = payload.config || {};
+        const enabled = payload.enabled !== false;
+        // A DISABLED row is allowed to be incomplete/blank — a school
+        // should be able to save "off, not configured yet" without first
+        // filling in every field. Full validation only applies once a row
+        // is actually being turned on, since that's the point an
+        // incomplete config would otherwise silently do nothing at
+        // generate time.
+        let cleanConfig;
+        if (type === 'subject_pair_not_consecutive') {
+          if (enabled) {
+            if (!config.subject_a || !config.subject_b) return err('Choose both subjects for this pair.');
+            if (config.subject_a === config.subject_b) return err('Choose two different subjects.');
+          }
+          cleanConfig = { subject_a: config.subject_a || null, subject_b: config.subject_b || null };
+        } else if (type === 'avoid_consecutive_intensive') {
+          const ids = [...new Set((config.subject_ids || []).filter(Boolean))];
+          if (enabled && ids.length < 2) return err('Pick at least 2 subjects to treat as mentally intensive.');
+          cleanConfig = { subject_ids: ids };
+        } else if (type === 'pe_before_break') {
+          const ids = [...new Set((config.subject_ids || []).filter(Boolean))];
+          if (enabled && !ids.length) return err('Pick at least 1 subject to treat as PE.');
+          cleanConfig = { subject_ids: ids };
+        } else if (type === 'max_consecutive_periods_class' || type === 'max_consecutive_periods_teacher') {
+          const max = Number(config.max);
+          if (enabled && (!Number.isFinite(max) || max < 1)) return err('Enter a maximum of at least 1 period.');
+          cleanConfig = { max: Number.isFinite(max) && max >= 1 ? Math.floor(max) : null };
+        } else {
+          cleanConfig = {}; // teacher_no_immediate_after_out — just an on/off, no extra config
+        }
+        const rec = { type, enabled, config: cleanConfig };
+        if (payload.id) {
+          const { error } = await supabase.from('timetable_constraints').update(rec).eq('id', payload.id);
+          if (error) return err(error.message);
+          return ok(true);
+        }
+        const { data, error } = await supabase.from('timetable_constraints').insert(rec).select().single();
+        if (error) return err(error.message);
+        return ok(data);
+      },
+      async remove(id) {
+        if (!id) return err('Missing constraint.');
+        const { error } = await supabase.from('timetable_constraints').delete().eq('id', id);
+        if (error) return err(error.message);
+        return ok(true);
+      }
+    },
+
     entries: {
       /** filters: { academic_year_id, term_id, class_id?, stream_id?, staff_id? } */
       async list(filters) {
@@ -250,12 +316,13 @@ export function createTimetableApi(supabase, settingsApi) {
       // each other, and teacher_unavailability doesn't depend on anything
       // else in this function either, so there's no reason to wait for the
       // subject-assignment step before starting it.
-      const [{ data: classes }, { data: streams }, periodsRes, daysRes, { data: unavailRows }] = await Promise.all([
+      const [{ data: classes }, { data: streams }, periodsRes, daysRes, { data: unavailRows }, constraintsRes] = await Promise.all([
         supabase.from('classes').select('id, name'),
         supabase.from('streams').select('id, class_id, name'),
         this.periods.list(),
         this.days.get(),
-        supabase.from('teacher_unavailability').select('staff_id, day_of_week, period_index')
+        supabase.from('teacher_unavailability').select('staff_id, day_of_week, period_index'),
+        this.constraints.list()
       ]);
       if (!periodsRes.ok) return err(periodsRes.message);
       if (!daysRes.ok) return err(daysRes.message);
@@ -311,13 +378,41 @@ export function createTimetableApi(supabase, settingsApi) {
       }));
 
       const unavailable = new Set((unavailRows || []).map((u) => `${u.staff_id}|${u.day_of_week}|${u.period_index}`));
+      const classNameById = {}; (classes || []).forEach((c) => { classNameById[c.id] = c.name; });
+      const streamNameById = {}; (streams || []).forEach((s) => { streamNameById[s.id] = s.name; });
 
-      const { entries, unresolved } = generateTimetable({
+      const generateInput = {
         days: daysRes.data,
         periods: periodsRes.data.map((p) => ({ period_index: p.period_index, is_break: p.is_break })),
         streams: streamsInput,
         unavailable
-      });
+      };
+
+      // Round 2 §7: fail clearly BEFORE running the placement engine or
+      // touching any existing timetable, whenever a stream is being asked
+      // for more periods/week than the week genuinely has room for — this
+      // used to only ever surface as a pile of per-subject `unresolved`
+      // entries after generation had already cleared the old timetable and
+      // run to completion. Nothing has been cleared or written yet at this
+      // point, so a school that hits this still has its previous timetable
+      // (if any) intact and untouched.
+      const capacity = checkCapacity(generateInput);
+      if (!capacity.ok) {
+        const detail = capacity.overloaded.map((o) => {
+          const label = `${classNameById[o.class_id] || ''} ${streamNameById[o.stream_id] || ''}`.trim() || 'A class/arm';
+          return `${label} needs ${o.required} periods/week but the week only has ${o.available}`;
+        }).join('; ');
+        return err(`Not enough room in the week for what's configured: ${detail}. Reduce periods/week for the affected subject(s) or add more periods to the daily grid (Setup tab), then try again.`);
+      }
+
+      // Round 2 §7: the school's configured Constraints, fed to the engine
+      // as soft preferences — see generate.mjs's header comment. A school
+      // with none configured (or a fetch failure, e.g. offline) simply
+      // generates exactly as it always has (empty array = no constraints
+      // enforced, not a hard failure).
+      generateInput.constraints = constraintsRes.ok ? constraintsRes.data : [];
+
+      const { entries, unresolved } = generateTimetable(generateInput);
 
       const clearRes = await this.entries.clearScope(academicYearId, termId);
       if (!clearRes.ok) return err(clearRes.message);
@@ -328,8 +423,6 @@ export function createTimetableApi(supabase, settingsApi) {
         if (error) return err(error.message);
       }
 
-      const classNameById = {}; (classes || []).forEach((c) => { classNameById[c.id] = c.name; });
-      const streamNameById = {}; (streams || []).forEach((s) => { streamNameById[s.id] = s.name; });
       const unresolvedNamed = unresolved.map((u) => ({
         ...u,
         subject_name: u.subject_name || subjectNameById[u.subject_id] || '',

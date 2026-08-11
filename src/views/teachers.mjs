@@ -6,7 +6,7 @@
  * duplicating it — same data, same login-provisioning flow, just a
  * teacher-focused view on top of it.
  */
-import { esc, initials, go } from '../app.js';
+import { esc, initials, go, toast, confirmAction } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { openStaffModal, openAddChoiceModal } from './staff.mjs';
 
@@ -45,6 +45,7 @@ async function render(root, query) {
           <button class="btn sm secondary" data-edit="${t.id}">Edit</button>
           <button class="icon-btn" data-assign="${t.id}" title="Subject assignments (in Classes &amp; Arms)">🔗</button>
           <button class="icon-btn" data-msg="${t.id}" title="Message">💬</button>
+          <button class="icon-btn" data-del="${t.id}" title="Remove teacher">🗑️</button>
         </div>
       </div>
     </div>`).join('');
@@ -74,4 +75,16 @@ async function render(root, query) {
   // build that) so it's just deleting the module").
   root.querySelectorAll('[data-assign]').forEach((b) => b.onclick = () => go('classes'));
   root.querySelectorAll('[data-msg]').forEach((b) => b.onclick = () => go('messaging'));
+  // Round 2 §4 bug fix: there was previously no way to remove a teacher
+  // once added — Staff (staff.mjs) already had this exact action for every
+  // OTHER kind of staff member (Db.staff.remove, same table), it just never
+  // made it onto this teacher-focused card view.
+  root.querySelectorAll('[data-del]').forEach((b) => b.onclick = () => confirmAction(
+    'Remove this teacher? This cannot be undone.',
+    async () => {
+      const r = await Db.staff.remove(b.dataset.del);
+      if (r.ok) { toast('Teacher removed.', 'ok'); render(root, query); } else toast(r.message, 'err');
+    },
+    true
+  ));
 }

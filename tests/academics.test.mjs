@@ -252,63 +252,90 @@ async function run() {
     check('classes.save clears class_teacher_staff_id when omitted', cleared.data.class_teacher_staff_id === null);
   }
 
-  // ---- subject papers (Learning Area Papers — exam-scoped, not permanent) ------
+  // ---- subject papers (Learning Area Papers — exam-scoped AND class-scoped, not permanent) ------
   {
     const sb = createMockSupabase({
       subjects: [{ id: 'su1', name: 'English' }],
-      exams: [{ id: 'ex1', name: 'Term 1 Exam' }, { id: 'ex2', name: 'Term 2 Exam' }]
+      exams: [{ id: 'ex1', name: 'Term 1 Exam' }, { id: 'ex2', name: 'Term 2 Exam' }],
+      classes: [{ id: 'c1', name: 'Grade 1' }, { id: 'c8', name: 'Grade 8' }]
     });
     const api = createAcademicsApi(sb);
 
-    check('subjectPapers.setForSubject requires an exam', (await api.subjectPapers.setForSubject(null, 'su1', [])).ok === false);
-    check('subjectPapers.setForSubject requires a subject', (await api.subjectPapers.setForSubject('ex1', null, [])).ok === false);
+    check('subjectPapers.setForSubject requires an exam', (await api.subjectPapers.setForSubject(null, 'su1', 'c1', [])).ok === false);
+    check('subjectPapers.setForSubject requires a subject', (await api.subjectPapers.setForSubject('ex1', null, 'c1', [])).ok === false);
+    check('subjectPapers.setForSubject requires a class', (await api.subjectPapers.setForSubject('ex1', 'su1', null, [])).ok === false);
 
     // Zero papers = single combined mark — the default state, and always a
     // valid save (the "revert to a single mark" escape hatch).
-    const zero = await api.subjectPapers.setForSubject('ex1', 'su1', []);
+    const zero = await api.subjectPapers.setForSubject('ex1', 'su1', 'c1', []);
     check('setForSubject accepts an empty paper list (single-mark mode)', zero.ok === true);
-    check('list() is empty for a subject with no papers configured', (await api.subjectPapers.list('ex1', 'su1')).data.length === 0);
+    check('list() is empty for a subject with no papers configured', (await api.subjectPapers.list('ex1', 'su1', 'c1')).data.length === 0);
 
     // Ratios that don't add up to 100% are rejected outright, never silently saved.
-    const badRatio = await api.subjectPapers.setForSubject('ex1', 'su1', [
+    const badRatio = await api.subjectPapers.setForSubject('ex1', 'su1', 'c1', [
       { name: 'Paper 1', out_of: 60, ratio: 60 }, { name: 'Paper 2', out_of: 40, ratio: 30 }
     ]);
     check('setForSubject rejects ratios that do not sum to 100%', badRatio.ok === false && /100%/.test(badRatio.message));
 
-    const saved = await api.subjectPapers.setForSubject('ex1', 'su1', [
+    const saved = await api.subjectPapers.setForSubject('ex1', 'su1', 'c1', [
       { name: 'Paper 1', out_of: 60, ratio: 60 }, { name: 'Paper 2', out_of: 40, ratio: 40 }
     ]);
     check('setForSubject saves a valid 2-paper split', saved.ok === true && saved.count === 2);
 
-    const listed = await api.subjectPapers.list('ex1', 'su1');
+    const listed = await api.subjectPapers.list('ex1', 'su1', 'c1');
     check('list() returns both papers in order, weight converted from the 0-100 ratio', listed.data.length === 2
       && listed.data[0].name === 'Paper 1' && listed.data[0].weight === 0.6
       && listed.data[1].name === 'Paper 2' && listed.data[1].weight === 0.4);
 
     // A single paper's ratio is always locked to 100%, regardless of what's sent.
-    const single = await api.subjectPapers.setForSubject('ex1', 'su1', [{ id: listed.data[0].id, name: 'Paper 1', out_of: 100, ratio: 37 }]);
+    const single = await api.subjectPapers.setForSubject('ex1', 'su1', 'c1', [{ id: listed.data[0].id, name: 'Paper 1', out_of: 100, ratio: 37 }]);
     check('setForSubject with just one paper locks its ratio to 100% (no combining needed)', single.ok === true);
-    const afterSingle = await api.subjectPapers.list('ex1', 'su1');
+    const afterSingle = await api.subjectPapers.list('ex1', 'su1', 'c1');
     check('single remaining paper has weight 1 regardless of the ratio sent', afterSingle.data.length === 1 && afterSingle.data[0].weight === 1);
     check('setForSubject with one paper removed the other (replace-all, not append)', afterSingle.data.every((p) => p.name === 'Paper 1'));
 
     // Reverting to zero papers again — the "use single mark instead" path.
-    const reverted = await api.subjectPapers.setForSubject('ex1', 'su1', []);
+    const reverted = await api.subjectPapers.setForSubject('ex1', 'su1', 'c1', []);
     check('setForSubject([]) reverts a configured subject back to single-mark mode', reverted.ok === true);
-    check('no papers remain after reverting', (await api.subjectPapers.list('ex1', 'su1')).data.length === 0);
+    check('no papers remain after reverting', (await api.subjectPapers.list('ex1', 'su1', 'c1')).data.length === 0);
 
     // THE critical requirement: the exact same subject has a completely
     // independent paper setup in a DIFFERENT exam — nothing carries over,
     // nothing is remembered from ex1.
-    const otherExam = await api.subjectPapers.setForSubject('ex2', 'su1', [
+    const otherExam = await api.subjectPapers.setForSubject('ex2', 'su1', 'c1', [
       { name: 'Paper 1', out_of: 100, ratio: 100 }
     ]);
     check('the same subject can have a totally different paper setup in a different exam', otherExam.ok === true);
-    check('exam 1 is unaffected by exam 2\'s paper setup for the same subject', (await api.subjectPapers.list('ex1', 'su1')).data.length === 0);
-    check('exam 2 has its own independent paper', (await api.subjectPapers.list('ex2', 'su1')).data.length === 1);
+    check('exam 1 is unaffected by exam 2\'s paper setup for the same subject', (await api.subjectPapers.list('ex1', 'su1', 'c1')).data.length === 0);
+    check('exam 2 has its own independent paper', (await api.subjectPapers.list('ex2', 'su1', 'c1')).data.length === 1);
 
     check('listForExam returns every paper across every subject for one exam', (await api.subjectPapers.listForExam('ex2')).data.length === 1);
-    check('setForSubject rejects a paper with no positive out_of', (await api.subjectPapers.setForSubject('ex1', 'su1', [{ name: 'Paper 1', out_of: 0, ratio: 100 }])).ok === false);
+    check('setForSubject rejects a paper with no positive out_of', (await api.subjectPapers.setForSubject('ex1', 'su1', 'c1', [{ name: 'Paper 1', out_of: 0, ratio: 100 }])).ok === false);
+
+    // Round 2 §5 correction: the SAME subject, SAME exam, has a completely
+    // independent paper setup PER CLASS — Grade 1 sits it as a single mark
+    // while Grade 8 sits it as 3 papers, and configuring one never touches
+    // the other.
+    const g1 = await api.subjectPapers.setForSubject('ex1', 'su1', 'c1', []);
+    const g8 = await api.subjectPapers.setForSubject('ex1', 'su1', 'c8', [
+      { name: 'Paper 1', out_of: 40, ratio: 40 }, { name: 'Paper 2', out_of: 30, ratio: 30 }, { name: 'Paper 3', out_of: 30, ratio: 30 }
+    ]);
+    check('Grade 1 saves as single-mark for this subject/exam', g1.ok === true);
+    check('Grade 8 saves as 3 papers for the SAME subject/exam', g8.ok === true && g8.count === 3);
+    check('Grade 1 still has zero papers — Grade 8\'s setup did not leak across', (await api.subjectPapers.list('ex1', 'su1', 'c1')).data.length === 0);
+    check('Grade 8 has its own independent 3-paper setup', (await api.subjectPapers.list('ex1', 'su1', 'c8')).data.length === 3);
+    check('listForExam sees both classes\' rows together (caller groups by class)', (await api.subjectPapers.listForExam('ex1')).data.length === 3);
+
+    // Defense in depth: applying the same `papers` array (same .id's) to a
+    // SECOND class must never steal/overwrite the first class's rows just
+    // because the ids match something that exists for a DIFFERENT class.
+    const g8Papers = (await api.subjectPapers.list('ex1', 'su1', 'c8')).data;
+    const stolen = await api.subjectPapers.setForSubject('ex1', 'su1', 'c1', g8Papers.map((p) => ({ id: p.id, name: p.name, out_of: p.out_of, ratio: Math.round(p.weight * 100) })));
+    check('reusing another class\'s paper ids for a different class still succeeds (treated as new rows)', stolen.ok === true);
+    const g8After = await api.subjectPapers.list('ex1', 'su1', 'c8');
+    check('Grade 8\'s original 3 papers are untouched by Grade 1\'s save using the same ids', g8After.data.length === 3 && g8After.data.every((p) => g8Papers.some((op) => op.id === p.id)));
+    const g1After = await api.subjectPapers.list('ex1', 'su1', 'c1');
+    check('Grade 1 got its OWN new rows, not a reassignment of Grade 8\'s', g1After.data.length === 3 && g1After.data.every((p) => !g8Papers.some((op) => op.id === p.id)));
   }
 
   // ---- subjects + CBC ----------------------------------------------------------
@@ -335,6 +362,53 @@ async function run() {
     check('subjects.loadCbc is idempotent (0 added on re-run)', second.added === 0);
     const listed = await api.subjects.list();
     check('subjects.list reflects the seeded CBC subjects', listed.data.length === CBC_SUBJECTS.length);
+  }
+
+  // ---- subject combinations (Round 2 §3 — the opposite of Learning Area Papers) ----
+  {
+    const sb = createMockSupabase({
+      subjects: [{ id: 'su1', name: 'Social Studies' }, { id: 'su2', name: 'CRE' }, { id: 'su3', name: 'Mathematics' }],
+      exams: [{ id: 'ex1', name: 'Term 1 Exam' }],
+      subject_combinations: [],
+      subject_combination_members: []
+    });
+    const api = createAcademicsApi(sb);
+
+    const noExam = await api.subjectCombinations.setCombination(null, { name: 'X', members: [{ subject_id: 'su1', ratio: 50 }, { subject_id: 'su2', ratio: 50 }] });
+    check('setCombination requires an exam', noExam.ok === false);
+
+    const noName = await api.subjectCombinations.setCombination('ex1', { members: [{ subject_id: 'su1', ratio: 50 }, { subject_id: 'su2', ratio: 50 }] });
+    check('setCombination requires a name', noName.ok === false);
+
+    const tooFew = await api.subjectCombinations.setCombination('ex1', { name: 'Just one', members: [{ subject_id: 'su1', ratio: 100 }] });
+    check('setCombination refuses a combination with fewer than 2 subjects', tooFew.ok === false && /at least 2/i.test(tooFew.message));
+
+    const badRatio = await api.subjectCombinations.setCombination('ex1', { name: 'SST/CRE', members: [{ subject_id: 'su1', ratio: 60 }, { subject_id: 'su2', ratio: 30 }] });
+    check('setCombination rejects ratios that do not sum to 100%', badRatio.ok === false && /100%/.test(badRatio.message));
+
+    const saved = await api.subjectCombinations.setCombination('ex1', { name: 'SST/CRE Combined', members: [{ subject_id: 'su1', ratio: 60 }, { subject_id: 'su2', ratio: 40 }] });
+    check('setCombination saves a valid 2-subject combination', saved.ok === true && !!saved.id);
+
+    const listed = await api.subjectCombinations.listForExam('ex1');
+    check('listForExam returns the combination with its members nested', listed.data.length === 1 && listed.data[0].members.length === 2);
+    check('member weights are converted from the 0-100 ratio', listed.data[0].members.find((m) => m.subject_id === 'su1').weight === 0.6);
+
+    // A subject already used by this combo cannot ALSO be used by a different one.
+    const clash = await api.subjectCombinations.setCombination('ex1', { name: 'Math/SST', members: [{ subject_id: 'su1', ratio: 50 }, { subject_id: 'su3', ratio: 50 }] });
+    check('setCombination refuses to double-claim a subject already in another combination', clash.ok === false && /already part of/i.test(clash.message));
+
+    // Editing the SAME combination (passing its own id) is allowed to keep its own members.
+    const editSame = await api.subjectCombinations.setCombination('ex1', { id: listed.data[0].id, name: 'SST/CRE Combined (renamed)', members: [{ subject_id: 'su1', ratio: 70 }, { subject_id: 'su2', ratio: 30 }] });
+    check('editing a combination can keep its own existing members without a false clash', editSame.ok === true);
+    const afterEdit = await api.subjectCombinations.listForExam('ex1');
+    check('the edit actually changed the name and ratios', afterEdit.data[0].name === 'SST/CRE Combined (renamed)' && afterEdit.data[0].members.find((m) => m.subject_id === 'su1').weight === 0.7);
+
+    // Now that su1/su2 are free again (after deleting), a new combo using them succeeds.
+    const del = await api.subjectCombinations.remove(afterEdit.data[0].id);
+    check('remove() deletes the combination', del.ok === true);
+    check('listForExam is empty after deletion', (await api.subjectCombinations.listForExam('ex1')).data.length === 0);
+    const reuse = await api.subjectCombinations.setCombination('ex1', { name: 'Math/SST', members: [{ subject_id: 'su1', ratio: 50 }, { subject_id: 'su3', ratio: 50 }] });
+    check('subjects freed up by deleting a combination can be reused in a new one', reuse.ok === true);
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

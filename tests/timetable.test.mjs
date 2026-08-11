@@ -24,7 +24,8 @@ const BASE_TABLES = {
     { subject_id: 'math', class_id: 'c1', stream_id: 'str2', staff_id: 'staffA' },
     { subject_id: 'eng', class_id: 'c1', stream_id: 'str1', staff_id: 'staffB' },
     { subject_id: 'eng', class_id: 'c1', stream_id: 'str2', staff_id: 'staffB' }
-  ]
+  ],
+  timetable_constraints: []
 };
 
 function freshApis(extraTables) {
@@ -119,6 +120,69 @@ async function run() {
     check('requirements.save rejects a double count that needs more periods than configured', tooMany.ok === false && /double/i.test(tooMany.message));
   }
 
+  // ---- constraints (Round 2 §7 Constraints module) ----------------------------
+  {
+    const { timetable } = freshApis();
+    check('constraints.list starts empty', (await timetable.constraints.list()).data.length === 0);
+    check('constraints.save rejects an unknown type', (await timetable.constraints.save({ type: 'not-a-real-type', config: {} })).ok === false);
+
+    // subject_pair_not_consecutive: needs both subjects, and two DIFFERENT ones.
+    const missingB = await timetable.constraints.save({ type: 'subject_pair_not_consecutive', config: { subject_a: 'math' } });
+    check('subject_pair_not_consecutive rejects a missing second subject when enabling', missingB.ok === false);
+    const sameSubject = await timetable.constraints.save({ type: 'subject_pair_not_consecutive', config: { subject_a: 'math', subject_b: 'math' } });
+    check('subject_pair_not_consecutive rejects the same subject twice', sameSubject.ok === false);
+    const pairSaved = await timetable.constraints.save({ type: 'subject_pair_not_consecutive', config: { subject_a: 'math', subject_b: 'eng' } });
+    check('subject_pair_not_consecutive saves a valid pair', pairSaved.ok === true && pairSaved.data.config.subject_a === 'math' && pairSaved.data.config.subject_b === 'eng');
+    check('a saved constraint defaults to enabled', pairSaved.data.enabled === true);
+
+    // A school can have MULTIPLE pairs.
+    const pair2 = await timetable.constraints.save({ type: 'subject_pair_not_consecutive', config: { subject_a: 'eng', subject_b: 'math' } });
+    check('a second, independent pair can be added', pair2.ok === true);
+    const afterTwoPairs = await timetable.constraints.list();
+    check('constraints.list reflects both pairs', afterTwoPairs.data.filter((c) => c.type === 'subject_pair_not_consecutive').length === 2);
+
+    // avoid_consecutive_intensive: needs at least 2 subjects when enabling.
+    const oneIntensive = await timetable.constraints.save({ type: 'avoid_consecutive_intensive', config: { subject_ids: ['math'] } });
+    check('avoid_consecutive_intensive rejects fewer than 2 subjects when enabling', oneIntensive.ok === false);
+    const twoIntensive = await timetable.constraints.save({ type: 'avoid_consecutive_intensive', config: { subject_ids: ['math', 'eng'] } });
+    check('avoid_consecutive_intensive saves with 2+ subjects', twoIntensive.ok === true);
+
+    // pe_before_break: needs at least 1 subject when enabling.
+    const noPe = await timetable.constraints.save({ type: 'pe_before_break', config: { subject_ids: [] } });
+    check('pe_before_break rejects zero subjects when enabling', noPe.ok === false);
+    const pe = await timetable.constraints.save({ type: 'pe_before_break', config: { subject_ids: ['math'] } });
+    check('pe_before_break saves with 1+ subject', pe.ok === true);
+
+    // A DISABLED row is allowed to be incomplete — a school can save "off,
+    // not configured yet" without filling in every field first.
+    const disabledIncomplete = await timetable.constraints.save({ type: 'avoid_consecutive_intensive', enabled: false, config: {} });
+    check('a DISABLED constraint row is allowed to have incomplete config', disabledIncomplete.ok === true && disabledIncomplete.data.enabled === false);
+
+    // max_consecutive_periods_class / _teacher: need a positive max when enabling.
+    const badMax = await timetable.constraints.save({ type: 'max_consecutive_periods_class', config: { max: 0 } });
+    check('max_consecutive_periods_class rejects a non-positive max when enabling', badMax.ok === false);
+    const goodMax = await timetable.constraints.save({ type: 'max_consecutive_periods_teacher', config: { max: 3 } });
+    check('max_consecutive_periods_teacher saves a valid max', goodMax.ok === true && goodMax.data.config.max === 3);
+
+    // teacher_no_immediate_after_out: no config needed at all.
+    const toggleOnly = await timetable.constraints.save({ type: 'teacher_no_immediate_after_out', enabled: true });
+    check('teacher_no_immediate_after_out saves with no extra config', toggleOnly.ok === true);
+
+    // Editing in place (passing an id) updates rather than duplicating.
+    const edited = await timetable.constraints.save({ id: pairSaved.data.id, type: 'subject_pair_not_consecutive', enabled: false, config: { subject_a: 'math', subject_b: 'eng' } });
+    check('editing an existing constraint by id succeeds', edited.ok === true);
+    const afterEdit = await timetable.constraints.list();
+    const editedRow = afterEdit.data.find((c) => c.id === pairSaved.data.id);
+    check('the edit actually took (now disabled)', editedRow.enabled === false);
+    check('editing in place did not create a duplicate row', afterEdit.data.length === 7);
+
+    const removed = await timetable.constraints.remove(pairSaved.data.id);
+    check('constraints.remove succeeds', removed.ok === true);
+    const afterRemove = await timetable.constraints.list();
+    check('the removed row is gone', afterRemove.data.length === 6 && !afterRemove.data.some((c) => c.id === pairSaved.data.id));
+    check('constraints.remove requires an id', (await timetable.constraints.remove(null)).ok === false);
+  }
+
   // ---- entries.saveEntry: conflict pre-checks ---------------------------------
   {
     const { timetable } = freshApis();
@@ -192,6 +256,53 @@ async function run() {
     check('re-running generate() succeeds', res2.ok === true);
     const entriesAfter = await timetable.entries.list({ academic_year_id: 'y1', term_id: 't1' });
     check('re-running generate() replaces the scope instead of duplicating it', entriesAfter.data.length === 18);
+  }
+
+  // ---- generate(): Round 2 §7 upfront capacity check ---------------------------
+  {
+    const { timetable } = freshApis();
+    await timetable.periods.saveGrid([
+      { start_time: '08:00', end_time: '08:40' }, { start_time: '08:40', end_time: '09:20' }
+    ]); // only 2 teachable periods/day
+    await timetable.days.save([1]); // and only 1 teaching day = 2 slots/week total
+
+    // BASE_TABLES asks for 5+4=9 periods/week per stream — way more than
+    // the 2 slots/week this tiny grid offers.
+    const res = await timetable.generate('y1', 't1');
+    check('generate() rejects up front when a stream needs more periods/week than the grid offers', res.ok === false);
+    check('the rejection message names what is required vs available, not just a generic failure', /periods\/week/i.test(res.message));
+
+    // Nothing should have been cleared or written — the school's existing
+    // (empty, in this case) timetable is left exactly as it was.
+    const entries = await timetable.entries.list({ academic_year_id: 'y1', term_id: 't1' });
+    check('generate() touches nothing when it fails the capacity check up front', entries.data.length === 0);
+  }
+
+  // ---- generate(): a school-configured Constraint actually reaches the engine --
+  {
+    const { timetable, sb } = freshApis();
+    await timetable.periods.saveGrid([
+      { start_time: '08:00', end_time: '08:40' }, { start_time: '08:40', end_time: '09:20' }, { start_time: '09:20', end_time: '10:00' }
+    ]);
+    await timetable.days.save([1]);
+    // A single stream with two single-period subjects that WOULD land
+    // adjacent by default — same shape as generate.mjs's own unit test for
+    // this constraint, just exercised end-to-end through the API layer
+    // this time (fetch constraints -> hand to generateTimetable).
+    sb._tables.streams = [{ id: 'strOnly', class_id: 'c1', name: 'Only' }];
+    sb._tables.subject_class_assignments = [
+      { id: 'p1', subject_id: 'math', class_id: 'c1', stream_id: 'strOnly', periods_per_week: 1, double_periods_per_week: 0 },
+      { id: 'p2', subject_id: 'eng', class_id: 'c1', stream_id: 'strOnly', periods_per_week: 1, double_periods_per_week: 0 }
+    ];
+    sb._tables.subject_teacher_assignments = [];
+    await timetable.constraints.save({ type: 'subject_pair_not_consecutive', config: { subject_a: 'math', subject_b: 'eng' } });
+
+    const res = await timetable.generate('y1', 't1');
+    check('generate() succeeds with a Constraint configured', res.ok === true);
+    const entries = await timetable.entries.list({ academic_year_id: 'y1', term_id: 't1' });
+    const mathEntry = entries.data.find((e) => e.subject_id === 'math');
+    const engEntry = entries.data.find((e) => e.subject_id === 'eng');
+    check('the configured pair constraint actually reached the engine — math and eng do not land adjacent', Math.abs(mathEntry.period_index - engEntry.period_index) !== 1);
   }
 
   // ---- perf: generate() batches subject_class_assignments into O(1) queries ---

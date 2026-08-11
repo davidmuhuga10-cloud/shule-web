@@ -114,6 +114,13 @@ h1,h2,h3,h4{margin:0;font-weight:650;color:var(--ink)}
    colors/style — inspiration for the STRUCTURE only, per the brief: "see
    this from Zeraki for inspiration don't build like them"). */
 .hub-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
+/* Round 2 §6 (Exams module): vertical stack instead of a horizontal card
+   grid — one column, so every tile is the full content width. Deliberately
+   NOT capped with a max-width: a hardcoded cap (e.g. 720px) could end up
+   UNDER half the page width on a wide screen, which is exactly what the
+   brief's "at least half the page width" rules out — 100% of the content
+   column always satisfies "at least half," on any viewport. */
+.hub-grid.stack{grid-template-columns:1fr}
 .hub-tile{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:18px;cursor:pointer;
   transition:.12s;display:flex;flex-direction:column;gap:6px;text-align:left}
 .hub-tile:hover{border-color:var(--primary);box-shadow:var(--shadow)}
@@ -630,13 +637,26 @@ table.data td.num,table.data th.num{text-align:center}
    way). Prints portrait/landscape via the same shared printOptionsHtml()/
    wirePrintOptions() every other report uses — no bespoke print code here.
    ---------------------------------------------------------------------- */
+/* Round 2 §7: printed page shell — themed border + a muted header band
+   instead of the old rule under the header (see _timetableGrid.mjs's
+   timetableGridPageHtml doc comment). */
+.tt-page{border:1.5px solid var(--primary)}
+.tt-page-head{background:var(--bg);padding:14px 16px}
+
+/* Round 2 §7: TRANSPOSED — days are rows, periods are columns (used to be
+   the other way around). .tt-day-col is the left-hand day label column,
+   equivalent to the old .tt-period-col's role but now holding a day name
+   instead of a period; .tt-break-col/.tt-break-cell replace the old
+   .tt-break-row now that a break is a whole column, not a whole row. */
 .tt-grid{width:100%;border-collapse:collapse;font-size:12px;color:var(--grid-text)}
 .tt-grid th,.tt-grid td{border:1.3px solid var(--grid-ink);padding:7px 8px;vertical-align:top}
 .tt-grid thead th{font-size:10.5px;font-weight:800;background:#f7f9fb;text-transform:uppercase;letter-spacing:.3px;text-align:center}
-.tt-grid .tt-period-col{width:110px;font-size:11px;white-space:nowrap;background:#fafbfc}
-.tt-grid .tt-time{font-size:9.5px;color:var(--muted)}
-.tt-grid .tt-break-row td{background:#eef1f5;text-align:center;font-weight:700;color:var(--muted);font-size:11px}
-.tt-grid .tt-cell{min-width:110px;text-align:center}
+.tt-grid .tt-day-col{width:90px;font-size:11px;white-space:nowrap;background:#fafbfc;text-align:left;vertical-align:middle}
+.tt-grid .tt-period-col{min-width:100px}
+.tt-grid .tt-time{font-size:9.5px;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0}
+.tt-grid .tt-break-col{background:#eef1f5}
+.tt-grid .tt-break-cell{background:#eef1f5;text-align:center;font-weight:700;color:var(--muted);font-size:11px;vertical-align:middle}
+.tt-grid .tt-cell{min-width:100px;text-align:center}
 .tt-grid .tt-subject{font-weight:700;font-size:12px}
 .tt-grid .tt-sub2{font-size:10px;color:var(--muted);margin-top:1px}
 .tt-grid .tt-room{display:inline-block;margin-top:3px;font-size:9px;font-weight:700;color:var(--brand-2);background:#eaf3f2;border-radius:6px;padding:1px 6px}

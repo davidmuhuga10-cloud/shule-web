@@ -17,12 +17,19 @@
 import { esc, options, toast, loader, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { DAY_LABELS } from '../lib/timetable/generate.mjs';
+import { renderTimetableConstraints } from './timetableConstraints.mjs';
 
 const SUB_TABS = [
   { key: 'grid', label: 'Teaching Days & Periods' },
   { key: 'rooms', label: 'Rooms (optional)' },
   { key: 'requirements', label: 'Subject Periods & Double Lessons' },
-  { key: 'availability', label: 'Teacher Availability' }
+  { key: 'availability', label: 'Teacher Availability' },
+  // Round 2 §7: the new Constraints module — a school's own scheduling
+  // preferences, fed into the generator as soft constraints. Lives here
+  // rather than as its own top-level Timetable tab since, like every other
+  // sub-tab in Setup, it's one-time configuration a school works through
+  // before generating rather than something visited every time.
+  { key: 'constraints', label: 'Constraints' }
 ];
 
 export async function viewTimetableSetup(root) {
@@ -41,7 +48,8 @@ function render(root, activeSub) {
   if (activeSub === 'grid') renderGrid(body);
   else if (activeSub === 'rooms') renderRooms(body);
   else if (activeSub === 'requirements') renderRequirements(body);
-  else renderAvailability(body);
+  else if (activeSub === 'availability') renderAvailability(body);
+  else renderTimetableConstraints(body);
 }
 
 /* ---------------------------------------------------------------- grid --- */

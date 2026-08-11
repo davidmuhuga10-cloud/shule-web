@@ -379,29 +379,35 @@ export function createAcademicsApi(supabase) {
      *  different exam; see the Learning Area Papers screen
      *  (learningAreaPapers.mjs). */
     subjectPapers: {
-      /** Papers for ONE subject in ONE exam — what Marks Entry/Bulk Upload
-       *  need to know whether (and how) to split a subject's entry into
-       *  per-paper columns. */
-      async list(examId, subjectId) {
+      /** Papers for ONE subject in ONE exam, optionally scoped further to
+       *  ONE class (0021_learning_area_papers_per_class.sql — papers are not
+       *  school-wide even within a single exam: Grade 1 might sit a subject
+       *  as a single mark while Grade 8 sits the same subject, same exam, as
+       *  3 papers). Marks Entry/Bulk Upload always pass classId, since a
+       *  paper list only makes sense for the one class actually being
+       *  entered. */
+      async list(examId, subjectId, classId) {
         if (!examId) return ok([]);
         let q = supabase.from('subject_papers').select('*').eq('exam_id', examId);
         if (subjectId) q = q.eq('subject_id', subjectId);
+        if (classId) q = q.eq('class_id', classId);
         const { data, error } = await q.order('paper_no', { ascending: true });
         if (error) return err(error.message);
         return ok(data || []);
       },
-      /** Every configured paper across every subject for ONE exam, in one
-       *  call — what the Learning Area Papers setup screen renders its
-       *  whole table from, instead of one request per subject. */
+      /** Every configured paper across every subject AND every class for
+       *  ONE exam, in one call — what the Learning Area Papers setup screen
+       *  renders its whole table from (grouped client-side by subject, then
+       *  by class), instead of one request per subject per class. */
       async listForExam(examId) {
         if (!examId) return ok([]);
         const { data, error } = await supabase.from('subject_papers').select('*').eq('exam_id', examId).order('paper_no', { ascending: true });
         if (error) return err(error.message);
         return ok(data || []);
       },
-      /** Replace the WHOLE paper list for one (exam, subject) in a single
-       *  call — same "the full set is the unit of change" convention as
-       *  setStreamSubjects()/periods.saveGrid() (Timetable). `papers` =
+      /** Replace the WHOLE paper list for one (exam, subject, CLASS) in a
+       *  single call — same "the full set is the unit of change" convention
+       *  as setStreamSubjects()/periods.saveGrid() (Timetable). `papers` =
        *  [{ id?, name, out_of, ratio }] in display order; ratio is 0-100 (a
        *  percentage, matching how the setup screen collects it) and is
        *  stored internally as a 0-1 weight, keeping the existing
@@ -409,14 +415,22 @@ export function createAcademicsApi(supabase) {
        *  get_report_card()) completely unchanged.
        *
        *  An EMPTY array deliberately means "no papers" — deletes every
-       *  existing row for this (exam, subject), reverting it to a single
-       *  combined mark for this exam. That's the intended, easy way to undo
-       *  papers for an exam where this subject shouldn't use them, per the
-       *  brief's "must be decided fresh for each exam" requirement — never
-       *  a one-way door. */
-      async setForSubject(examId, subjectId, papers) {
+       *  existing row for this (exam, subject, class), reverting it to a
+       *  single combined mark for this exam+class. That's the intended,
+       *  easy way to undo papers for a class that shouldn't use them, per
+       *  the brief's "must be decided fresh" requirement — never a one-way
+       *  door.
+       *
+       *  Applying the SAME paper setup to several classes at once (the
+       *  Learning Area Papers screen's class picker) means calling this
+       *  once per selected class with the same `papers` array — see the
+       *  id-ownership check below for why that's safe even though every
+       *  call shares the same `papers` object (with the same `.id`s) across
+       *  classes that don't actually own those ids. */
+      async setForSubject(examId, subjectId, classId, papers) {
         if (!examId) return err('Missing exam.');
         if (!subjectId) return err('Missing subject.');
+        if (!classId) return err('Missing class.');
         papers = (papers || []).map((p, i) => ({
           id: p.id || undefined,
           name: String(p.name || '').trim() || `Paper ${i + 1}`,
@@ -441,7 +455,17 @@ export function createAcademicsApi(supabase) {
           }
         }
 
-        const { data: existing } = await supabase.from('subject_papers').select('id').eq('exam_id', examId).eq('subject_id', subjectId);
+        const { data: existing } = await supabase.from('subject_papers').select('id').eq('exam_id', examId).eq('subject_id', subjectId).eq('class_id', classId);
+        const existingIds = new Set((existing || []).map((r) => r.id));
+        // Defense in depth: an incoming id is only ever reused as an UPDATE
+        // target if it actually belongs to THIS (exam, subject, class).
+        // Applying one paper setup to multiple classes reuses the exact
+        // same `papers` array (with the exact same `.id`s) across every
+        // selected class — without this check, the second and later
+        // classes in that loop would silently steal/overwrite the FIRST
+        // class's rows via their shared ids instead of creating their own.
+        papers.forEach((p) => { if (p.id && !existingIds.has(p.id)) p.id = undefined; });
+
         const keepIds = new Set(papers.filter((p) => p.id).map((p) => p.id));
         const toRemove = (existing || []).filter((r) => !keepIds.has(r.id));
         for (const r of toRemove) {
@@ -455,11 +479,107 @@ export function createAcademicsApi(supabase) {
             const { error } = await supabase.from('subject_papers').update(rec).eq('id', p.id);
             if (error) return err(error.message);
           } else {
-            const { error } = await supabase.from('subject_papers').insert({ ...rec, exam_id: examId, subject_id: subjectId });
+            const { error } = await supabase.from('subject_papers').insert({ ...rec, exam_id: examId, subject_id: subjectId, class_id: classId });
             if (error) return err(error.message);
           }
         }
         return ok(true, { count: papers.length });
+      }
+    },
+
+    /** Subject Combination (Round 2 §3) — the opposite direction from
+     *  Learning Area Papers: instead of splitting one subject into papers,
+     *  this combines two or more EXISTING subjects into one named,
+     *  school-chosen result (e.g. Social Studies + CRE -> "SST/CRE
+     *  Combined"), scoped to one exam, with a ratio/weighting between the
+     *  member subjects — same 0-100 Ratio / 0-1 weight convention as
+     *  subjectPapers. Marks are still entered per underlying subject
+     *  exactly as before; only the Mark List (results.mjs's getBroadsheet)
+     *  folds a combo's members into one combined column. */
+    subjectCombinations: {
+      /** Every combination configured for ONE exam, each with its member
+       *  subjects nested — what the Subject Combination setup screen
+       *  renders its whole list from, and what results.mjs's getBroadsheet
+       *  uses to fold member subjects together. */
+      async listForExam(examId) {
+        if (!examId) return ok([]);
+        const { data: combos, error } = await supabase.from('subject_combinations').select('*').eq('exam_id', examId).order('created_at', { ascending: true });
+        if (error) return err(error.message);
+        if (!(combos || []).length) return ok([]);
+        const comboIds = combos.map((c) => c.id);
+        const { data: members, error: mErr } = await supabase.from('subject_combination_members').select('*').in('combination_id', comboIds);
+        if (mErr) return err(mErr.message);
+        const membersByCombo = {};
+        (members || []).forEach((m) => { (membersByCombo[m.combination_id] = membersByCombo[m.combination_id] || []).push(m); });
+        return ok(combos.map((c) => ({ ...c, members: membersByCombo[c.id] || [] })));
+      },
+
+      /** Replace the WHOLE combination in a single call — same "the full
+       *  set is the unit of change" convention as subjectPapers.setForSubject
+       *  above. `id` is omitted to CREATE a new combination, or passed to
+       *  replace an existing one's name + member list wholesale.
+       *  `members` = [{ subject_id, ratio }], ratio 0-100 summing to 100,
+       *  same as papers. Requires at least 2 members (fewer than that isn't
+       *  a combination — it's just the one subject on its own) and refuses
+       *  to save if any chosen subject is already part of a DIFFERENT
+       *  combination in this same exam (a subject can only ever be folded
+       *  into ONE combined result per exam). */
+      async setCombination(examId, payload) {
+        payload = payload || {};
+        if (!examId) return err('Missing exam.');
+        const id = payload.id || undefined;
+        const name = String(payload.name || '').trim();
+        if (!name) return err('Give this combination a name.');
+        let members = (payload.members || []).map((m) => ({
+          subject_id: m.subject_id,
+          ratio: m.ratio === '' || m.ratio === undefined || m.ratio === null ? 0 : Number(m.ratio)
+        })).filter((m) => m.subject_id);
+        // De-dupe defensively — the setup screen shouldn't let the same
+        // subject be picked twice, but never trust the client alone.
+        const seen = new Set();
+        members = members.filter((m) => { if (seen.has(m.subject_id)) return false; seen.add(m.subject_id); return true; });
+        if (members.length < 2) return err('A combination needs at least 2 subjects.');
+        const ratioTotal = Math.round(members.reduce((a, m) => a + m.ratio, 0) * 100) / 100;
+        if (ratioTotal !== 100) return err(`Ratios must add up to 100% — currently at ${ratioTotal}%.`);
+
+        // Defense in depth / core rule: none of these subjects may already
+        // belong to a DIFFERENT combination for this same exam.
+        const { data: otherCombos } = await supabase.from('subject_combinations').select('id, name').eq('exam_id', examId).neq('id', id || '');
+        const otherComboIds = (otherCombos || []).map((c) => c.id);
+        if (otherComboIds.length) {
+          const { data: otherMembers } = await supabase.from('subject_combination_members').select('subject_id, combination_id').in('combination_id', otherComboIds);
+          const nameById = {}; (otherCombos || []).forEach((c) => { nameById[c.id] = c.name; });
+          const clash = (otherMembers || []).find((m) => members.some((mm) => mm.subject_id === m.subject_id));
+          if (clash) return err(`That subject is already part of "${nameById[clash.combination_id] || 'another combination'}" for this exam — remove it there first.`);
+        }
+
+        let comboId = id;
+        if (comboId) {
+          const { error } = await supabase.from('subject_combinations').update({ name }).eq('id', comboId);
+          if (error) return err(error.message);
+          const { error: delErr } = await supabase.from('subject_combination_members').delete().eq('combination_id', comboId);
+          if (delErr) return err(delErr.message);
+        } else {
+          const { data: created, error } = await supabase.from('subject_combinations').insert({ exam_id: examId, name }).select().single();
+          if (error) return err(error.message);
+          comboId = created.id;
+        }
+
+        const rows = members.map((m) => ({ combination_id: comboId, subject_id: m.subject_id, weight: m.ratio / 100 }));
+        const { error: insErr } = await supabase.from('subject_combination_members').insert(rows);
+        if (insErr) return err(insErr.message);
+        return ok(true, { id: comboId });
+      },
+
+      /** Deletes a combination entirely (its members cascade with it) —
+       *  the "undo, go back to separate subjects" escape hatch, same
+       *  spirit as subjectPapers.setForSubject([]) reverting to a single
+       *  mark. */
+      async remove(comboId) {
+        if (!comboId) return err('Missing combination.');
+        const { error } = await supabase.from('subject_combinations').delete().eq('id', comboId);
+        if (error) return err(error.message);
+        return ok(true);
       }
     }
   };

@@ -33,6 +33,7 @@ import { renderMarksPanel, renderMarksBulkPanel } from './marksEntry.mjs';
 import { CBC_LEVELS, levelBucketForClassName } from '../lib/api/cbcDefaults.mjs';
 import { renderPublishPanel } from './publishing.mjs';
 import { renderLearningAreaPapersScreen } from './learningAreaPapers.mjs';
+import { renderSubjectCombinationScreen } from './subjectCombination.mjs';
 
 const EXAM_TYPE_CHOICES = Object.keys(EXAM_TYPE_LABELS).map((k) => ({ id: k, name: EXAM_TYPE_LABELS[k] }));
 
@@ -86,6 +87,7 @@ async function renderBoard(root, exams, classes, years, terms) {
     card.querySelector('[data-edit-exam]').onclick = () => openExamModal(root, years, terms, classes, e, classRows);
     card.querySelector('[data-add-classes]').onclick = () => openClassPickerModal(root, e, classRows, () => renderBoardScreen(root, years, terms));
     card.querySelector('[data-learning-area-papers]').onclick = () => renderLearningAreaPapersScreen(root, e, () => renderBoardScreen(root, years, terms));
+    card.querySelector('[data-subject-combination]').onclick = () => renderSubjectCombinationScreen(root, e, () => renderBoardScreen(root, years, terms));
     // Brief §8: Delete now soft-deletes (Deleted Exams submodule, 30-day
     // window) instead of the old immediate hard delete.
     card.querySelector('[data-del-exam]').onclick = () => confirmAction('Move this exam to Deleted Exams? It can be restored within 30 days, after which it (and any marks recorded for it) is permanently removed.', async () => {
@@ -207,6 +209,7 @@ function examCard(exam, classRows) {
       <div class="spacer"></div>
       <button class="btn ghost sm" data-add-classes>+ Add classes</button>
       <button class="btn ghost sm" data-learning-area-papers>📄 Learning Area Papers</button>
+      <button class="btn ghost sm" data-subject-combination>🧩 Subject Combination</button>
       <button class="btn sm secondary" data-edit-exam>Edit</button>
       <button class="btn sm danger" data-del-exam>Delete</button>
     </div>

@@ -98,9 +98,11 @@ async function computeClassAverage(supabase, examId, classId) {
   if (!subjectIds.length) return { average: 0, students_sat: 0 };
   const { data: exam } = await supabase.from('exams').select('out_of').eq('id', examId).maybeSingle();
   const examOutOf = Number(exam && exam.out_of) || 100;
-  // Learning Area Papers are scoped to THIS exam (0020_learning_area_papers.sql)
-  // — a subject's paper setup for a different exam is irrelevant here.
-  const { data: papers } = await supabase.from('subject_papers').select('*').eq('exam_id', examId).in('subject_id', subjectIds);
+  // Learning Area Papers are scoped to THIS exam AND this class
+  // (0020_learning_area_papers.sql, 0021_learning_area_papers_per_class.sql)
+  // — a subject's paper setup for a different exam, or for a different
+  // class within this same exam, is irrelevant here.
+  const { data: papers } = await supabase.from('subject_papers').select('*').eq('exam_id', examId).eq('class_id', classId).in('subject_id', subjectIds);
   const paperById = indexById(papers || []);
   const { data: results } = await supabase.from('results').select('*').eq('exam_id', examId).eq('class_id', classId);
   const byStudent = {};
@@ -348,12 +350,12 @@ export function createResultsApi(supabase, gradingApi) {
       let outOf = Number(exam.out_of) || 100;
       let maxMarksSet = false;
       if (q.paper_id) {
-        // Defense in depth: a paper_id must actually belong to this exam,
-        // not just exist somewhere — same "never trust the client alone"
-        // convention as everywhere else in this codebase (a stale paper_id
-        // left over from switching exams should error, not silently apply
-        // the wrong paper's out_of).
-        const { data: paper } = await supabase.from('subject_papers').select('*').eq('id', q.paper_id).eq('exam_id', q.exam_id).maybeSingle();
+        // Defense in depth: a paper_id must actually belong to this exam
+        // AND this class, not just exist somewhere — same "never trust the
+        // client alone" convention as everywhere else in this codebase (a
+        // stale paper_id left over from switching exams/classes should
+        // error, not silently apply the wrong paper's out_of).
+        const { data: paper } = await supabase.from('subject_papers').select('*').eq('id', q.paper_id).eq('exam_id', q.exam_id).eq('class_id', q.class_id).maybeSingle();
         if (!paper) return err('Paper not found.');
         outOf = Number(paper.out_of) || 100;
       } else {
@@ -548,12 +550,16 @@ export function createResultsApi(supabase, gradingApi) {
         subjects = subjects.filter((s) => statusBySubject[s.id] === 'published');
       }
 
-      // Learning Area Papers: scoped to THIS exam (0020_learning_area_papers.sql)
-      // — a subject's paper setup from a different exam is never relevant to
-      // this Mark List. A subject with zero rows here is shown as a single
-      // combined column, exactly as before this feature existed.
+      // Learning Area Papers: scoped to THIS exam AND this class
+      // (0020_learning_area_papers.sql, 0021_learning_area_papers_per_class.sql)
+      // — a subject's paper setup from a different exam, OR from a
+      // different class sitting the same exam, is never relevant to THIS
+      // Mark List (Grade 1 may be single-mark while Grade 8 is 3 papers,
+      // same subject, same exam). A subject with zero rows here (for this
+      // class) is shown as a single combined column, exactly as before this
+      // feature existed.
       const { data: papers } = subjects.length
-        ? await supabase.from('subject_papers').select('*').eq('exam_id', q.exam_id).in('subject_id', subjects.map((s) => s.id))
+        ? await supabase.from('subject_papers').select('*').eq('exam_id', q.exam_id).eq('class_id', q.class_id).in('subject_id', subjects.map((s) => s.id))
         : { data: [] };
       const paperById = indexById(papers || []);
       const papersBySubject = {};
@@ -605,6 +611,59 @@ export function createResultsApi(supabase, gradingApi) {
           paperScoresBySubjectStudent[r.subject_id][r.student_id][r.paper_id] = Number(r.score);
         }
       });
+
+      // Subject Combination (Round 2 §3) — the opposite direction from
+      // Learning Area Papers: fold 2+ member subjects into ONE combined
+      // "subject" entry, BEFORE the totals loop below ever runs. This is
+      // the exact same trick papers use above (bySubjectStudent already
+      // holds one combined score per real subject before this point,
+      // regardless of whether that subject itself has papers) — a combo's
+      // combined score is just a further weighted sum of its members'
+      // ALREADY-papers-combined scores, written into bySubjectStudent under
+      // a synthetic id, with the member subjects then removed from
+      // `subjects`. Every downstream total/mean/ranking/"subjects done"
+      // count only ever iterates over `subjects`, so this one substitution
+      // is all that's needed — nothing below has to know combos exist.
+      const { data: combos } = await supabase.from('subject_combinations').select('*').eq('exam_id', q.exam_id);
+      if ((combos || []).length) {
+        const { data: comboMembers } = await supabase.from('subject_combination_members').select('*').in('combination_id', combos.map((c) => c.id));
+        const membersByCombo = {};
+        (comboMembers || []).forEach((m) => { (membersByCombo[m.combination_id] = membersByCombo[m.combination_id] || []).push(m); });
+
+        combos.forEach((combo) => {
+          const members = membersByCombo[combo.id] || [];
+          // Indices are recomputed fresh every iteration (cheap — this list
+          // is always small) rather than once up front, since a PRIOR
+          // combo in this same loop may already have spliced `subjects`,
+          // which would otherwise leave stale indices for this one.
+          const subjectIndexById = {}; subjects.forEach((s, i) => { subjectIndexById[s.id] = i; });
+          // Only "activate" a combo on THIS Mark List if every one of its
+          // member subjects is actually showing here (published, or
+          // includeUnpublished:true) — a combo with a still-draft member
+          // falls back to showing nothing special for it rather than
+          // presenting an incomplete combined score as if it were final.
+          if (members.length < 2 || !members.every((m) => subjectIndexById[m.subject_id] !== undefined)) return;
+
+          const comboSubjectId = `combo:${combo.id}`;
+          bySubjectStudent[comboSubjectId] = {};
+          (students || []).forEach((s) => {
+            let sum = 0, any = false;
+            members.forEach((m) => {
+              const v = bySubjectStudent[m.subject_id] && bySubjectStudent[m.subject_id][s.id];
+              if (v !== undefined) { sum += v * (Number(m.weight) || 0); any = true; }
+            });
+            if (any) bySubjectStudent[comboSubjectId][s.id] = sum;
+          });
+
+          // Replace the members with ONE entry, positioned where the first
+          // member used to be (keeps column order predictable rather than
+          // always jumping to the end).
+          const insertAt = Math.min(...members.map((m) => subjectIndexById[m.subject_id]));
+          const memberIds = new Set(members.map((m) => m.subject_id));
+          subjects = subjects.filter((s) => !memberIds.has(s.id));
+          subjects.splice(Math.min(insertAt, subjects.length), 0, { id: comboSubjectId, name: combo.name, code: combo.name, papers: [], is_combination: true });
+        });
+      }
 
       // Step 1: per-(exam,class) "minimum learning areas" (exam_classes.
       // min_subjects) takes precedence when set; falls back to the existing
@@ -972,6 +1031,23 @@ export function createResultsApi(supabase, gradingApi) {
       const { data: subjects, error } = await supabase.from('subjects').select('id, name, code').in('id', subjectIds);
       if (error) return err(error.message);
       return ok((subjects || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name))));
+    },
+
+    /** Every class ALREADY assigned to this exam, just id+name (the
+     *  opposite of listExamClassChoices below) — what the Learning Area
+     *  Papers screen's class picker offers, since a paper setup can only
+     *  ever apply to a class that's actually sitting this exam in the first
+     *  place. Deliberately a different name from listExamClasses() above
+     *  (the Manage Exams board's per-class publishing-status rows) — same
+     *  underlying exam_classes source, completely different shape/purpose. */
+    async listExamClassNames(examId) {
+      if (!examId) return err('Please choose an exam.');
+      const { data: examClassRows } = await supabase.from('exam_classes').select('class_id').eq('exam_id', examId);
+      const classIds = [...new Set((examClassRows || []).map((r) => r.class_id).filter(Boolean))];
+      if (!classIds.length) return ok([]);
+      const { data: classes, error } = await supabase.from('classes').select('id, name').in('id', classIds);
+      if (error) return err(error.message);
+      return ok((classes || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name))));
     },
 
     /** Every class NOT yet added to this exam — the exam-edit modal's "add

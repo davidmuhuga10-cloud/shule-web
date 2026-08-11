@@ -5,6 +5,21 @@
  * School Settings per Round 4 §6; see permissionsSettings.mjs) gating the
  * Report Form's STEM/Social Sciences/Arts & Sport Science cluster row, off
  * by default; see _reportCard.mjs's clusterSummaryHtml()).
+ *
+ * Round 2 §1/§2 (Learning Area Papers follow-up) adds two more, both under
+ * Permissions/Mark List (permissionsSettings.mjs):
+ *   - show_papers_separately ('true'/'false') — whether the Mark List
+ *     splits a papers-enabled subject into one column per paper (+ a
+ *     combined %), or folds it into a single combined column. UNLIKE every
+ *     other toggle above, this one defaults ON (ticked) for every school —
+ *     seed_school_defaults() writes 'true' explicitly for brand-new
+ *     schools, and any code that READS this key must treat a genuinely
+ *     missing key (an existing school from before this setting existed) as
+ *     true too, not false — see broadsheet.mjs's showPapersSeparately().
+ *   - use_custom_subject_order ('true'/'false', off by default like most
+ *     toggles) + subject_order (a JSON-encoded array of subject ids, the
+ *     school's chosen display order) — the Mark List's subject column order
+ *     when the toggle is on; see broadsheet.mjs's orderSubjects().
  */
 import { ok, err, titleCase } from './_util.mjs';
 

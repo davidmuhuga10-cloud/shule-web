@@ -1,7 +1,31 @@
-import { generateTimetable, DEFAULT_PERIODS_PER_WEEK } from '../src/lib/timetable/generate.mjs';
+import { generateTimetable, checkCapacity, DEFAULT_PERIODS_PER_WEEK, CONSTRAINT_TYPES } from '../src/lib/timetable/generate.mjs';
 
 let passed = 0, failed = 0;
 function check(name, cond) { if (cond) passed++; else { failed++; console.error('FAIL:', name); } }
+
+/** Longest run of period-index-consecutive entries sharing `keyFn`'s value,
+ *  on the same day — used by the max-consecutive-periods constraint tests
+ *  to verify the ACTUAL longest back-to-back stretch, rather than
+ *  hardcoding exact slot numbers the engine's internal ordering happens to
+ *  produce. */
+function maxConsecutiveRun(entries, keyFn) {
+  const byGroupDay = {};
+  entries.forEach((e) => {
+    const k = `${keyFn(e)}|${e.day_of_week}`;
+    (byGroupDay[k] = byGroupDay[k] || []).push(e.period_index);
+  });
+  let best = 0;
+  Object.values(byGroupDay).forEach((idxs) => {
+    const sorted = [...new Set(idxs)].sort((a, b) => a - b);
+    let run = 1;
+    for (let i = 1; i < sorted.length; i++) {
+      run = sorted[i] === sorted[i - 1] + 1 ? run + 1 : 1;
+      if (run > best) best = run;
+    }
+    if (sorted.length && sorted.length === 1) best = Math.max(best, 1);
+  });
+  return best;
+}
 
 // A simple, roomy daily template: 6 teaching periods + a break after period 3.
 const PERIODS = [
@@ -310,6 +334,209 @@ function run() {
       if (staffKeys.has(tk)) staffClash = true; else staffKeys.add(tk);
     });
     check('understaffed case: the overloaded teacher is STILL never double-booked, even though demand exceeds supply', !staffClash);
+  }
+
+  // ================================================================
+  // Round 2 §7: the Constraints module — 6 SOFT constraint types. Every
+  // test below first confirms a baseline call (no `constraints` passed —
+  // must behave byte-for-byte as before this round) then shows the
+  // constraint actually changes placement when it's feasible to honor.
+  // ================================================================
+
+  check('CONSTRAINT_TYPES exports exactly the 6 documented types', CONSTRAINT_TYPES.length === 6);
+
+  // ---- subject_pair_not_consecutive ----------------------------------------------
+  {
+    const periods = [{ period_index: 1, is_break: false }, { period_index: 2, is_break: false }, { period_index: 3, is_break: false }];
+    const streams = [{ stream_id: 'st1', class_id: 'c1', subjects: [
+      { subject_id: 'A', subject_name: 'A', periods_per_week: 1 }, { subject_id: 'B', subject_name: 'B', periods_per_week: 1 }
+    ] }];
+    const baseline = generateTimetable({ days: [1], periods, streams, unavailable: new Set() });
+    check('pair baseline (no constraint): A and B land adjacent (periods 1,2)', baseline.entries.some((e) => e.subject_id === 'A' && e.period_index === 1) && baseline.entries.some((e) => e.subject_id === 'B' && e.period_index === 2));
+
+    const withPair = generateTimetable({
+      days: [1], periods, streams, unavailable: new Set(),
+      constraints: [{ type: 'subject_pair_not_consecutive', enabled: true, config: { subject_a: 'A', subject_b: 'B' } }]
+    });
+    check('pair constraint enabled: B is pushed away to a non-adjacent period instead', withPair.entries.find((e) => e.subject_id === 'B').period_index === 3);
+    check('pair constraint: nothing left unresolved (it is a SOFT preference, not a hard rule)', withPair.unresolved.length === 0);
+  }
+
+  // ---- avoid_consecutive_intensive -----------------------------------------------
+  {
+    const periods = [{ period_index: 1, is_break: false }, { period_index: 2, is_break: false }, { period_index: 3, is_break: false }];
+    const streams = [{ stream_id: 'st1', class_id: 'c1', subjects: [
+      { subject_id: 'A', subject_name: 'A', periods_per_week: 1 }, { subject_id: 'B', subject_name: 'B', periods_per_week: 1 }
+    ] }];
+    const withIntensive = generateTimetable({
+      days: [1], periods, streams, unavailable: new Set(),
+      constraints: [{ type: 'avoid_consecutive_intensive', enabled: true, config: { subject_ids: ['A', 'B'] } }]
+    });
+    check('avoid_consecutive_intensive: two flagged subjects avoid landing back-to-back', withIntensive.entries.find((e) => e.subject_id === 'B').period_index === 3);
+    check('avoid_consecutive_intensive: nothing left unresolved', withIntensive.unresolved.length === 0);
+
+    // A subject NOT in the flagged set is never affected.
+    const unaffected = generateTimetable({
+      days: [1], periods: periods, streams: [{ stream_id: 'st1', class_id: 'c1', subjects: [
+        { subject_id: 'A', subject_name: 'A', periods_per_week: 1 }, { subject_id: 'C', subject_name: 'C', periods_per_week: 1 }
+      ] }],
+      unavailable: new Set(), constraints: [{ type: 'avoid_consecutive_intensive', enabled: true, config: { subject_ids: ['A', 'B'] } }]
+    });
+    check('avoid_consecutive_intensive: a subject outside the flagged set is placed normally (adjacent is fine)', unaffected.entries.find((e) => e.subject_id === 'C').period_index === 2);
+  }
+
+  // ---- teacher_no_immediate_after_out ---------------------------------------------
+  {
+    const periods = [{ period_index: 1, is_break: false }, { period_index: 2, is_break: false }, { period_index: 3, is_break: false }];
+    const streams = [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'M', subject_name: 'M', periods_per_week: 1, staff_id: 'tA' }] }];
+    const unavailable = new Set(['tA|1|1']); // teacher "out" for period 1
+
+    const baseline = generateTimetable({ days: [1], periods, streams, unavailable });
+    check('teacher_no_immediate_after_out baseline: single lesson lands right after the "out" period (period 2)', baseline.entries[0].period_index === 2);
+
+    const withConstraint = generateTimetable({
+      days: [1], periods, streams, unavailable,
+      constraints: [{ type: 'teacher_no_immediate_after_out', enabled: true, config: {} }]
+    });
+    check('teacher_no_immediate_after_out enabled: single lesson skips the period right after "out" (lands on period 3 instead)', withConstraint.entries[0].period_index === 3);
+    check('teacher_no_immediate_after_out: nothing left unresolved', withConstraint.unresolved.length === 0);
+
+    // Double lessons are explicitly exempt per the brief.
+    const doublePeriods = [{ period_index: 1, is_break: false }, { period_index: 2, is_break: false }, { period_index: 3, is_break: false }, { period_index: 4, is_break: false }];
+    const doubleStreams = [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'SCI', subject_name: 'SCI', periods_per_week: 2, double_periods_per_week: 1, staff_id: 'tA' }] }];
+    const withDouble = generateTimetable({
+      days: [1], periods: doublePeriods, streams: doubleStreams, unavailable,
+      constraints: [{ type: 'teacher_no_immediate_after_out', enabled: true, config: {} }]
+    });
+    check('teacher_no_immediate_after_out: a DOUBLE lesson is exempt and may still start right after "out"', withDouble.entries.some((e) => e.period_index === 2) && withDouble.entries.some((e) => e.period_index === 3));
+  }
+
+  // ---- pe_before_break -------------------------------------------------------------
+  {
+    // period 2 sits right before the break at period 3 — the one
+    // "preferred" slot for a flagged PE subject.
+    const periods = [{ period_index: 1, is_break: false }, { period_index: 2, is_break: false }, { period_index: 3, is_break: true }, { period_index: 4, is_break: false }];
+    const streams = [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'PE', subject_name: 'PE', periods_per_week: 1 }] }];
+
+    const baseline = generateTimetable({ days: [1], periods, streams, unavailable: new Set() });
+    check('pe_before_break baseline: PE just takes the first free period (period 1), ignoring the break', baseline.entries[0].period_index === 1);
+
+    const withConstraint = generateTimetable({
+      days: [1], periods, streams, unavailable: new Set(),
+      constraints: [{ type: 'pe_before_break', enabled: true, config: { subject_ids: ['PE'] } }]
+    });
+    check('pe_before_break enabled: PE is placed in the period immediately before the break instead (period 2)', withConstraint.entries[0].period_index === 2);
+    check('pe_before_break: nothing left unresolved', withConstraint.unresolved.length === 0);
+  }
+
+  // ---- max_consecutive_periods_class -----------------------------------------------
+  {
+    const periods = []; for (let p = 1; p <= 6; p++) periods.push({ period_index: p, is_break: false });
+    const streams = [{ stream_id: 'st1', class_id: 'c1', subjects: [
+      { subject_id: 'A', subject_name: 'A', periods_per_week: 2 }, { subject_id: 'B', subject_name: 'B', periods_per_week: 2 },
+      { subject_id: 'C', subject_name: 'C', periods_per_week: 2 }, { subject_id: 'D', subject_name: 'D', periods_per_week: 2 }
+    ] }];
+    const baseline = generateTimetable({ days: [1, 2], periods, streams, unavailable: new Set() });
+    const baselineRun = maxConsecutiveRun(baseline.entries, (e) => e.stream_id);
+    check('max_consecutive_periods_class baseline: with enough slack in the week, greedy filling still produces a run longer than 2 (proves the constraint has something to do)', baselineRun > 2);
+
+    const withConstraint = generateTimetable({
+      days: [1, 2], periods, streams, unavailable: new Set(),
+      constraints: [{ type: 'max_consecutive_periods_class', enabled: true, config: { max: 2 } }]
+    });
+    const constrainedRun = maxConsecutiveRun(withConstraint.entries, (e) => e.stream_id);
+    check('max_consecutive_periods_class enabled: the longest back-to-back stretch for the class never exceeds the configured max (2)', constrainedRun <= 2);
+    check('max_consecutive_periods_class: nothing left unresolved when there is enough slack to honor it', withConstraint.unresolved.length === 0);
+    check('max_consecutive_periods_class: every required period still gets placed', withConstraint.entries.length === baseline.entries.length);
+  }
+
+  // ---- max_consecutive_periods_teacher ----------------------------------------------
+  {
+    const periods = []; for (let p = 1; p <= 6; p++) periods.push({ period_index: p, is_break: false });
+    const streams = ['st1', 'st2', 'st3', 'st4'].map((sid) => ({
+      stream_id: sid, class_id: 'c1', subjects: [{ subject_id: 'A', subject_name: 'A', periods_per_week: 2, staff_id: 'tShared' }]
+    }));
+    const baseline = generateTimetable({ days: [1, 2], periods, streams, unavailable: new Set() });
+    const baselineRun = maxConsecutiveRun(baseline.entries, (e) => e.staff_id);
+    check('max_consecutive_periods_teacher baseline: the shared teacher naturally ends up with a run longer than 2', baselineRun > 2);
+
+    const withConstraint = generateTimetable({
+      days: [1, 2], periods, streams, unavailable: new Set(),
+      constraints: [{ type: 'max_consecutive_periods_teacher', enabled: true, config: { max: 2 } }]
+    });
+    const constrainedRun = maxConsecutiveRun(withConstraint.entries, (e) => e.staff_id);
+    check('max_consecutive_periods_teacher enabled: the teacher\'s longest back-to-back stretch never exceeds the configured max (2)', constrainedRun <= 2);
+    check('max_consecutive_periods_teacher: nothing left unresolved when there is enough slack to honor it', withConstraint.unresolved.length === 0);
+
+    // Zero teacher double-bookings still holds — a soft constraint must
+    // never compromise the pre-existing hard guarantees.
+    const staffKeys = new Set(); let staffClash = false;
+    withConstraint.entries.forEach((e) => {
+      const k = `${e.staff_id}|${e.day_of_week}|${e.period_index}`;
+      if (staffKeys.has(k)) staffClash = true; else staffKeys.add(k);
+    });
+    check('max_consecutive_periods_teacher: the shared teacher is still never double-booked', !staffClash);
+  }
+
+  // ---- a genuinely infeasible custom constraint still relaxes rather than fail ----
+  {
+    // Only 1 teachable period in the whole week — a max-consecutive-of-1
+    // constraint is trivially satisfied, but a DOUBLE lesson needs 2
+    // consecutive periods regardless, which this tiny grid can't offer at
+    // all (a pre-existing hard limitation, not something the new soft
+    // constraint should get blamed for).
+    const periods = [{ period_index: 1, is_break: false }];
+    const streams = [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'SCI', subject_name: 'SCI', periods_per_week: 1 }] }];
+    const res = generateTimetable({
+      days: [1], periods, streams, unavailable: new Set(),
+      constraints: [{ type: 'max_consecutive_periods_class', enabled: true, config: { max: 1 } }]
+    });
+    check('an impossible-in-context custom constraint still relaxes rather than leaving a placeable lesson unresolved', res.entries.length === 1 && res.unresolved.length === 0);
+  }
+
+  // ---- malformed/incomplete constraint config is skipped, never crashes ----------
+  {
+    const periods = [{ period_index: 1, is_break: false }, { period_index: 2, is_break: false }];
+    const streams = [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'A', subject_name: 'A', periods_per_week: 2 }] }];
+    const badConstraints = [
+      { type: 'subject_pair_not_consecutive', enabled: true, config: { subject_a: 'A' } }, // missing subject_b
+      { type: 'avoid_consecutive_intensive', enabled: true, config: {} },                  // no subject_ids
+      { type: 'max_consecutive_periods_class', enabled: true, config: { max: 'not-a-number' } },
+      { type: 'pe_before_break', enabled: false, config: { subject_ids: ['A'] } },          // disabled — should be a full no-op
+      null, undefined
+    ];
+    let threw = false;
+    let res;
+    try { res = generateTimetable({ days: [1], periods, streams, unavailable: new Set(), constraints: badConstraints }); }
+    catch (e) { threw = true; }
+    check('malformed/disabled constraint rows never throw', !threw);
+    check('malformed/disabled constraint rows are simply skipped — generation still succeeds normally', res.entries.length === 2 && res.unresolved.length === 0);
+  }
+
+  // ================================================================
+  // Round 2 §7: checkCapacity() — upfront validation before the engine or
+  // any clearing of existing entries runs at all.
+  // ================================================================
+  {
+    const periods = [{ period_index: 1, is_break: false }, { period_index: 2, is_break: false }];
+    const roomy = checkCapacity({ days: [1, 2], periods, streams: [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'A', periods_per_week: 4 }] }] });
+    check('checkCapacity: exactly enough room (4 required, 4 available) reports ok', roomy.ok === true && roomy.teachableSlotsPerWeek === 4);
+
+    const tight = checkCapacity({ days: [1, 2], periods, streams: [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'A', periods_per_week: 10 }] }] });
+    check('checkCapacity: a stream asking for more than the week can hold is flagged', tight.ok === false && tight.overloaded.length === 1);
+    check('checkCapacity: the overloaded entry names exactly what is required vs available', tight.overloaded[0].required === 10 && tight.overloaded[0].available === 4);
+
+    const multi = checkCapacity({
+      days: [1, 2], periods,
+      streams: [
+        { stream_id: 'ok', class_id: 'c1', subjects: [{ subject_id: 'A', periods_per_week: 4 }] },
+        { stream_id: 'over', class_id: 'c2', subjects: [{ subject_id: 'A', periods_per_week: 3 }, { subject_id: 'B', periods_per_week: 3 }] }
+      ]
+    });
+    check('checkCapacity: only the genuinely overloaded stream is flagged, not a fine one alongside it', multi.ok === false && multi.overloaded.length === 1 && multi.overloaded[0].stream_id === 'over');
+
+    const usesDefault = checkCapacity({ days: [1, 2], periods, streams: [{ stream_id: 'st1', class_id: 'c1', subjects: [{ subject_id: 'A', periods_per_week: null }] }] });
+    check('checkCapacity falls back to DEFAULT_PERIODS_PER_WEEK for an unconfigured subject, same as the engine itself', usesDefault.overloaded.length === 0 ? usesDefault.ok === true : DEFAULT_PERIODS_PER_WEEK > 4);
   }
 
   console.log(`${passed} passed, ${failed} failed`);

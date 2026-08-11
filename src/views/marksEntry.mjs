@@ -184,7 +184,7 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
   gridEl.innerHTML = loader();
 
   let paperId = '';
-  const papersRes = await Db.subjectPapers.list(examId, subject.id);
+  const papersRes = await Db.subjectPapers.list(examId, subject.id, classId);
   const papers = papersRes.ok ? papersRes.data : [];
   if (papers.length) paperId = papers[0].id;
 
@@ -372,7 +372,7 @@ async function renderBulkUpload(area, sel, subjectTabs) {
 
   const [studentsRes, papersLists] = await Promise.all([
     Db.students.list({ class_id: sel.class_id, stream_id: sel.stream_id || undefined }),
-    Promise.all(subjectTabs.map((s) => Db.subjectPapers.list(sel.exam_id, s.id)))
+    Promise.all(subjectTabs.map((s) => Db.subjectPapers.list(sel.exam_id, s.id, sel.class_id)))
   ]);
   const students = studentsRes.ok ? studentsRes.data : [];
   const papersBySubjectId = {};

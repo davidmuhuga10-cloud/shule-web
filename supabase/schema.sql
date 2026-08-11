@@ -526,9 +526,52 @@ create index idx_exams_deleted_at on public.exams(deleted_at) where deleted_at i
 -- the note above subject_papers' create table. Scopes every paper to one
 -- specific exam so the same subject can have a completely different (or no)
 -- paper setup in a different exam, per the Learning Area Papers brief.
+--
+-- 0021_learning_area_papers_per_class.sql: also add class_id (same reason —
+-- classes exists by this point too) — a paper setup is scoped to one
+-- specific CLASS within that exam as well, not assumed school-wide: Grade 1
+-- can sit English as a single paper while Grade 8 sits it as 3 separate
+-- papers, within the very same exam. The unique constraint below reflects
+-- both migrations' end state directly (exam_id, subject_id, class_id,
+-- paper_no) since a fresh install goes straight there.
 alter table public.subject_papers add column exam_id uuid references public.exams(id) on delete cascade;
 create index idx_subject_papers_exam on public.subject_papers(exam_id);
-alter table public.subject_papers add constraint subject_papers_exam_subject_paperno_key unique (exam_id, subject_id, paper_no);
+alter table public.subject_papers add column class_id uuid references public.classes(id) on delete cascade;
+create index idx_subject_papers_class on public.subject_papers(class_id);
+alter table public.subject_papers add constraint subject_papers_exam_subject_class_paperno_key unique (exam_id, subject_id, class_id, paper_no);
+
+-- 0023_subject_combination.sql (Round 2 §3): the opposite direction from
+-- Learning Area Papers — combine two or more EXISTING subjects into one
+-- named, weighted result for one exam (e.g. Social Studies + CRE ->
+-- "SST/CRE Combined"), instead of splitting one subject into papers. Scoped
+-- to one exam for the same reason subject_papers is; a subject may only
+-- belong to one active combination per exam, enforced in academics.mjs
+-- (not expressible as a single-table constraint).
+create table public.subject_combinations (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  exam_id uuid not null references public.exams(id) on delete cascade,
+  name text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index idx_subject_combinations_exam on public.subject_combinations(exam_id);
+create index idx_subject_combinations_school on public.subject_combinations(school_id);
+create trigger trg_subject_combinations_updated_at before update on public.subject_combinations
+  for each row execute function public.set_updated_at();
+
+create table public.subject_combination_members (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  combination_id uuid not null references public.subject_combinations(id) on delete cascade,
+  subject_id uuid not null references public.subjects(id) on delete cascade,
+  weight numeric not null default 1,
+  created_at timestamptz not null default now(),
+  unique (combination_id, subject_id)
+);
+create index idx_subject_combination_members_combo on public.subject_combination_members(combination_id);
+create index idx_subject_combination_members_subject on public.subject_combination_members(subject_id);
+create index idx_subject_combination_members_school on public.subject_combination_members(school_id);
 
 -- Phase 2h (brief §7.1): which classes were explicitly chosen to sit a given
 -- exam — purely a "should this class show on the exam's board at all"
@@ -754,6 +797,10 @@ create trigger trg_staff_capabilities_school_id before insert on public.staff_ca
   for each row execute function public.set_school_id();
 create trigger trg_result_submissions_school_id before insert on public.result_submissions
   for each row execute function public.set_school_id();
+create trigger trg_subject_combinations_school_id before insert on public.subject_combinations
+  for each row execute function public.set_school_id();
+create trigger trg_subject_combination_members_school_id before insert on public.subject_combination_members
+  for each row execute function public.set_school_id();
 
 -- ============================================================================
 -- Row-Level Security
@@ -787,6 +834,8 @@ alter table public.settings enable row level security;
 alter table public.subject_papers enable row level security;
 alter table public.staff_capabilities enable row level security;
 alter table public.result_submissions enable row level security;
+alter table public.subject_combinations enable row level security;
+alter table public.subject_combination_members enable row level security;
 
 -- schools: a signed-in user may read their OWN school's row (for branding /
 -- account screens). Creating, renaming, suspending a school is a service-role
@@ -979,6 +1028,24 @@ create policy subject_papers_admin_write on public.subject_papers for insert
 create policy subject_papers_admin_update on public.subject_papers for update
   using (public.is_admin() and school_id = public.current_school_id());
 create policy subject_papers_admin_delete on public.subject_papers for delete
+  using (public.is_admin() and school_id = public.current_school_id());
+
+create policy subject_combinations_read on public.subject_combinations for select
+  using (school_id = public.current_school_id());
+create policy subject_combinations_admin_write on public.subject_combinations for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy subject_combinations_admin_update on public.subject_combinations for update
+  using (public.is_admin() and school_id = public.current_school_id());
+create policy subject_combinations_admin_delete on public.subject_combinations for delete
+  using (public.is_admin() and school_id = public.current_school_id());
+
+create policy subject_combination_members_read on public.subject_combination_members for select
+  using (school_id = public.current_school_id());
+create policy subject_combination_members_admin_write on public.subject_combination_members for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy subject_combination_members_admin_update on public.subject_combination_members for update
+  using (public.is_admin() and school_id = public.current_school_id());
+create policy subject_combination_members_admin_delete on public.subject_combination_members for delete
   using (public.is_admin() and school_id = public.current_school_id());
 
 create policy staff_capabilities_read on public.staff_capabilities for select
@@ -1217,7 +1284,11 @@ begin
     (p_school_id, 'logo', ''),
     -- Minimum-subjects-for-ranking rule (Phase 2a) — '0' means "no rule, rank
     -- everyone with a total > 0", the same behaviour every school already had.
-    (p_school_id, 'min_subjects_for_ranking', '0')
+    (p_school_id, 'min_subjects_for_ranking', '0'),
+    -- 0022_merit_list_and_subject_order.sql (Round 2 §1): unlike every other
+    -- toggle here, this one defaults ON for a brand-new school — see the
+    -- comment on this key in settings.mjs.
+    (p_school_id, 'show_papers_separately', 'true')
   on conflict (school_id, key) do nothing;
 
   -- Landing-redesign brief C2: "Academic year and terms should be
@@ -1647,10 +1718,35 @@ create unique index idx_tt_entries_unique_staff_slot
 create unique index idx_tt_entries_unique_room_slot
   on public.timetable_entries(academic_year_id, term_id, day_of_week, period_index, room_id) where room_id is not null;
 
+-- 0024_timetable_constraints.sql (Round 2 §7): school-configured scheduling
+-- preferences fed into the placement engine (generate.mjs) as soft
+-- constraints — see that migration's header comment for the full design
+-- rationale and the 6 supported constraint types.
+create table public.timetable_constraints (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  type text not null,
+  enabled boolean not null default true,
+  config jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint timetable_constraints_type_check check (type in (
+    'subject_pair_not_consecutive', 'avoid_consecutive_intensive', 'teacher_no_immediate_after_out',
+    'pe_before_break', 'max_consecutive_periods_class', 'max_consecutive_periods_teacher'
+  ))
+);
+create trigger trg_timetable_constraints_updated_at before update on public.timetable_constraints
+  for each row execute function public.set_updated_at();
+create trigger trg_timetable_constraints_school_id before insert on public.timetable_constraints
+  for each row execute function public.set_school_id();
+create index idx_timetable_constraints_school on public.timetable_constraints(school_id);
+create index idx_timetable_constraints_type on public.timetable_constraints(school_id, type);
+
 alter table public.rooms enable row level security;
 alter table public.timetable_periods enable row level security;
 alter table public.teacher_unavailability enable row level security;
 alter table public.timetable_entries enable row level security;
+alter table public.timetable_constraints enable row level security;
 
 create policy rooms_read on public.rooms for select
   using (school_id = public.current_school_id());
@@ -1685,6 +1781,15 @@ create policy timetable_entries_staff_update on public.timetable_entries for upd
   using (public.is_staff() and school_id = public.current_school_id());
 create policy timetable_entries_staff_delete on public.timetable_entries for delete
   using (public.is_staff() and school_id = public.current_school_id());
+
+create policy timetable_constraints_read on public.timetable_constraints for select
+  using (school_id = public.current_school_id());
+create policy timetable_constraints_admin_write on public.timetable_constraints for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy timetable_constraints_admin_update on public.timetable_constraints for update
+  using (public.is_admin() and school_id = public.current_school_id());
+create policy timetable_constraints_admin_delete on public.timetable_constraints for delete
+  using (public.is_admin() and school_id = public.current_school_id());
 
 -- Additional, narrow parent read access bolted onto existing tables — these
 -- are extra PERMISSIVE policies (Postgres OR's them with the ones already on

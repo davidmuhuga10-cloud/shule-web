@@ -66,6 +66,7 @@ export const Db = {
   streams: academics.streams,
   subjects: academics.subjects,
   subjectPapers: academics.subjectPapers,
+  subjectCombinations: academics.subjectCombinations,
   students: createStudentsApi(supabase),
   staff: createStaffApi(supabase),
   assignments: createAssignmentsApi(supabase),
