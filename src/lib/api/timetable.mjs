@@ -38,6 +38,95 @@ async function activeVersionNumber(supabase, academicYearId, termId) {
   return (data && data.length) ? (Number(data[0].version_number) || 1) : 1;
 }
 
+/** Sprint Review §1/§2: the classes/streams/effective-subjects/period-grid/
+ *  teacher-unavailability fetch generate() has always needed, pulled out
+ *  standalone so a lightweight read-only capacity check (checkCapacityStatus
+ *  below) can reuse the EXACT same data-gathering generate() itself runs on
+ *  — rather than a second, slightly-different query path that could drift
+ *  out of sync with what generate() actually validates against. Returns
+ *  `{ ok: false, message }` on the same early-exit conditions generate()
+ *  itself used to return err() for directly. */
+async function buildGenerateInput(supabase, periodsApi, daysApi, constraintsApi) {
+  // Perf: fetch classes/streams/period grid/teaching days/teacher
+  // unavailability up front, all in parallel — none of these depend on
+  // each other, and teacher_unavailability doesn't depend on anything
+  // else in this function either, so there's no reason to wait for the
+  // subject-assignment step before starting it.
+  const [{ data: classes }, { data: streams }, periodsRes, daysRes, { data: unavailRows }, constraintsRes] = await Promise.all([
+    supabase.from('classes').select('id, name'),
+    supabase.from('streams').select('id, class_id, name'),
+    periodsApi.list(),
+    daysApi.get(),
+    supabase.from('teacher_unavailability').select('staff_id, day_of_week, period_index'),
+    constraintsApi.list()
+  ]);
+  if (!periodsRes.ok) return { ok: false, message: periodsRes.message };
+  if (!daysRes.ok) return { ok: false, message: daysRes.message };
+  if (!periodsRes.data.length) return { ok: false, message: 'Set up your period grid first (Setup tab) before generating a timetable.' };
+  if (!(streams || []).length) return { ok: false, message: 'No classes/arms found — add classes and arms first.' };
+
+  // Effective subjects (with periods/week, doubles/week, teacher) per
+  // stream — same stream-row-wins-else-class-wide precedence
+  // assignments.mjs's getEffectiveClassSubjectIdsBatch already uses,
+  // but fetched here in exactly TWO queries total (every stream's own
+  // rows in one .in() call, every class-wide fallback row in another),
+  // not two queries PER STREAM. A big school with 30-40 streams used to
+  // mean 60-80 sequential-feeling round trips (the browser can only run
+  // ~6 requests at once per host, so most of them just queued) — that
+  // was the main reason Generate felt slow. Now it's always 2, however
+  // many streams the school has.
+  const streamIds = (streams || []).map((s) => s.id);
+  const classIds = [...new Set((streams || []).map((s) => s.class_id))];
+  const [{ data: streamRows }, { data: classWideRows }] = await Promise.all([
+    streamIds.length ? supabase.from('subject_class_assignments').select('subject_id, stream_id, class_id, periods_per_week, double_periods_per_week').in('stream_id', streamIds) : Promise.resolve({ data: [] }),
+    classIds.length ? supabase.from('subject_class_assignments').select('subject_id, stream_id, class_id, periods_per_week, double_periods_per_week').in('class_id', classIds).is('stream_id', null) : Promise.resolve({ data: [] })
+  ]);
+  const rowsByStream = {};
+  (streamRows || []).forEach((r) => { (rowsByStream[r.stream_id] = rowsByStream[r.stream_id] || []).push(r); });
+  const rowsByClass = {};
+  (classWideRows || []).forEach((r) => { (rowsByClass[r.class_id] = rowsByClass[r.class_id] || []).push(r); });
+  const streamSubjectsRes = (streams || []).map((s) => ({
+    stream: s,
+    rows: (rowsByStream[s.id] && rowsByStream[s.id].length) ? rowsByStream[s.id] : (rowsByClass[s.class_id] || [])
+  }));
+
+  const allSubjectIds = [...new Set(streamSubjectsRes.flatMap((r) => r.rows.map((x) => x.subject_id)))];
+  const [{ data: subjectsMeta }, { data: teacherRows }] = await Promise.all([
+    allSubjectIds.length ? supabase.from('subjects').select('id, name').in('id', allSubjectIds) : Promise.resolve({ data: [] }),
+    allSubjectIds.length ? supabase.from('subject_teacher_assignments').select('subject_id, stream_id, class_id, staff_id').in('subject_id', allSubjectIds) : Promise.resolve({ data: [] })
+  ]);
+  const subjectNameById = {}; (subjectsMeta || []).forEach((s) => { subjectNameById[s.id] = s.name; });
+  // Teacher lookup: stream-specific assignment wins, else class-wide
+  // (stream_id null) — same precedence subject_class_assignments uses.
+  const teacherByStreamSubject = {}, teacherByClassSubject = {};
+  (teacherRows || []).forEach((t) => {
+    if (t.stream_id) teacherByStreamSubject[`${t.stream_id}|${t.subject_id}`] = t.staff_id;
+    else teacherByClassSubject[`${t.class_id}|${t.subject_id}`] = t.staff_id;
+  });
+
+  const streamsInput = streamSubjectsRes.map(({ stream, rows }) => ({
+    stream_id: stream.id, class_id: stream.class_id,
+    subjects: rows.map((r) => ({
+      subject_id: r.subject_id, subject_name: subjectNameById[r.subject_id] || '',
+      periods_per_week: r.periods_per_week, double_periods_per_week: r.double_periods_per_week,
+      staff_id: teacherByStreamSubject[`${stream.id}|${r.subject_id}`] || teacherByClassSubject[`${stream.class_id}|${r.subject_id}`] || null
+    }))
+  }));
+
+  const unavailable = new Set((unavailRows || []).map((u) => `${u.staff_id}|${u.day_of_week}|${u.period_index}`));
+  const classNameById = {}; (classes || []).forEach((c) => { classNameById[c.id] = c.name; });
+  const streamNameById = {}; (streams || []).forEach((s) => { streamNameById[s.id] = s.name; });
+
+  const generateInput = {
+    days: daysRes.data,
+    periods: periodsRes.data.map((p) => ({ period_index: p.period_index, is_break: p.is_break })),
+    streams: streamsInput,
+    unavailable
+  };
+
+  return { ok: true, generateInput, classNameById, streamNameById, subjectNameById, constraintsRes };
+}
+
 export function createTimetableApi(supabase, settingsApi) {
   return {
     rooms: {
@@ -388,82 +477,9 @@ export function createTimetableApi(supabase, settingsApi) {
     async generate(academicYearId, termId) {
       if (!academicYearId || !termId) return err('Choose an academic year and term first.');
 
-      // Perf: fetch classes/streams/period grid/teaching days/teacher
-      // unavailability up front, all in parallel — none of these depend on
-      // each other, and teacher_unavailability doesn't depend on anything
-      // else in this function either, so there's no reason to wait for the
-      // subject-assignment step before starting it.
-      const [{ data: classes }, { data: streams }, periodsRes, daysRes, { data: unavailRows }, constraintsRes] = await Promise.all([
-        supabase.from('classes').select('id, name'),
-        supabase.from('streams').select('id, class_id, name'),
-        this.periods.list(),
-        this.days.get(),
-        supabase.from('teacher_unavailability').select('staff_id, day_of_week, period_index'),
-        this.constraints.list()
-      ]);
-      if (!periodsRes.ok) return err(periodsRes.message);
-      if (!daysRes.ok) return err(daysRes.message);
-      if (!periodsRes.data.length) return err('Set up your period grid first (Setup tab) before generating a timetable.');
-      if (!(streams || []).length) return err('No classes/arms found — add classes and arms first.');
-
-      // Effective subjects (with periods/week, doubles/week, teacher) per
-      // stream — same stream-row-wins-else-class-wide precedence
-      // assignments.mjs's getEffectiveClassSubjectIdsBatch already uses,
-      // but fetched here in exactly TWO queries total (every stream's own
-      // rows in one .in() call, every class-wide fallback row in another),
-      // not two queries PER STREAM. A big school with 30-40 streams used to
-      // mean 60-80 sequential-feeling round trips (the browser can only run
-      // ~6 requests at once per host, so most of them just queued) — that
-      // was the main reason Generate felt slow. Now it's always 2, however
-      // many streams the school has.
-      const streamIds = (streams || []).map((s) => s.id);
-      const classIds = [...new Set((streams || []).map((s) => s.class_id))];
-      const [{ data: streamRows }, { data: classWideRows }] = await Promise.all([
-        streamIds.length ? supabase.from('subject_class_assignments').select('subject_id, stream_id, class_id, periods_per_week, double_periods_per_week').in('stream_id', streamIds) : Promise.resolve({ data: [] }),
-        classIds.length ? supabase.from('subject_class_assignments').select('subject_id, stream_id, class_id, periods_per_week, double_periods_per_week').in('class_id', classIds).is('stream_id', null) : Promise.resolve({ data: [] })
-      ]);
-      const rowsByStream = {};
-      (streamRows || []).forEach((r) => { (rowsByStream[r.stream_id] = rowsByStream[r.stream_id] || []).push(r); });
-      const rowsByClass = {};
-      (classWideRows || []).forEach((r) => { (rowsByClass[r.class_id] = rowsByClass[r.class_id] || []).push(r); });
-      const streamSubjectsRes = (streams || []).map((s) => ({
-        stream: s,
-        rows: (rowsByStream[s.id] && rowsByStream[s.id].length) ? rowsByStream[s.id] : (rowsByClass[s.class_id] || [])
-      }));
-
-      const allSubjectIds = [...new Set(streamSubjectsRes.flatMap((r) => r.rows.map((x) => x.subject_id)))];
-      const [{ data: subjectsMeta }, { data: teacherRows }] = await Promise.all([
-        allSubjectIds.length ? supabase.from('subjects').select('id, name').in('id', allSubjectIds) : Promise.resolve({ data: [] }),
-        allSubjectIds.length ? supabase.from('subject_teacher_assignments').select('subject_id, stream_id, class_id, staff_id').in('subject_id', allSubjectIds) : Promise.resolve({ data: [] })
-      ]);
-      const subjectNameById = {}; (subjectsMeta || []).forEach((s) => { subjectNameById[s.id] = s.name; });
-      // Teacher lookup: stream-specific assignment wins, else class-wide
-      // (stream_id null) — same precedence subject_class_assignments uses.
-      const teacherByStreamSubject = {}, teacherByClassSubject = {};
-      (teacherRows || []).forEach((t) => {
-        if (t.stream_id) teacherByStreamSubject[`${t.stream_id}|${t.subject_id}`] = t.staff_id;
-        else teacherByClassSubject[`${t.class_id}|${t.subject_id}`] = t.staff_id;
-      });
-
-      const streamsInput = streamSubjectsRes.map(({ stream, rows }) => ({
-        stream_id: stream.id, class_id: stream.class_id,
-        subjects: rows.map((r) => ({
-          subject_id: r.subject_id, subject_name: subjectNameById[r.subject_id] || '',
-          periods_per_week: r.periods_per_week, double_periods_per_week: r.double_periods_per_week,
-          staff_id: teacherByStreamSubject[`${stream.id}|${r.subject_id}`] || teacherByClassSubject[`${stream.class_id}|${r.subject_id}`] || null
-        }))
-      }));
-
-      const unavailable = new Set((unavailRows || []).map((u) => `${u.staff_id}|${u.day_of_week}|${u.period_index}`));
-      const classNameById = {}; (classes || []).forEach((c) => { classNameById[c.id] = c.name; });
-      const streamNameById = {}; (streams || []).forEach((s) => { streamNameById[s.id] = s.name; });
-
-      const generateInput = {
-        days: daysRes.data,
-        periods: periodsRes.data.map((p) => ({ period_index: p.period_index, is_break: p.is_break })),
-        streams: streamsInput,
-        unavailable
-      };
+      const built = await buildGenerateInput(supabase, this.periods, this.days, this.constraints);
+      if (!built.ok) return err(built.message);
+      const { generateInput, classNameById, streamNameById, subjectNameById, constraintsRes } = built;
 
       // Round 2 §7: fail clearly BEFORE running the placement engine or
       // touching any existing timetable, whenever a stream is being asked
@@ -552,6 +568,27 @@ export function createTimetableApi(supabase, settingsApi) {
       }));
 
       return ok({ placed: entries.length, unresolved: unresolvedNamed });
+    },
+
+    /** Sprint Review §2: "The Timetable should refuse to generate at all
+     *  while the configuration is over the limit" — generate() has always
+     *  refused server-side (checkCapacity() above), but only AFTER the
+     *  Generate button is clicked and a full round trip completes. This
+     *  read-only twin runs the exact same check up front so the Generate
+     *  tab can warn/disable BEFORE that click — never writes anything, and
+     *  reuses buildGenerateInput() so it can never validate against
+     *  different data than generate() itself actually uses. */
+    async checkCapacityStatus() {
+      const built = await buildGenerateInput(supabase, this.periods, this.days, this.constraints);
+      if (!built.ok) return err(built.message);
+      const capacity = checkCapacity(built.generateInput);
+      const overloaded = capacity.overloaded.map((o) => ({
+        class_id: o.class_id, stream_id: o.stream_id,
+        class_name: built.classNameById[o.class_id] || '',
+        stream_name: built.streamNameById[o.stream_id] || '',
+        required: o.required, available: o.available
+      }));
+      return ok({ ok: capacity.ok, teachableSlotsPerWeek: capacity.teachableSlotsPerWeek, overloaded });
     }
   };
 }

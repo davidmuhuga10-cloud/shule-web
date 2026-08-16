@@ -112,7 +112,10 @@ async function load(root, classes, subjects, sel) {
       ${printOptionsHtml('ss', 'portrait')}
     </div>
     <div class="card">
-      <div class="card-b" style="border-bottom:1px solid var(--line);padding-bottom:12px">
+      <!-- Sprint Review bug: dropped the leftover border-bottom — it printed
+           as a stray grey line under reportTitleBarHtml's green rectangle
+           (see broadsheet.mjs's load() for the full explanation). -->
+      <div class="card-b" style="padding-bottom:12px">
         ${printHeaderHtml(settings)}
         ${reportTitleBarHtml('Score Sheet')}
       </div>

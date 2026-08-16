@@ -57,6 +57,9 @@ function render(root, settings, subjects) {
   // comment on this key in settings.mjs.
   const showPapersSeparately = settings.show_papers_separately === undefined ? true : String(settings.show_papers_separately) === 'true';
   const useCustomOrder = String(settings.use_custom_subject_order) === 'true';
+  // Sprint Review §8: same "missing key means true" rule as
+  // show_papers_separately just above — ticked yes by default.
+  const showAchievementLevels = settings.show_achievement_levels === undefined ? true : String(settings.show_achievement_levels) === 'true';
   let orderList = orderedSubjectList(settings, subjects);
 
   root.innerHTML = `
@@ -96,6 +99,13 @@ function render(root, settings, subjects) {
           <span class="hint" style="margin:0">Off by default (subjects appear in the system's normal order). Turn this on to choose exactly which order subjects appear in — e.g. Mathematics first, English last.</span></span>
         </label>
         <div id="perm-order-list" style="margin-top:14px${useCustomOrder ? '' : ';display:none'}"></div>
+      </div>
+      <div class="card-b" style="border-top:1px solid var(--line)">
+        <label style="display:flex;align-items:center;gap:12px;cursor:pointer">
+          <input type="checkbox" id="perm-show-levels" ${showAchievementLevels ? 'checked' : ''}>
+          <span><b>Show achievement levels on the Mark List</b><br>
+          <span class="hint" style="margin:0">On by default. When on, the Mark List shows each mark's grade/achievement-level letter (e.g. EE1, A-), the PL column, and the grade-breakdown tables at the bottom. Turn this off for a school that wants raw marks only, with none of that — the Mark List (on screen, printed, and its Excel export) then shows just the numbers.</span></span>
+        </label>
       </div>
     </div>
   `;
@@ -154,6 +164,13 @@ function render(root, settings, subjects) {
     drawOrderList();
   }
   if (useCustomOrder) drawOrderList();
+
+  root.querySelector('#perm-show-levels').onchange = async (e) => {
+    const val = e.target.checked;
+    const r = await Db.settings.save({ show_achievement_levels: String(val) });
+    if (!r.ok) { toast(r.message, 'err'); e.target.checked = !val; return; }
+    toast(val ? 'The Mark List will now show achievement-level letters again.' : 'The Mark List will now show raw marks only, with no achievement levels.', 'ok');
+  };
 
   root.querySelector('#perm-custom-order').onchange = async (e) => {
     const val = e.target.checked;

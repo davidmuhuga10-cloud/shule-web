@@ -2190,11 +2190,19 @@ begin
     select fs.subject_id, fs.subject_name, fs.effective_score, gr.grade_label, gr.points, gr.remark
     from final_subjects fs
     left join lateral (
+      -- Sprint Review bug fix: grade off round(fs.effective_score), not the
+      -- raw fraction — a Subject Combination's weighted-sum score very
+      -- often lands on a decimal (e.g. 84.6), and integer grade-range
+      -- bands (…73-84, 85-100…) have no band covering that fraction, so
+      -- some students silently got no Performance Level at all while a
+      -- classmate whose combo score happened to round to a whole number
+      -- was fine. Grading off the same whole number this function already
+      -- displays ('score', round(effective_score) below) closes the gap.
       select gr.grade_label, gr.points, gr.remark
       from public.grade_ranges gr
       join public.grading_scales gs on gs.id = gr.grading_scale_id
       where gs.is_default = true and gs.school_id = v_caller_school
-        and fs.effective_score >= gr.min_score and fs.effective_score <= gr.max_score
+        and round(fs.effective_score) >= gr.min_score and round(fs.effective_score) <= gr.max_score
       limit 1
     ) gr on true
   )
@@ -2209,12 +2217,20 @@ begin
   into v_subjects, v_total, v_count
   from graded;
 
-  v_average := case when v_count > 0 then round(v_total / v_count) else 0 end;
+  -- Sprint Review correction (final): the AVERAGE returned to callers is an
+  -- aggregate figure and keeps 2 decimal places (round(x, 2)) instead of
+  -- being rounded away to a whole number — same rule as _reportCard.mjs's
+  -- summary boxes. The overall-grade band lookup below still compares
+  -- round(v_average) (whole number) against the integer grade bands, same
+  -- fix as the per-subject lateral join above, so a fractional average
+  -- can't fall through a gap between bands — only the DISPLAYED value stays
+  -- 2dp, the grade lookup still needs a whole number to match the bands.
+  v_average := case when v_count > 0 then round(v_total / v_count, 2) else 0 end;
 
   select grade_label into v_overall_grade
     from public.grade_ranges gr
     join public.grading_scales gs on gs.id = gr.grading_scale_id and gs.is_default = true and gs.school_id = v_caller_school
-    where v_average >= gr.min_score and v_average <= gr.max_score
+    where round(v_average) >= gr.min_score and round(v_average) <= gr.max_score
     limit 1;
 
 
@@ -2314,7 +2330,7 @@ begin
     ),
     'exam', jsonb_build_object('name', v_exam.name, 'out_of', v_exam.out_of, 'exam_type', v_exam.exam_type),
     'session_name', coalesce(v_year.name, ''), 'term_name', coalesce(v_term.name, ''),
-    'subjects', v_subjects, 'total', round(v_total), 'average', v_average,
+    'subjects', v_subjects, 'total', round(v_total, 2), 'average', v_average,
     'overall_grade', coalesce(v_overall_grade, ''), 'position', v_position,
     'class_size', coalesce(v_class_size, 0), 'below_minimum', v_below_minimum
   );

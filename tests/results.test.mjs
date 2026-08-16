@@ -238,9 +238,9 @@ async function run() {
       { id: 'm1', combination_id: 'combo1', subject_id: 'su2', weight: 0.6 },
       { id: 'm2', combination_id: 'combo1', subject_id: 'su3', weight: 0.4 }
     );
-    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '80' }] });
-    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su2', scores: [{ student_id: 's1', score: '70' }] });
-    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su3', scores: [{ student_id: 's1', score: '50' }] });
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '80' }, { student_id: 's2', score: '50' }] });
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su2', scores: [{ student_id: 's1', score: '70' }, { student_id: 's2', score: '84' }] });
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su3', scores: [{ student_id: 's1', score: '50' }, { student_id: 's2', score: '73' }] });
 
     const sheet = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1', includeUnpublished: true });
     check('getBroadsheet folds the 2 combined subjects into ONE entry in `subjects`', sheet.subjects.length === 2 && sheet.subjects.some((s) => s.id === 'su1') && sheet.subjects.some((s) => s.id === 'combo:combo1'));
@@ -251,6 +251,17 @@ async function run() {
     check('the combo shows the school-chosen name', sheet.subjects.find((s) => s.id === 'combo:combo1').name === 'SST/CRE Combined');
     check('subject_count (SBJ) treats the combo as ONE subject, not two (Math + combo = 2, not 3)', jane.subject_count === 2);
     check('the student\'s total is Math + the combined score (80 + 62 = 142), not Math + 2 raw subjects', jane.total === 142);
+
+    // ---- Sprint Review bug fix: a combo score landing on a fraction must
+    // still get a Performance Level, not fall through a gap between two
+    // integer grade bands (this school's bands: C 0-49, B 50-79, A 80-100
+    // — nothing covers e.g. 79.6) ----
+    const amos = sheet.students.find((s) => s.student_id === 's2');
+    // 84*0.6 + 73*0.4 = 50.4 + 29.2 = 79.6 — used to have NO grade_label at
+    // all (79.6 is in neither the B 50-79 nor the A 80-100 band); grading
+    // off the rounded whole number (80) now correctly lands it in A.
+    check('a fractional combo score (79.6) is still graded, not left blank', amos.scores['combo:combo1'] === 79.6);
+    check('...graded off its rounded whole number (79.6 -> 80 -> A), closing the gap between integer bands', amos.grades['combo:combo1'].grade_label === 'A');
 
     // ---- independence: a combo must NOT activate if a member is unpublished (default view) ----
     await results.saveExam({ id: exam.id, name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100, class_ids: ['c1'] });

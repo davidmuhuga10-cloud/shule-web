@@ -230,6 +230,11 @@ async function renderRooms(root) {
 
 /* --------------------------------------------------------- requirements --- */
 async function renderRequirements(root) {
+  // Sprint Review §3: same fix as timetableHub.mjs's showTab() — show
+  // "please wait" the instant this sub-tab is opened, before the awaited
+  // fetches below, instead of leaving the PREVIOUS sub-tab's content on
+  // screen with no visible change while this one loads.
+  root.innerHTML = loader();
   const [classesRes, daysRes, periodsRes] = await Promise.all([Db.classes.list(), Db.timetable.days.get(), Db.timetable.periods.list()]);
   const classes = classesRes.ok ? classesRes.data : [];
   // Round 6 §6: how many teaching slots a class/arm's week actually holds —
@@ -281,18 +286,36 @@ async function renderRequirements(root) {
           <td><input type="number" min="0" max="10" class="req-double" style="width:80px" placeholder="0" value="${r.double_periods_per_week ? r.double_periods_per_week : ''}" ${r.assignment_id ? '' : 'disabled'}></td>
         </tr>`).join('')}
       </tbody></table>
-      <p id="req-total" class="hint" style="margin:10px 0 0;font-weight:600"></p>
+      <!-- Sprint Review §2: "the running total was implemented, but too
+           subtly — easy to miss entirely." Redesigned from a single hint
+           line into two always-visible, large live tiles (Expected /
+           Scheduled) plus a separate status banner that turns red and
+           states outright once the week is full or over, instead of a
+           small paragraph a school could easily scroll past. -->
+      <div id="req-cap-tiles" class="tt-cap-tiles">
+        <div class="tt-cap-tile">
+          <div class="tt-cap-label">EXPECTED</div>
+          <div class="tt-cap-value" id="req-expected-val">${weeklyCapacity || '—'}</div>
+          <div class="tt-cap-sub">timeslots this class/arm's week has</div>
+        </div>
+        <div class="tt-cap-tile" id="req-scheduled-tile">
+          <div class="tt-cap-label">SCHEDULED</div>
+          <div class="tt-cap-value" id="req-scheduled-val">0</div>
+          <div class="tt-cap-sub">periods/week configured so far</div>
+        </div>
+      </div>
+      <p id="req-total-msg" class="hint" style="margin:10px 0 0;font-weight:700"></p>
     `;
 
-    // Round 6 §6: a live running total of periods/week configured so far
-    // against how many teaching slots the week's grid actually holds
-    // (weeklyCapacity, computed once above from Teaching Days & Periods) —
-    // recomputed on every keystroke, not just on blur/change, so the number
-    // updates as the school types rather than only after they tab away.
-    // Doubles/week isn't added separately: buildUnits() in generate.mjs
-    // carves doubles OUT of periods_per_week (a "3 doubles" subject with
-    // periods_per_week=6 uses exactly 6 slots, not 6+3), so only the
-    // Periods/week column counts toward the grid total.
+    // Round 6 §6 / Sprint Review §2: a live running total of periods/week
+    // configured so far against how many teaching slots the week's grid
+    // actually holds (weeklyCapacity, computed once above from Teaching
+    // Days & Periods) — recomputed on every keystroke, not just on
+    // blur/change, so the tiles/message update as the school types rather
+    // than only after they tab away. Doubles/week isn't added separately:
+    // buildUnits() in generate.mjs carves doubles OUT of periods_per_week
+    // (a "3 doubles" subject with periods_per_week=6 uses exactly 6 slots,
+    // not 6+3), so only the Periods/week column counts toward the total.
     function recomputeTotal() {
       let total = 0;
       table.querySelectorAll('tr[data-assignment] .req-periods').forEach((inp) => {
@@ -300,16 +323,32 @@ async function renderRequirements(root) {
         const n = raw === '' ? DEFAULT_PERIODS_PER_WEEK : Number(raw);
         if (Number.isFinite(n) && n > 0) total += n;
       });
+      const atOrOverMax = weeklyCapacity > 0 && total >= weeklyCapacity;
       const over = weeklyCapacity > 0 && total > weeklyCapacity;
-      const totalEl = table.querySelector('#req-total');
-      if (totalEl) {
-        totalEl.innerHTML = weeklyCapacity > 0
-          ? `Periods used this week: <b>${total}</b> / ${weeklyCapacity} available${over
-            ? ` — <span style="color:var(--danger)">${total - weeklyCapacity} too many. Reduce a subject's periods, or add more periods under Teaching Days &amp; Periods.</span>`
-            : ` (${weeklyCapacity - total} free)`}`
-          : `Periods used this week: <b>${total}</b> — set up the period grid under Teaching Days &amp; Periods to see how much room this class/arm's week has.`;
+
+      const scheduledVal = table.querySelector('#req-scheduled-val');
+      const scheduledTile = table.querySelector('#req-scheduled-tile');
+      const msgEl = table.querySelector('#req-total-msg');
+      if (scheduledVal) scheduledVal.textContent = String(total);
+      // Bullet 1: "a permanent red message/tile once the maximum is
+      // reached" — this fires at exactly-full too, not just over-budget.
+      if (scheduledTile) scheduledTile.classList.toggle('over', atOrOverMax);
+      if (msgEl) {
+        if (!weeklyCapacity) {
+          msgEl.innerHTML = `Scheduled so far: <b>${total}</b> — set up the period grid under Teaching Days &amp; Periods to see how much room this class/arm's week has.`;
+          msgEl.classList.remove('danger');
+        } else if (over) {
+          msgEl.innerHTML = `⛔ <b>Maximum timeslots reached</b> — ${total}/${weeklyCapacity}, ${total - weeklyCapacity} too many. Reduce a subject's periods/week, or add more periods under Teaching Days &amp; Periods.`;
+          msgEl.classList.add('danger');
+        } else if (atOrOverMax) {
+          msgEl.innerHTML = `⛔ <b>Maximum timeslots reached</b> — ${total}/${weeklyCapacity}, this class/arm's week is completely full. Add more periods under Teaching Days &amp; Periods for any more.`;
+          msgEl.classList.add('danger');
+        } else {
+          msgEl.innerHTML = `✓ ${total}/${weeklyCapacity} used — ${weeklyCapacity - total} free.`;
+          msgEl.classList.remove('danger');
+        }
       }
-      return { total, over };
+      return { total, over, atOrOverMax };
     }
     recomputeTotal();
     table.querySelectorAll('.req-periods').forEach((inp) => inp.oninput = recomputeTotal);
@@ -354,6 +393,10 @@ async function renderRequirements(root) {
 
 /* --------------------------------------------------------- availability --- */
 async function renderAvailability(root) {
+  // Sprint Review §3: same fix as renderRequirements() above and
+  // timetableHub.mjs's showTab() — show "please wait" before the awaited
+  // fetch, not after.
+  root.innerHTML = loader();
   const staffRes = await Db.staff.list();
   const staff = (staffRes.ok ? staffRes.data : []).filter((s) => s.status === 'active');
   root.innerHTML = `

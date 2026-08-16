@@ -14,6 +14,7 @@
 import { viewTimetableView } from './timetableView.mjs';
 import { viewTimetableGenerate } from './timetableGenerate.mjs';
 import { viewTimetableSetup } from './timetableSetup.mjs';
+import { renderLoading } from '../app.js';
 
 // Setup comes first — a school needs a period grid, subjects, and teachers
 // configured before Generate does anything meaningful, so that's what they
@@ -44,9 +45,19 @@ export async function viewTimetableHub(root) {
     <div id="tt-hub-body"></div>
   `;
   const body = root.querySelector('#tt-hub-body');
+  // Sprint Review §3 (STILL BROKEN, reported previously): clicking
+  // Setup/Generate/View gave no sign a click had registered — each of
+  // those three view functions fetches its own data (sometimes several
+  // requests) BEFORE touching the DOM at all, so the PREVIOUS tab's
+  // content just sat there unchanged for however long that took. Same
+  // fix as app.js's renderLoading() doc comment prescribes: call it
+  // SYNCHRONOUSLY, before the tab-switch's `await`, so there's visible
+  // "please wait" feedback the instant the tab is clicked, on every tab,
+  // regardless of how slow (or fast) that tab's own fetch turns out to be.
   const showTab = (key) => {
     active = key;
     root.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === key));
+    renderLoading(body, 'Loading, please wait…');
     if (key === 'setup') viewTimetableSetup(body);
     else if (key === 'generate') viewTimetableGenerate(body, (yearId, termId) => { handoff = { year_id: yearId, term_id: termId }; showTab('view'); });
     else {

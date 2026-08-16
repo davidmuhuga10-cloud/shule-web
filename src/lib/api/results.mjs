@@ -720,7 +720,18 @@ export function createResultsApi(supabase, gradingApi) {
           }
           if (v !== null && !isNaN(v)) {
             total += v; counted++;
-            const g = grade(v);
+            // Sprint Review bug: a Subject Combination's score is a
+            // weighted sum and very often lands on a fraction (e.g.
+            // 84.6) — grading off that raw fraction against integer
+            // grade-range bands (…73-84, 85-100…) leaves genuinely
+            // ungraded gaps between adjacent bands' boundaries, so some
+            // students silently got no Performance Level letter while
+            // classmates whose combo score happened to round to a whole
+            // number were fine. Grade off the same whole number the
+            // Mark List/Report Form actually display (Math.round(v)) —
+            // `total`/`scores` above keep the exact, unrounded v for
+            // ranking, unaffected by this.
+            const g = grade(Math.round(v));
             grades[sub.id] = { grade_label: g.grade_label || '', points: g.points === '' || g.points === null || g.points === undefined ? null : Number(g.points) };
             if (grades[sub.id].points !== null) { pointsTotal += grades[sub.id].points; pointsCounted++; }
           } else {
@@ -736,7 +747,10 @@ export function createResultsApi(supabase, gradingApi) {
         // is the first time their own overall_grade reflects it too, rather
         // than showing a computed grade as if they'd sat a full set).
         const belowMinimum = minSubjects > 0 && counted < minSubjects;
-        const overallGrade = belowMinimum ? { grade_label: 'X', points: null } : (counted ? grade(average) : { grade_label: '', points: '' });
+        // Same boundary-gap fix as the per-subject grade above — grade the
+        // overall average off its rounded whole number, not the raw
+        // fractional average.
+        const overallGrade = belowMinimum ? { grade_label: 'X', points: null } : (counted ? grade(Math.round(average)) : { grade_label: '', points: '' });
         return {
           student_id: s.id, admission_no: s.admission_no, full_name: s.full_name, gender: s.gender || '',
           stream_id: s.stream_id || '', stream_name: streamMap[s.stream_id] || '',

@@ -77,15 +77,58 @@ export function computeGradeSummaries(students, subjects, bands) {
     return { grade, male, female, other: inGrade.length - male - female, total: inGrade.length };
   });
 
+  // Sprint Review EX5 (redesign, approved): Grade Breakdown by Subject now
+  // also carries each subject's Mean Marks, Mean Points, and a spelled-out
+  // Performance Level (e.g. "Meeting Expectation") — same figures the Exam
+  // Analysis report shows per subject (examAnalysis.mjs's perSubject),
+  // computed the same way here so the two screens never disagree.
   const subjectBreakdown = subjects.map((sub) => {
     const counts = {};
     gradeOrder.forEach((grade) => { counts[grade] = 0; });
+    const scores = [];
+    const pointsList = [];
     students.forEach((s) => {
       const g = s.grades && s.grades[sub.id] ? s.grades[sub.id].grade_label : '';
       if (g && counts[g] !== undefined) counts[g]++;
+      const sc = s.scores ? s.scores[sub.id] : undefined;
+      if (sc !== null && sc !== undefined && !isNaN(sc)) scores.push(sc);
+      const pts = s.grades && s.grades[sub.id] ? s.grades[sub.id].points : null;
+      if (pts !== null && pts !== undefined && !isNaN(pts)) pointsList.push(pts);
     });
-    return { subject_id: sub.id, subject_name: sub.name, counts };
+    const meanMarks = mean(scores);
+    const meanPoints = mean(pointsList);
+    return {
+      subject_id: sub.id, subject_name: sub.name, counts,
+      mean_marks: meanMarks, mean_points: meanPoints,
+      performance_level: meanPoints === null ? '' : levelForPoints(meanPoints, bands)
+    };
   });
 
   return { gradeOrder, totalRanked, totalStudents, totalGraded, ungraded, classSummary, genderSummary, subjectBreakdown };
+}
+
+/** Plain arithmetic mean, ignoring null/undefined/NaN — kept unrounded so
+ *  the caller decides display precision (Sprint Review correction: an
+ *  aggregate like Mean Marks/Mean Points keeps 2dp at render time, never
+ *  rounded away here in the data layer). */
+function mean(nums) {
+  const vals = nums.filter((v) => v !== null && v !== undefined && !isNaN(v));
+  if (!vals.length) return null;
+  return vals.reduce((a, v) => a + v, 0) / vals.length;
+}
+
+/** Matches a Mean Points figure to its nearest grading-scale band by points
+ *  (bands are sorted by min_score, not points, but points scales
+ *  monotonically with min_score in every scale this app grades with) and
+ *  returns that band's spelled-out remark (e.g. "Meeting Expectation"),
+ *  falling back to the grade_label if no remark is configured — same
+ *  convention examAnalysis.mjs's levelForPoints() uses. */
+function levelForPoints(points, bands) {
+  if (points === null || points === undefined) return '';
+  let best = null, bestDiff = Infinity;
+  bands.forEach((b) => {
+    const diff = Math.abs(Number(b.points) - points);
+    if (diff < bestDiff) { bestDiff = diff; best = b; }
+  });
+  return best ? (best.remark || best.grade_label || '') : '';
 }

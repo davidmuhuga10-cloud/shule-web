@@ -287,6 +287,36 @@ async function run() {
     check('generate() touches nothing when it fails the capacity check up front', entries.data.length === 0);
   }
 
+  // ---- checkCapacityStatus(): Sprint Review §2 — same check as generate(), read-only, callable before clicking Generate ----
+  {
+    const { timetable } = freshApis();
+    await timetable.periods.saveGrid([
+      { start_time: '08:00', end_time: '08:40' }, { start_time: '08:40', end_time: '09:20' }
+    ]); // only 2 teachable periods/day
+    await timetable.days.save([1]); // and only 1 teaching day = 2 slots/week total
+
+    const status = await timetable.checkCapacityStatus();
+    check('checkCapacityStatus() succeeds (ok:true means the CALL succeeded, not that capacity is fine)', status.ok === true);
+    check('...reports capacity as NOT ok when a stream needs more than the grid offers', status.data.ok === false);
+    check('...names the overloaded class/arm with required vs available, same numbers generate() itself rejects on', status.data.overloaded.length > 0 && status.data.overloaded[0].required > status.data.overloaded[0].available);
+    check('...reports the teachable-slots-per-week figure the Setup screen can show as "Expected"', status.data.teachableSlotsPerWeek === 2);
+
+    // Nothing written — this is read-only, unlike generate().
+    const entries = await timetable.entries.list({ academic_year_id: 'y1', term_id: 't1' });
+    check('checkCapacityStatus() never writes/clears anything', entries.data.length === 0);
+
+    // Widen the grid so the same configured load now fits — capacity flips to ok.
+    await timetable.periods.saveGrid([
+      { start_time: '08:00', end_time: '08:40' }, { start_time: '08:40', end_time: '09:20' },
+      { start_time: '09:20', end_time: '10:00' }, { start_time: '10:00', end_time: '10:40' },
+      { start_time: '10:40', end_time: '11:20' }, { start_time: '11:20', end_time: '12:00' },
+      { start_time: '12:00', end_time: '12:40' }, { start_time: '12:40', end_time: '13:20' },
+      { start_time: '13:20', end_time: '14:00' }
+    ]);
+    const status2 = await timetable.checkCapacityStatus();
+    check('checkCapacityStatus() reports ok:true once the grid has enough room', status2.data.ok === true && status2.data.overloaded.length === 0);
+  }
+
   // ---- generate(): a school-configured Constraint actually reaches the engine --
   {
     const { timetable, sb } = freshApis();

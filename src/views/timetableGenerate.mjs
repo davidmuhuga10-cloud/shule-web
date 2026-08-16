@@ -26,7 +26,15 @@ function pickDefaultYearTerm(years, termsByYear) {
 }
 
 export async function viewTimetableGenerate(root, onGenerated) {
-  const [yearsRes, periodsRes] = await Promise.all([Db.academicYears.list(), Db.timetable.periods.list()]);
+  // Sprint Review §2: "The Timetable should refuse to generate at all while
+  // the configuration is over the limit" — generate() has always refused
+  // server-side once clicked; checkCapacityStatus() (same check, read-only)
+  // is fetched up front here too so the button is disabled and the reason
+  // is visible BEFORE that click, not just after a round trip. A failed
+  // fetch here fails open (button stays enabled) — generate() itself is
+  // still the authoritative check either way, so nothing unsafe can slip
+  // through if this particular request happens to be offline.
+  const [yearsRes, periodsRes, capacityRes] = await Promise.all([Db.academicYears.list(), Db.timetable.periods.list(), Db.timetable.checkCapacityStatus()]);
   // Round 5 §5 (BUG): don't conflate a failed fetch (usually a lost/flaky
   // connection) with "genuinely not configured yet".
   if (!yearsRes.ok || !periodsRes.ok) {
@@ -35,6 +43,8 @@ export async function viewTimetableGenerate(root, onGenerated) {
   }
   const years = yearsRes.data;
   const periods = periodsRes.data;
+  const capacity = capacityRes.ok ? capacityRes.data : null;
+  const overCapacity = !!(capacity && !capacity.ok);
 
   if (!years.length) { root.innerHTML = `<div class="card"><div class="card-b"><div class="empty warn"><div class="e-ico">⚠️</div><h3>No academic years found</h3><p>Set up an academic year and term first (Settings → Academic Years &amp; Terms).</p></div></div></div>`; return; }
   if (!periods.length) { root.innerHTML = `<div class="card"><div class="card-b"><div class="empty warn"><div class="e-ico">⚠️</div><h3>Set up your period grid first</h3><p>Go to the Setup tab and define your school's daily periods before generating a timetable.</p></div></div></div>`; return; }
@@ -49,11 +59,25 @@ export async function viewTimetableGenerate(root, onGenerated) {
   function render() {
     const terms = termsByYear[sel.year_id] || [];
     root.innerHTML = `
+      ${overCapacity ? `
+      <div class="card no-print" style="margin-bottom:16px;border-color:var(--danger)">
+        <div class="card-b" style="display:flex;gap:12px;align-items:flex-start">
+          <div style="font-size:22px;line-height:1">⛔</div>
+          <div>
+            <div style="font-weight:750;color:var(--danger)">Maximum timeslots reached — can't generate yet</div>
+            <p class="hint" style="margin:4px 0 0">${capacity.overloaded.length} class/arm${capacity.overloaded.length === 1 ? '' : 's'} ${capacity.overloaded.length === 1 ? 'needs' : 'need'} more periods/week than the daily grid has room for:</p>
+            <ul style="margin:6px 0 0;padding-left:20px">
+              ${capacity.overloaded.map((o) => `<li><b>${esc(`${o.class_name} ${o.stream_name}`.trim() || 'A class/arm')}</b>: needs ${o.required}, but the week only has ${o.available} <span style="color:var(--danger);font-weight:700">(${o.required - o.available} over)</span></li>`).join('')}
+            </ul>
+            <p class="hint" style="margin:8px 0 0">Fix this under Setup → Subject Periods &amp; Double Lessons (reduce a subject's periods/week) or Setup → Teaching Days &amp; Periods (add more periods to the grid), then come back here.</p>
+          </div>
+        </div>
+      </div>` : ''}
       <div class="card" style="margin-bottom:16px">
         <div class="card-b grid4">
           <div class="field"><label>Academic Year</label><select id="tt-year">${options(years, 'id', 'name', sel.year_id, 'Choose a year')}</select></div>
           <div class="field"><label>Term</label><select id="tt-term">${options(terms, 'id', 'name', sel.term_id, 'Choose a term')}</select></div>
-          <div class="field"><label>&nbsp;</label><button class="btn" id="tt-generate">🔄 Generate Timetable</button></div>
+          <div class="field"><label>&nbsp;</label><button class="btn" id="tt-generate" ${overCapacity ? 'disabled title="Can\'t generate while a class/arm is over its weekly period limit — see the warning above."' : ''}>🔄 Generate Timetable</button></div>
           <div class="field"><label>&nbsp;</label><p class="hint" style="margin:0">Regenerating replaces this term's active timetable — the last 3 versions are kept, so you can switch back on the View tab if this one turns out worse. Once done, you'll be taken straight there.</p></div>
         </div>
       </div>
@@ -64,6 +88,7 @@ export async function viewTimetableGenerate(root, onGenerated) {
     yearSel.onchange = () => { sel.year_id = yearSel.value; sel.term_id = (termsByYear[sel.year_id] || [])[0]?.id || ''; render(); };
     termSel.onchange = () => { sel.term_id = termSel.value; };
 
+    if (overCapacity) return; // nothing left to wire — the button is disabled.
     root.querySelector('#tt-generate').onclick = () => {
       if (!sel.year_id || !sel.term_id) { toast('Choose an academic year and term first.', 'err'); return; }
       confirmAction('Generate a fresh timetable for this term? This becomes the active one everyone sees — the current version is kept and can be switched back to from the View tab if needed.', async () => {

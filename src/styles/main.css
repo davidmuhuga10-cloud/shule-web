@@ -316,10 +316,11 @@ table.data td.num,table.data th.num{text-align:center}
    stretching the column horizontally. */
 .mark-list-grid th.subj-col{width:70px}
 .mark-list-grid th.sum-col,.mark-list-grid td.sum-col{width:50px}
-/* Round 6 §3: TT MKS now reads "earned/possible" (e.g. "830/1230") instead
-   of a bare number — noticeably longer, so it gets a bit more room than
-   the other sum-col columns rather than clipping against the same 50px. */
-.mark-list-grid th.tt-mks-col,.mark-list-grid td.tt-mks-col{width:66px}
+/* Sprint Review redo: the earned/possible ("870/1200") format moved from
+   the per-student TT MKS column to the class-level TOTAL row's subject
+   columns (subj-col, already 70px — wider than sum-col — which is enough
+   room for that format; verified visually, see EX7/EX8 CSS verification
+   notes below). */
 .mark-list-grid tr:last-child td{border-bottom:1.3px solid var(--grid-ink)}
 .mark-cell .mark-grade{color:var(--grid-text);font-weight:600;font-size:10.5px}
 /* Round 5 §2: the TOTAL/AVERAGE rows at the very bottom of the Merit List —
@@ -329,19 +330,15 @@ table.data td.num,table.data th.num{text-align:center}
 /* System Fixes brief §15: Mark List summary stat tables (Class Grade
    Summary / Gender Grade Summary / Grade Breakdown by Subject), replacing
    the old single "Class average" line.
-   Round 6 §4: redesigned as bordered tiles in ONE auto-fit grid — 2 across
-   when there's room (minmax(320px,1fr) means a tile never squeezes below
-   320px, so a narrow viewport or a portrait print naturally drops to 1
-   column on its own, no separate breakpoint rule needed) — using the same
+   Sprint Review EX5 (redesign, approved): the Round 6 §4 bordered-tile 2x2
+   grid was rejected — reverted to the original unboxed heading + table
+   look. Class Grade Summary and Gender Grade Summary sit side by side via
+   the app's existing `.grid2` class; Grade Breakdown by Subject is its own
+   full-width block below them (see broadsheet.mjs's summaryTablesHtml),
+   not wrapped into the same 2-across grid. Every table still uses the same
    black grid-ink border every other printed report on this app uses
-   (main.css's .print-grid/.mark-list-grid), replacing the grey table.data
-   look these three tables used to have, which read as inconsistent with
-   the rest of the Mark List sitting right above them. */
+   (main.css's .print-grid/.mark-list-grid). */
 .bs-summary{padding:16px 18px}
-.bs-summary-h{font-weight:700;font-size:12.5px;margin-bottom:6px}
-.bs-summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;align-items:start}
-.bs-summary-tile{border:1.3px solid var(--grid-ink);border-radius:6px;padding:12px 14px}
-.bs-summary-tile .table-wrap{margin:0}
 
 /* Shared printable-report header (feature brief §2/§4; Round 5 §2/§3): logo
    far left, school name centered, address block far right — same layout for
@@ -757,6 +754,20 @@ table.data td.num,table.data th.num{text-align:center}
    applied to the wrapping .tt-switch while its save is in flight. */
 .tt-switch.busy{opacity:.55;cursor:wait}
 .tt-switch.busy input{cursor:wait}
+
+/* Sprint Review §2: the Setup > Subject Periods running total, redesigned
+   from one small hint line into two always-visible "Expected"/"Scheduled"
+   tiles plus a status message — see timetableSetup.mjs's recomputeTotal().
+   The Scheduled tile and the message both switch to a red, impossible-to-
+   miss treatment the moment the week is full or over, not just on save. */
+.tt-cap-tiles{display:flex;gap:14px;margin-top:16px;flex-wrap:wrap}
+.tt-cap-tile{flex:1;min-width:160px;border:1.5px solid var(--line);border-radius:10px;padding:14px 16px;text-align:center;transition:border-color .15s,background .15s}
+.tt-cap-label{font-size:11px;font-weight:750;letter-spacing:.5px;color:var(--muted)}
+.tt-cap-value{font-size:28px;font-weight:800;margin-top:4px;line-height:1.15}
+.tt-cap-sub{font-size:11px;color:var(--muted);margin-top:2px}
+.tt-cap-tile.over{border-color:var(--danger);background:var(--danger-bg)}
+.tt-cap-tile.over .tt-cap-value{color:var(--danger)}
+#req-total-msg.danger{color:var(--danger)}
 
 /* Brief §8/§9: printed reports should have sane margins/page sizing and
    never require scrolling on paper. @page sets a consistent margin on every

@@ -20,6 +20,15 @@
  *     toggles) + subject_order (a JSON-encoded array of subject ids, the
  *     school's chosen display order) — the Mark List's subject column order
  *     when the toggle is on; see broadsheet.mjs's orderSubjects().
+ *
+ * Sprint Review §8 adds one more, under Permissions/Mark List:
+ *   - show_achievement_levels ('true'/'false') — whether the Mark List (both
+ *     on screen and its Excel export) shows grade/achievement-level letters
+ *     (the little badge next to each mark, the PL column, and the Class/
+ *     Gender/Subject grade-breakdown tables at the bottom) at all, or just
+ *     raw marks with none of that. Same "defaults ON, and a missing key
+ *     means true too" rule as show_papers_separately above — see
+ *     broadsheet.mjs's showAchievementLevels().
  */
 import { ok, err, titleCase } from './_util.mjs';
 

@@ -863,6 +863,39 @@ function run() {
     check('zero-slack pathological case: still places the overwhelming majority (>=95%) even in this adversarial setup', entries.length / (NUM_CLASSES * STREAMS_PER_CLASS * 40) >= 0.95);
   }
 
+  // ---- Sprint Review TT1 ("Still Broken: 'Couldn't Be Scheduled' Error") -------
+  {
+    // A genuinely feasible instance — every stream's total periods and every
+    // teacher's total load both fit comfortably within the week's capacity
+    // (6 teachable slots: 2 days x 3 periods) — but the OLD engine's single
+    // fixed ordering (doubles first, streams in their input order) greedily
+    // painted itself into a corner and left one lesson unresolved, found by
+    // brute-force search over the old single-strategy placement pass. The
+    // new multi-strategy engine (buildOrderingStrategies/generateTimetable)
+    // must resolve it completely by trying an alternate ordering instead of
+    // giving up after the first attempt.
+    const periods = [
+      { period_index: 1, is_break: false }, { period_index: 2, is_break: false }, { period_index: 3, is_break: false }
+    ];
+    const days = [1, 2];
+    const input = {
+      days, periods,
+      streams: [
+        { stream_id: 'str0', class_id: 'str0', subjects: [{ subject_id: 's0_0', subject_name: 'S0_0', periods_per_week: 3, staff_id: 'T3' }] },
+        { stream_id: 'str1', class_id: 'str1', subjects: [{ subject_id: 's1_0', subject_name: 'S1_0', periods_per_week: 3, staff_id: 'T1' }] },
+        { stream_id: 'str2', class_id: 'str2', subjects: [
+          { subject_id: 's2_0', subject_name: 'S2_0', periods_per_week: 3, staff_id: 'T2' },
+          { subject_id: 's2_1', subject_name: 'S2_1', periods_per_week: 3, staff_id: 'T1' }
+        ] },
+        { stream_id: 'str3', class_id: 'str3', subjects: [{ subject_id: 's3_0', subject_name: 'S3_0', periods_per_week: 2, staff_id: 'T2' }] }
+      ],
+      unavailable: new Set()
+    };
+    const { entries, unresolved } = generateTimetable(input);
+    check('TT1: a feasible-but-greedy-unfriendly layout is now fully resolved by trying alternate strategies', unresolved.length === 0);
+    check('TT1: every required period actually got placed (14 total)', entries.length === 14);
+  }
+
   console.log(`${passed} passed, ${failed} failed`);
   if (failed) process.exit(1);
 }

@@ -5,16 +5,16 @@ function check(name, cond) { if (cond) passed++; else { failed++; console.error(
 
 function run() {
   const bands = [
-    { grade_label: 'A', min_score: 80, max_score: 100 },
-    { grade_label: 'B', min_score: 60, max_score: 79 },
-    { grade_label: 'C', min_score: 40, max_score: 59 }
+    { grade_label: 'A', min_score: 80, max_score: 100, points: 12, remark: 'Exceeding Expectation' },
+    { grade_label: 'B', min_score: 60, max_score: 79, points: 9, remark: 'Meeting Expectation' },
+    { grade_label: 'C', min_score: 40, max_score: 59, points: 6, remark: 'Approaching Expectation' }
   ];
   const subjects = [{ id: 'math', name: 'Mathematics' }, { id: 'eng', name: 'English' }];
   const students = [
-    { student_id: 's1', gender: 'Male', overall_grade: 'A', grades: { math: { grade_label: 'A' }, eng: { grade_label: 'B' } } },
-    { student_id: 's2', gender: 'Female', overall_grade: 'A', grades: { math: { grade_label: 'A' }, eng: { grade_label: 'A' } } },
-    { student_id: 's3', gender: 'Female', overall_grade: 'B', grades: { math: { grade_label: 'B' }, eng: { grade_label: 'C' } } },
-    { student_id: 's4', gender: 'Male', overall_grade: '', grades: { math: { grade_label: '' }, eng: { grade_label: '' } } } // unranked (e.g. below min subjects)
+    { student_id: 's1', gender: 'Male', overall_grade: 'A', scores: { math: 90, eng: 65 }, grades: { math: { grade_label: 'A', points: 12 }, eng: { grade_label: 'B', points: 9 } } },
+    { student_id: 's2', gender: 'Female', overall_grade: 'A', scores: { math: 85, eng: 88 }, grades: { math: { grade_label: 'A', points: 12 }, eng: { grade_label: 'A', points: 12 } } },
+    { student_id: 's3', gender: 'Female', overall_grade: 'B', scores: { math: 70, eng: 45 }, grades: { math: { grade_label: 'B', points: 9 }, eng: { grade_label: 'C', points: 6 } } },
+    { student_id: 's4', gender: 'Male', overall_grade: '', scores: {}, grades: { math: { grade_label: '' }, eng: { grade_label: '' } } } // unranked (e.g. below min subjects)
   ];
 
   // ---- grade order: best-to-worst by band, not alphabetical ----------------------
@@ -52,6 +52,20 @@ function run() {
   check('Subject breakdown counts Math grade B once', mathRow.counts.B === 1);
   const engRow = subjectBreakdown.find((r) => r.subject_id === 'eng');
   check('Subject breakdown counts English grade A once (student 2 only)', engRow.counts.A === 1);
+
+  // ---- Sprint Review EX5 (redesign, approved): Grade Breakdown by Subject
+  // now also carries Mean Marks / Mean Points / a spelled-out Performance
+  // Level per subject — an aggregate figure, so it's unrounded here (2dp is
+  // applied only at display/export time, same convention as every other
+  // aggregate in this app). Math: (90+85+70)/3 = 81.666...; points
+  // (12+12+9)/3 = 11 -> nearest band is A (points:12) here since B(9) is
+  // further away... actually 11 is closer to 12 (diff 1) than to 9 (diff 2).
+  check('Math mean marks is the plain average of every student with a score (90+85+70)/3', Math.abs(mathRow.mean_marks - 81.66666666666667) < 1e-9);
+  check('Math mean points is the plain average of every student with points (12+12+9)/3', Math.abs(mathRow.mean_points - 11) < 1e-9);
+  check('Math performance level resolves to the nearest band by points (11 -> closest to A\'s 12)', mathRow.performance_level === 'Exceeding Expectation');
+  const engMeanPoints = (9 + 12 + 6) / 3;
+  check('English mean points is the plain average (9+12+6)/3 = 9', Math.abs(engRow.mean_points - engMeanPoints) < 1e-9);
+  check('English performance level resolves to band B\'s remark (9 matches B\'s points exactly)', engRow.performance_level === 'Meeting Expectation');
 
   // ---- a grade label present on a student but missing from bands still counts -------
   const withOverride = computeGradeSummaries(

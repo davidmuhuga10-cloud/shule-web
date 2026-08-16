@@ -54,8 +54,9 @@ function run() {
   check('buildBroadsheetAoa student row starts with admission no, name, stream', studentRow[0] === '101' && studentRow[1] === 'Amos Otieno' && studentRow[2] === 'East');
   check('buildBroadsheetAoa combines score + grade into one cell', studentRow.includes('78 (A-)'));
   check('buildBroadsheetAoa shows an em-dash for a missing score', studentRow.includes('—'));
-  // Round 6 §1: class average rounded to a whole number for display too (65.4 -> 65).
-  check('buildBroadsheetAoa trailing row reports the class average, rounded', bsAoa[bsAoa.length - 1][0] === 'Class average:' && bsAoa[bsAoa.length - 1][1] === 65);
+  // Sprint Review correction: Class average is a "Mean Marks" figure — an
+  // exception to the whole-number rounding rule — so it keeps 2dp (65.4).
+  check('buildBroadsheetAoa trailing row reports the class average to 2dp', bsAoa[bsAoa.length - 1][0] === 'Class average:' && bsAoa[bsAoa.length - 1][1] === 65.4);
 
   const bsAoaNoContact = buildBroadsheetAoa({ settings: { school_name: 'No Contact School' }, exam, cls: null, streamName: '', subjects: [], students: [], class_average: 0 });
   check('buildBroadsheetAoa omits the contact row when no contact fields are set', bsAoaNoContact[1][0] === 'Term 2 Mid-Term — Mark List — ');
@@ -102,20 +103,32 @@ function run() {
     const totalRow = aoa[7], avgRow = aoa[8];
     check('a TOTAL row is added right after the student rows, labelled in column 2', totalRow[1] === 'TOTAL');
     check('an AVERAGE row follows it, labelled in column 2', avgRow[1] === 'AVERAGE');
-    check('TOTAL sums the plain subject column (70 + 80 = 150)', totalRow[3] === 150);
+    // Sprint Review redo: the TOTAL row shows earned/possible ("sum/2*100",
+    // 2 students * the exam's out_of, which defaults to 100 here) — the
+    // AVERAGE row is unaffected (an average isn't a "total").
+    check('TOTAL sums the plain subject column as earned/possible (70 + 80 = 150 / 200)', totalRow[3] === '150/200');
     check('AVERAGE averages the plain subject column (70 + 80)/2 = 75', avgRow[3] === 75);
-    check('TOTAL sums the combined-subject column, rounded (61.4 + 68.6 = 130)', totalRow[4] === 130);
+    check('TOTAL sums the combined-subject column, rounded, as earned/possible (61.4 + 68.6 = 130 / 200)', totalRow[4] === '130/200');
     check('AVERAGE averages the combined-subject column, rounded ((61.4+68.6)/2 = 65)', avgRow[4] === 65);
     // sub-lap columns: P1, P2, then %.
-    check('TOTAL sums a Learning Area Paper\'s own column (30 + 20 = 50)', totalRow[5] === 50);
-    check('TOTAL sums the Learning Area Papers % column, rounded (55.4 + 44.6 = 100)', totalRow[7] === 100);
+    check('TOTAL sums a Learning Area Paper\'s own column as earned/possible (30 + 20 = 50 / 200)', totalRow[5] === '50/200');
+    check('TOTAL sums the Learning Area Papers % column, rounded, as earned/possible (55.4 + 44.6 = 100 / 200)', totalRow[7] === '100/200');
     check('AVERAGE averages the Learning Area Papers % column, rounded ((55.4+44.6)/2 = 50)', avgRow[7] === 50);
-    // Round 6 §1: class average rounded here too (63.3 -> 63).
-    check('the blank spacer and Class average row still follow immediately after', aoa[9].length === 0 && aoa[10][0] === 'Class average:' && aoa[10][1] === 63);
+    // Sprint Review correction: class average keeps 2dp (63.3), not rounded.
+    check('the blank spacer and Class average row still follow immediately after', aoa[9].length === 0 && aoa[10][0] === 'Class average:' && aoa[10][1] === 63.3);
 
     // A totally empty class (no students) doesn't blow up — every column dashes out.
     const emptyAoa = buildBroadsheetAoa({ settings, exam, cls, streamName: 'East', subjects: comboSubjects, students: [], class_average: 0 });
     check('TOTAL/AVERAGE rows dash out every column when there are no students', emptyAoa[5].slice(3).every((c) => c === '—') && emptyAoa[6].slice(3).every((c) => c === '—'));
+
+    // --- Sprint Review §8: "Show achievement levels on the Mark List" off — raw marks only, no grade letters ---
+    const noLevelsAoa = buildBroadsheetAoa({ settings, exam, cls, streamName: 'East', subjects: comboSubjects, students: multiStudents, class_average: 63.3, showLevels: false });
+    const rowNoLevels = noLevelsAoa[5];
+    check('showLevels:false drops the grade letter from a combined-subject cell (just "61", no "(B)")', !rowNoLevels.includes('61 (B)') && rowNoLevels.includes('61'));
+    check('showLevels:false drops the grade letter from a Learning Area Papers % cell too', !rowNoLevels.includes('55 (C+)') && rowNoLevels.includes('55'));
+    check('showLevels:false still shows the PL column as a plain dash, not the grade', rowNoLevels[rowNoLevels.length - 6] === '—');
+    // showLevels defaults to true (matches the on-screen default) when the caller omits it and settings has no explicit key either.
+    check('buildBroadsheetAoa defaults showLevels to true when omitted', aoa[5].includes('61 (B)'));
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

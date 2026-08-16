@@ -284,6 +284,90 @@ function buildConstraintCheckers(constraints, ctx) {
  * }
  * returns { entries: [{day_of_week, period_index, subject_id, class_id, stream_id, staff_id}], unresolved: [{...unit, reason}] }
  */
+/** Sprint Review TT1 ("Still Broken: 'Couldn't Be Scheduled' Error"): totals
+ *  up how many units share a given key (teacher, or stream) — used to rank
+ *  who/what is most heavily loaded so a placement strategy can give the
+ *  tightest-constrained thing first pick of slots instead of leftovers. */
+function totalLoadByKey(units, keyFn) {
+  const m = new Map();
+  units.forEach((u) => {
+    const k = keyFn(u);
+    if (k === null || k === undefined) return;
+    m.set(k, (m.get(k) || 0) + 1);
+  });
+  return m;
+}
+
+/** Stable descending sort by score — ties keep their original relative
+ *  order, so a strategy's output stays deterministic. */
+function stableSortByDesc(arr, scoreFn) {
+  return arr
+    .map((u, i) => ({ u, i, s: scoreFn(u) }))
+    .sort((a, b) => (b.s - a.s) || (a.i - b.i))
+    .map((x) => x.u);
+}
+
+/** Sprint Review TT1: the old engine tried exactly ONE fixed allocation
+ *  order (doubles first, then singles, streams in their input order) and
+ *  simply gave up — reporting "couldn't be scheduled" — the moment that one
+ *  order ran a unit into a dead end, even when a different, equally valid
+ *  order would have fit everything. Builds several full re-orderings of the
+ *  same unit list, each a distinct, named strategy per the Sprint Review's
+ *  own suggestions, so generateTimetable (below) can attempt each one from
+ *  a clean slate and keep whichever leaves the fewest lessons unresolved. */
+function buildOrderingStrategies(baseUnits) {
+  const doubles = baseUnits.filter((u) => u.type === 'double');
+  const singles = baseUnits.filter((u) => u.type === 'single');
+
+  // Strategy 1 — "default": the original ordering (doubles first — a
+  // standard CSP "most constrained first" heuristic — then singles, streams
+  // in their natural input order). Tried first so a school whose
+  // configuration already places cleanly sees byte-for-byte the same
+  // layout as before this fix.
+  const original = [...doubles, ...singles];
+
+  // Strategy 2 — "teacher-first": "fully allocate the stuck teacher's
+  // lessons first then work around that". A teacher's own week is often
+  // the tightest constraint in the whole system — one person can't be in
+  // two streams' lessons at once — so the most heavily-loaded teacher's
+  // lessons get first pick of every slot, teacher by teacher from busiest
+  // to least busy, ahead of everyone else's lighter (or unassigned) load.
+  const staffLoad = totalLoadByKey(baseUnits, (u) => u.staff_id || null);
+  const byTeacherLoad = (u) => (u.staff_id ? staffLoad.get(u.staff_id) || 0 : -1);
+  const teacherFirst = [...stableSortByDesc(doubles, byTeacherLoad), ...stableSortByDesc(singles, byTeacherLoad)];
+
+  // Strategy 3 — "class-complete": "fully generate one class's timetable
+  // before moving to the next", busiest class/arm (most periods to place,
+  // so the one most likely to run out of room) first — its own doubles
+  // then singles are placed in full before the next stream is touched at
+  // all, rather than every stream's doubles being placed first, then
+  // circling back for everyone's singles.
+  const streamLoad = totalLoadByKey(baseUnits, (u) => u.stream_id);
+  const streamIds = [...new Set(baseUnits.map((u) => u.stream_id))]
+    .sort((a, b) => (streamLoad.get(b) || 0) - (streamLoad.get(a) || 0));
+  const classComplete = [];
+  streamIds.forEach((sid) => {
+    classComplete.push(...doubles.filter((u) => u.stream_id === sid));
+    classComplete.push(...singles.filter((u) => u.stream_id === sid));
+  });
+
+  return [
+    { name: 'default', units: original },
+    { name: 'teacher-first', units: teacherFirst },
+    { name: 'class-complete', units: classComplete }
+  ];
+}
+
+/** Sprint Review TT1: the actual entry point every caller uses. Instead of
+ *  running the placement engine once with one fixed unit ordering and
+ *  reporting whatever ended up unresolved (the old behaviour — "gives up on
+ *  conflict"), this now runs several independent, full attempts — one per
+ *  strategy from buildOrderingStrategies() — and keeps whichever attempt
+ *  left the fewest lessons unresolved, stopping early the moment any
+ *  attempt places everything. Each attempt starts from a completely clean
+ *  slate (see runPlacementPass), so trying a second or third strategy can
+ *  never be worse than stopping after the first — the engine only ever
+ *  keeps a result at least as good as "default" alone would have given. */
 export function generateTimetable(input) {
   input = input || {};
   const days = (input.days || []).slice().sort((a, b) => a - b);
@@ -291,7 +375,7 @@ export function generateTimetable(input) {
   const teachable = periods.filter((p) => !p.is_break);
   const teachableIndexSet = new Set(teachable.map((p) => p.period_index));
   const unavailable = input.unavailable || new Set();
-  const units = buildUnits(input.streams || []);
+  const baseUnits = buildUnits(input.streams || []);
 
   // Round 2 §7: which teachable period_index values sit immediately before
   // a break — used by the pe_before_break constraint.
@@ -303,6 +387,38 @@ export function generateTimetable(input) {
     }
   });
 
+  // Round 6 §3 ("regenerate produces nearly identical output"): the engine
+  // is intentionally deterministic (see this file's header comment — no
+  // Math.random(), for explainability/testability), which also means the
+  // exact same input always produced the exact same layout, regenerate
+  // after regenerate. input.seed varies which day each unit's search
+  // starts from — Db.timetable.generate() passes the next version_number
+  // as the seed (Round 5 §10's version tracking), so every regenerate
+  // genuinely reshuffles while staying fully deterministic/reproducible
+  // for that specific version. seed defaults to 0 (byte-for-byte the old
+  // idx-only rotation) when not supplied, e.g. by every existing test.
+  const seed = Number(input.seed) || 0;
+
+  const ctx = { days, teachable, teachableIndexSet, unavailable, beforeBreakIndexes, constraints: input.constraints, seed };
+
+  let best = null;
+  for (const strategy of buildOrderingStrategies(baseUnits)) {
+    const result = runPlacementPass(strategy.units, ctx);
+    if (!best || result.unresolved.length < best.unresolved.length) best = result;
+    if (best.unresolved.length === 0) break;
+  }
+  return best || { entries: [], unresolved: [] };
+}
+
+/** Runs one full, independent placement attempt (the same 4-pass
+ *  soft-constraint relaxation the engine has always used) over a given unit
+ *  ordering, from a completely clean slate — no state is shared between
+ *  strategy attempts, so one strategy's near-misses can never leak into
+ *  another's. Returns { entries, unresolved } exactly like
+ *  generateTimetable used to return directly. */
+function runPlacementPass(units, ctx) {
+  const { days, teachable, teachableIndexSet, unavailable, beforeBreakIndexes, constraints, seed } = ctx;
+
   const streamBusy = new Set();   // `${stream_id}|${day}|${period}`
   const staffBusy = new Set();    // `${staff_id}|${day}|${period}`
   const subjectOnDay = new Set(); // `${stream_id}|${subject_id}|${day}`
@@ -312,7 +428,7 @@ export function generateTimetable(input) {
   // "don't land directly next to another double" checker.
   const doubleSlot = new Set(); // `${stream_id}|${day}|${period}`
 
-  const customCheckers = buildConstraintCheckers(input.constraints, {
+  const customCheckers = buildConstraintCheckers(constraints, {
     streamSlotSubject, unavailable, beforeBreakIndexes, teachableIndexSet, streamBusy, staffBusy, doubleSlot
   });
 
@@ -347,18 +463,6 @@ export function generateTimetable(input) {
       doubleSlot.add(slotKey(unit.stream_id, day, secondPeriod));
     }
   };
-
-  // Round 6 §3 ("regenerate produces nearly identical output"): the engine
-  // is intentionally deterministic (see this file's header comment — no
-  // Math.random(), for explainability/testability), which also means the
-  // exact same input always produced the exact same layout, regenerate
-  // after regenerate. input.seed varies which day each unit's search
-  // starts from — Db.timetable.generate() passes the next version_number
-  // as the seed (Round 5 §10's version tracking), so every regenerate
-  // genuinely reshuffles while staying fully deterministic/reproducible
-  // for that specific version. seed defaults to 0 (byte-for-byte the old
-  // idx-only rotation) when not supplied, e.g. by every existing test.
-  const seed = Number(input.seed) || 0;
 
   units.forEach((unit, idx) => {
     const dayOrder = rotatedDays(days, idx + seed);
