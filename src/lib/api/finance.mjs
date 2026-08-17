@@ -91,6 +91,41 @@ export function createFinanceApi(supabase) {
         .eq('student_id', studentId).eq('academic_year_id', academicYearId).eq('term_id', termId).maybeSingle();
       if (error) return err(error.message);
       return ok(data || null);
+    },
+    /** Round 2 §8 — the roster of students currently assigned to one route
+     *  for one term, for the route's own detail screen. */
+    async studentsOnRoute(routeId, academicYearId, termId) {
+      let q = supabase.from('finance_student_routes')
+        .select('*, students(id, full_name, admission_no, class_id, classes(name))')
+        .eq('route_id', routeId).order('created_at', { ascending: false });
+      if (academicYearId) q = q.eq('academic_year_id', academicYearId);
+      if (termId) q = q.eq('term_id', termId);
+      const { data, error } = await q;
+      if (error) return err(error.message);
+      return ok(data || []);
+    },
+    /** Round 2 §9 — every student's route assignment for a term, for the
+     *  "class list with assigned transport route" printable breakdown. */
+    async classAssignments(academicYearId, termId) {
+      let q = supabase.from('finance_student_routes')
+        .select('*, students(full_name, admission_no, class_id, classes(name)), finance_routes(name)')
+        .order('created_at', { ascending: false });
+      if (academicYearId) q = q.eq('academic_year_id', academicYearId);
+      if (termId) q = q.eq('term_id', termId);
+      const { data, error } = await q;
+      if (error) return err(error.message);
+      return ok(data || []);
+    },
+    /** Round 2 §8 — bulk-invoices every student on a route for a term,
+     *  skipping anyone already invoiced for it (server-enforced, see
+     *  finance_invoice_route in migrations/0032). */
+    async invoiceRoute(routeId, academicYearId, termId) {
+      const { data, error } = await supabase.rpc('finance_invoice_route', {
+        p_route_id: routeId, p_academic_year_id: academicYearId, p_term_id: termId
+      });
+      if (error) return err(error.message);
+      clearCache();
+      return ok(data);
     }
   };
 
@@ -141,6 +176,16 @@ export function createFinanceApi(supabase) {
      *  covers both "new term, invoice Grade 1/2" and "new mid-term joiner". */
     async generateInvoices(feeStructureId, studentIds) {
       const { data, error } = await supabase.rpc('finance_generate_invoices', { p_fee_structure_id: feeStructureId, p_student_ids: studentIds || null });
+      if (error) return err(error.message);
+      clearCache();
+      return ok(data);
+    },
+    /** Round 2 §10 — undoes a bulk invoice run, removing this structure's
+     *  line items from whatever invoices they landed on. Safe even after
+     *  payments were recorded (see finance_uninvoice_structure's own
+     *  comment in migrations/0032 for why). */
+    async uninvoice(feeStructureId) {
+      const { data, error } = await supabase.rpc('finance_uninvoice_structure', { p_fee_structure_id: feeStructureId });
       if (error) return err(error.message);
       clearCache();
       return ok(data);
@@ -310,6 +355,17 @@ export function createFinanceApi(supabase) {
         if (error) return err(error.message);
         return ok(data || []);
       });
+    },
+    /** Round 2 §9 — one vote head's per-student balance (e.g. "who hasn't
+     *  cleared Transport specifically"). Not cached like the others above —
+     *  used from a targeted report screen, not the Dashboard's click-often
+     *  filter row, so the 20s memo would rarely pay for itself. */
+    async voteHeadStudentBalances(voteHeadId, academicYearId, termId) {
+      const { data, error } = await supabase.rpc('finance_vote_head_student_balances', {
+        p_vote_head_id: voteHeadId, p_academic_year_id: academicYearId || null, p_term_id: termId || null
+      });
+      if (error) return err(error.message);
+      return ok(data || []);
     }
   };
 

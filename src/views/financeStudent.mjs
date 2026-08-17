@@ -14,11 +14,9 @@ import { renderIssueNoteModal } from './financeInvoicing.mjs';
 
 export async function viewFinanceStudent(root, access) {
   root.innerHTML = `
-    <div class="card pad">
-      <div class="field" style="max-width:420px"><label>Search a student</label>
-        <input id="fst-q" placeholder="Name or admission no." autocomplete="off">
-        <div id="fst-results" class="search-results"></div>
-      </div>
+    <div class="search-hero" style="position:relative">
+      <input id="fst-q" placeholder="🔍 Search by admission no. or name…" autocomplete="off">
+      <div id="fst-results" class="search-results"></div>
     </div>
     <div id="fst-body" style="margin-top:14px"></div>
   `;
@@ -69,7 +67,7 @@ async function openStudent(body, access, student) {
         <div style="font-size:20px;font-weight:700;color:${Number(bal.balance || 0) > 0 ? 'var(--danger)' : 'var(--ok)'}">KES ${Number(bal.balance || 0).toLocaleString()}</div>
       </div>
     </div>
-    <div class="tabs settings-tabs no-print" style="margin-top:12px">
+    <div class="fin-tabs no-print" style="margin-top:12px">
       ${TABS.map((t) => `<button data-stab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</button>`).join('')}
     </div>
     <div id="fst-tab-body" style="margin-top:12px"></div>

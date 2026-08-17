@@ -62,7 +62,7 @@ export async function viewFinanceHub(root) {
   let active = TABS[0].key;
   root.innerHTML = `
     <div class="page-head no-print"><div><h2>Finance</h2><p>Fees, invoicing, collections, transport billing and basic bookkeeping reports.</p></div></div>
-    <div class="tabs settings-tabs no-print">
+    <div class="fin-tabs no-print">
       ${TABS.map((t) => `<button data-tab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</button>`).join('')}
     </div>
     <div id="fin-hub-body"></div>

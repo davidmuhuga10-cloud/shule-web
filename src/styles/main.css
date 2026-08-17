@@ -885,3 +885,24 @@ table.data td.num,table.data th.num{text-align:center}
 .search-hit{padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--line)}
 .search-hit:last-child{border-bottom:none}
 .search-hit:hover{background:var(--hover-bg,#f4f6fa)}
+
+/* ---------- Finance Round 2 §1: top-bar redesign ----------
+   The hub tabs previously reused .settings-tabs (max-width:520px), which is
+   exactly why they read as clustered/narrow with grey text — that's a
+   Settings-specific convention, not meant for a 6-tab module bar. .fin-tabs
+   is Finance's own full-width variant: black label text (not grey) on
+   both states, and evenly distributed via flex:1 same as .tabs already
+   does, just without the width cap. .fin-toolbar is the reusable
+   search(~half width)+action(right) row every Finance screen's header
+   uses now, via a shared .spacer push. */
+.fin-tabs{display:flex;gap:6px;background:#eef1f5;padding:5px;border-radius:10px;margin-bottom:18px;max-width:none}
+.fin-tabs button{flex:1;padding:11px 14px;border:none;background:none;border-radius:7px;cursor:pointer;
+  color:var(--ink);font-family:inherit;font-size:13.5px;font-weight:600;text-align:center;transition:background .15s}
+.fin-tabs button.active{background:#fff;font-weight:700;box-shadow:var(--shadow)}
+.fin-tabs button:not(.active):hover{background:rgba(255,255,255,.5)}
+.fin-toolbar{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:18px}
+.fin-toolbar .fin-search{flex:1 1 420px;max-width:560px;margin:0}
+.fin-toolbar .fin-search input{width:100%}
+.fin-toolbar .fin-filters{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;flex:1 1 420px}
+.fin-toolbar .fin-filters .field{margin:0;min-width:170px;flex:1 1 170px;max-width:260px}
+@media(max-width:720px){.fin-toolbar{flex-direction:column;align-items:stretch}.fin-toolbar .spacer{display:none}}
