@@ -108,9 +108,14 @@ export async function openStaffModal(root, existing, onSaved) {
   onSaved = onSaved || (() => render(root));
   const titleChoices = JOB_TITLES.map((t) => ({ id: t, name: t }));
   let canPublish = false;
+  let canFinanceCollect = false;
+  let canFinanceManage = false;
   if (existing) {
     const capsRes = await Db.capabilities.listForStaff(existing.id);
-    canPublish = capsRes.ok && capsRes.data.indexOf('publish_results') !== -1;
+    const caps = capsRes.ok ? capsRes.data : [];
+    canPublish = caps.indexOf('publish_results') !== -1;
+    canFinanceCollect = caps.indexOf('finance_record_collections') !== -1;
+    canFinanceManage = caps.indexOf('finance_manage_fees') !== -1;
   }
   modal({
     title: existing ? 'Edit staff member' : 'Add staff member',
@@ -140,6 +145,8 @@ export async function openStaffModal(root, existing, onSaved) {
         </div>
       </details>
       ${existing ? `<div class="field"><label class="chk"><input type="checkbox" id="sf-publish" ${canPublish ? 'checked' : ''}> Can publish exam results (final step of the approval workflow)</label></div>` : ''}
+      ${existing ? `<div class="field"><label class="chk"><input type="checkbox" id="sf-finance-collect" ${canFinanceCollect ? 'checked' : ''}> Finance: can record collections &amp; view statements</label></div>` : ''}
+      ${existing ? `<div class="field"><label class="chk"><input type="checkbox" id="sf-finance-manage" ${canFinanceManage ? 'checked' : ''}> Finance: can manage fees, invoices &amp; credit/debit notes</label></div>` : ''}
       ${existing ? '' : `<div class="field"><label class="chk"><input type="checkbox" id="sf-admin"> Grant admin (full) access, not just teacher access</label></div>`}
     `,
     okLabel: 'Save',
@@ -177,6 +184,20 @@ export async function openStaffModal(root, existing, onSaved) {
           const capRes = wantsPublish
             ? await Db.capabilities.grant(existing.id, 'publish_results')
             : await Db.capabilities.revoke(existing.id, 'publish_results');
+          if (!capRes.ok) toast(capRes.message, 'err');
+        }
+        const wantsFinanceCollect = document.getElementById('sf-finance-collect') && document.getElementById('sf-finance-collect').checked;
+        if (wantsFinanceCollect !== canFinanceCollect) {
+          const capRes = wantsFinanceCollect
+            ? await Db.capabilities.grant(existing.id, 'finance_record_collections')
+            : await Db.capabilities.revoke(existing.id, 'finance_record_collections');
+          if (!capRes.ok) toast(capRes.message, 'err');
+        }
+        const wantsFinanceManage = document.getElementById('sf-finance-manage') && document.getElementById('sf-finance-manage').checked;
+        if (wantsFinanceManage !== canFinanceManage) {
+          const capRes = wantsFinanceManage
+            ? await Db.capabilities.grant(existing.id, 'finance_manage_fees')
+            : await Db.capabilities.revoke(existing.id, 'finance_manage_fees');
           if (!capRes.ok) toast(capRes.message, 'err');
         }
         toast('Staff saved.', 'ok');

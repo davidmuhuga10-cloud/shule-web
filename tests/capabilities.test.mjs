@@ -36,7 +36,11 @@ async function run() {
     const api = createCapabilitiesApi(sb);
     check('listForStaff returns empty (not an error) with no staff id', (await api.listForStaff(null)).data.length === 0);
     check('grant requires a staff id', (await api.grant(null, 'publish_results')).ok === false);
-    check('CAPABILITIES currently exposes exactly publish_results', CAPABILITIES.length === 1 && CAPABILITIES[0] === 'publish_results');
+    check('CAPABILITIES includes publish_results plus the Finance module\'s two capabilities',
+      CAPABILITIES.indexOf('publish_results') !== -1 &&
+      CAPABILITIES.indexOf('finance_manage_fees') !== -1 &&
+      CAPABILITIES.indexOf('finance_record_collections') !== -1 &&
+      CAPABILITIES.length === 3);
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

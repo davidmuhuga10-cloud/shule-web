@@ -867,3 +867,21 @@ table.data td.num,table.data th.num{text-align:center}
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:35;display:none}
 .scrim.show{display:block}
 @media(max-width:960px){.scrim.show{display:block}}
+
+/* ---------- Finance module ---------- */
+.fin-progress{display:inline-block;width:100px;height:8px;border-radius:5px;background:var(--line);overflow:hidden;vertical-align:middle;margin-right:6px}
+.fin-progress-fill{height:100%;background:var(--primary);border-radius:5px}
+.fin-receipt{width:390px;margin:0 auto;font-size:12.5px;border:1px solid var(--grid-ink)}
+.fin-receipt .fr-h{text-align:center;padding:10px;border-bottom:1px solid var(--grid-ink)}
+.fin-receipt .fr-row{display:flex;justify-content:space-between;padding:3px 10px}
+.fin-receipt table{width:100%;border-collapse:collapse;margin:8px 0}
+.fin-receipt table th,.fin-receipt table td{border:1px solid var(--grid-ink);padding:4px 6px;font-size:11.5px}
+.fin-receipt .fr-words{padding:6px 10px;font-style:italic;border-top:1px solid var(--grid-ink)}
+.fin-statement table{width:100%;border-collapse:collapse}
+.fin-statement th,.fin-statement td{border:1px solid var(--grid-ink);padding:5px 8px;font-size:12px}
+@media print{.fin-receipt{border-color:#000}.fin-receipt .fr-h,.fin-receipt .fr-words{border-color:#000}.fin-receipt table th,.fin-receipt table td{border-color:#000}}
+.search-results{position:relative;z-index:5;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-top:4px;background:var(--card-bg,#fff)}
+.search-results:empty{border:none;margin-top:0}
+.search-hit{padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--line)}
+.search-hit:last-child{border-bottom:none}
+.search-hit:hover{background:var(--hover-bg,#f4f6fa)}

@@ -9,8 +9,20 @@
  */
 import { ok, err } from './_util.mjs';
 
-export const CAPABILITIES = ['publish_results'];
-export const CAPABILITY_LABELS = { publish_results: 'Publish exam results' };
+// Sprint: Finance module — two granular grants (see migrations/
+// 0031_finance_module.sql's header comment): 'finance_record_collections'
+// (record/reverse/transfer payments, view balances/statements/reports) and
+// 'finance_manage_fees' (vote heads, fee structures, invoicing, routes,
+// debit/credit notes — a superset for anything that changes what's owed
+// rather than what's been paid). Brief scenario #20's "grant a bursar
+// collections + statements only, not fee structures/notes" is exactly one
+// of these two grants, not both.
+export const CAPABILITIES = ['publish_results', 'finance_record_collections', 'finance_manage_fees'];
+export const CAPABILITY_LABELS = {
+  publish_results: 'Publish exam results',
+  finance_record_collections: 'Finance: record collections & view statements',
+  finance_manage_fees: 'Finance: manage fees, invoices & credit/debit notes'
+};
 
 export function createCapabilitiesApi(supabase) {
   return {

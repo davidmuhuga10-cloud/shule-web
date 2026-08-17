@@ -21,6 +21,7 @@ import { createMessagingApi } from './messaging.mjs';
 import { createParentsApi } from './parents.mjs';
 import { createCapabilitiesApi } from './capabilities.mjs';
 import { createTimetableApi } from './timetable.mjs';
+import { createFinanceApi } from './finance.mjs';
 
 async function callAdminFunction(action, payload) {
   const token = await getAccessToken();
@@ -83,5 +84,6 @@ export const Db = {
   // timetable.mjs's header comment) so `days` can read/write
   // `settings.timetable_days` through the exact same batched save() every
   // other settings field already uses.
-  timetable: createTimetableApi(supabase, settings)
+  timetable: createTimetableApi(supabase, settings),
+  finance: createFinanceApi(supabase)
 };

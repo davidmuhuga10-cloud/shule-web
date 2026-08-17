@@ -38,6 +38,7 @@ import { viewMessaging } from './views/messaging.mjs';
 import { viewMyChildren } from './views/myChildren.mjs';
 import { viewTimetableHub } from './views/timetableHub.mjs';
 import { viewMyTimetable } from './views/myTimetable.mjs';
+import { viewFinanceHub } from './views/financeHub.mjs';
 import { renderComingSoon } from './views/_comingSoon.mjs';
 
 /* ------------------------------ Shared state ----------------------------- */
@@ -688,11 +689,24 @@ const NAV = {
     { route: 'messaging', label: 'Messaging', ico: '💬' },
     { section: 'Configuration' },
     { route: 'settings', label: 'Settings', ico: '⚙️' },
-    { route: 'timetable', label: 'Timetable', ico: '📅' }
+    { route: 'timetable', label: 'Timetable', ico: '📅' },
+    // Sprint: Finance module — placed directly below Timetable per the
+    // brief's own request. An admin always has full access (finance_can_
+    // manage()/finance_can_collect() both bypass on is_admin() — see
+    // migrations/0031_finance_module.sql); a teacher only sees this same
+    // entry (below) once granted a finance capability.
+    { route: 'finance', label: 'Finance', ico: '💰' }
   ],
   teacher: [
     { route: 'dashboard', label: 'Dashboard', ico: '🏠' },
     { route: 'my-timetable', label: 'My Timetable', ico: '📅' },
+    // Finance is hidden here unless this teacher has been granted a
+    // finance capability (e.g. as a bursar) — see viewFinanceHub()'s own
+    // capability check for why it's still safe to leave this route
+    // reachable in HIDDEN_ALLOWED_ROUTES even when the sidebar hides it.
+    // Placed directly below (My) Timetable per the brief's own request,
+    // same as the admin nav above.
+    { route: 'finance', label: 'Finance', ico: '💰', hideUnless: 'financeAccess' },
     { section: 'People' },
     { route: 'students', label: 'Students', ico: '🎒' },
     { section: 'Daily' },
@@ -737,6 +751,11 @@ function buildNav() {
   const items = NAV[state.profile.role] || NAV.student;
   let html = '';
   items.forEach((it) => {
+    // e.g. { hideUnless: 'financeAccess' } — a per-USER gate (not per-role,
+    // which is all NAV normally checks), for a module a teacher only sees
+    // once individually granted a capability. See bootApp()'s capability
+    // fetch, which sets this flag on state.profile at login.
+    if (it.hideUnless && !state.profile[it.hideUnless]) return;
     if (it.section) {
       html += `<div class="group">${esc(it.section)}</div>`;
     } else if (it.parent) {
@@ -793,7 +812,8 @@ const ROUTES = {
   'messaging': viewMessaging,
   'my-children': viewMyChildren,
   'timetable': viewTimetableHub,
-  'my-timetable': viewMyTimetable
+  'my-timetable': viewMyTimetable,
+  'finance': viewFinanceHub
 };
 
 async function router() {
@@ -871,6 +891,21 @@ async function bootApp() {
     state.settings = settingsRes.ok ? settingsRes.data : {};
   } catch (e) {
     state.settings = {};
+  }
+
+  // Finance module: a teacher's sidebar only shows "Finance" once they've
+  // been granted one of the two finance capabilities (see staff.mjs's
+  // staff-edit modal) — an admin always has full access regardless, so
+  // this check is skipped for them. One cheap query at login, not on every
+  // navigation.
+  state.profile.financeAccess = state.profile.role === 'admin';
+  if (state.profile.role === 'teacher' && state.profile.staff_id) {
+    try {
+      const capsRes = await Db.capabilities.listForStaff(state.profile.staff_id);
+      state.profile.financeAccess = capsRes.ok && (capsRes.data.indexOf('finance_manage_fees') !== -1 || capsRes.data.indexOf('finance_record_collections') !== -1);
+    } catch (e) {
+      state.profile.financeAccess = false;
+    }
   }
 
   $('#auth-screen').classList.add('hidden');
