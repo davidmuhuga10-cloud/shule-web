@@ -6,36 +6,49 @@
  * happen server-side. Everything else here (recipient previews, history) is
  * a plain RLS-scoped read, same as every other module.
  */
-import { ok, err } from './_util.mjs';
+import { ok, err, createMemoCache, clearAllCaches } from './_util.mjs';
 
 export function createMessagingApi(supabase, sendMessageFn) {
+  // Same short-window in-memory memoization pattern as the rest of the app
+  // (see _util.mjs's createMemoCache header comment for the app-wide
+  // invalidation bus this shares). Scoped per createMessagingApi() CALL,
+  // not module-level — see the same note in academics.mjs/students.mjs.
+  const { cached } = createMemoCache(20000);
   return {
     /** Guardians for a class — shown in the compose screen so an admin/
      *  teacher can see who a "whole class" send will actually reach before
      *  sending it. */
     async classRecipients(class_id) {
       if (!class_id) return err('Choose a class.');
-      const { data, error } = await supabase
-        .from('students')
-        .select('id, full_name, guardian_name, guardian_contact')
-        .eq('class_id', class_id).eq('status', 'active')
-        .order('full_name');
-      if (error) return err(error.message);
-      return ok(data || []);
+      return cached('classRecipients', class_id, async () => {
+        const { data, error } = await supabase
+          .from('students')
+          .select('id, full_name, guardian_name, guardian_contact')
+          .eq('class_id', class_id).eq('status', 'active')
+          .order('full_name');
+        if (error) return err(error.message);
+        return ok(data || []);
+      });
     },
 
     async history(limit) {
-      const { data, error } = await supabase
-        .from('message_logs')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(limit || 200);
-      if (error) return err(error.message);
-      return ok(data || []);
+      return cached('history', limit || 200, async () => {
+        const { data, error } = await supabase
+          .from('message_logs')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(limit || 200);
+        if (error) return err(error.message);
+        return ok(data || []);
+      });
     },
 
     /** payload: { scope: 'class'|'individual_student'|'individual_staff'|'broadcast',
-     *             class_id?, student_id?, staff_id?, body } */
+     *             class_id?, student_id?, staff_id?, body }
+     *  Goes through the send-message Netlify function, not `supabase`
+     *  directly (see header comment) — clearAllCaches() still needs to run
+     *  on success since it writes message_logs, which history() above
+     *  caches. */
     async send(payload) {
       payload = payload || {};
       if (!String(payload.body || '').trim()) return err('Message cannot be empty.');
@@ -43,7 +56,9 @@ export function createMessagingApi(supabase, sendMessageFn) {
       if (payload.scope === 'class' && !payload.class_id) return err('Choose a class.');
       if (payload.scope === 'individual_student' && !payload.student_id) return err('Choose a student.');
       if (payload.scope === 'individual_staff' && !payload.staff_id) return err('Choose a staff member.');
-      return sendMessageFn(payload);
+      const res = await sendMessageFn(payload);
+      if (res && res.ok) clearAllCaches();
+      return res;
     }
   };
 }

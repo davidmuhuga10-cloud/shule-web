@@ -2,9 +2,19 @@
  * dashboard.mjs — Supabase equivalent of Dashboard.gs's getDashboard/getActiveContext_.
  * (Settings live in settings.mjs; user/login management lives in users.mjs.)
  */
-import { ok } from './_util.mjs';
+import { ok, createMemoCache } from './_util.mjs';
 
 export function createDashboardApi(supabase) {
+  // get() below is the very first thing loaded after login and one of the
+  // most-revisited screens in the app, so it's worth memoizing even though
+  // it touches nearly every table — it shares the app-wide invalidation bus
+  // (_util.mjs's createMemoCache/clearAllCaches), so a write anywhere
+  // (enroll a student, add a class, record a collection...) still clears
+  // this immediately; it just avoids re-running this big aggregate query
+  // every single time someone lands back on the dashboard within a few
+  // seconds. Scoped per createDashboardApi() CALL, not module-level — see
+  // the same note in academics.mjs/students.mjs/results.mjs for why.
+  const { cached } = createMemoCache(20000);
   async function getActiveContext() {
     const [{ data: year }, { data: term }] = await Promise.all([
       supabase.from('academic_years').select('id, name').eq('status', 'active').maybeSingle(),
@@ -31,6 +41,7 @@ export function createDashboardApi(supabase) {
     // no longer needs its own students query — it reuses the same students
     // rows already fetched for the count.
     async get() {
+      return cached('dashboard.get', null, async () => {
       const [
         { data: students }, { data: staffAll }, { data: classes },
         { count: streamCount }, { count: subjectCount }, { count: examCount },
@@ -100,6 +111,7 @@ export function createDashboardApi(supabase) {
         active,
         checklist,
         setupComplete: checklist.every((c) => c.done)
+      });
       });
     }
   };

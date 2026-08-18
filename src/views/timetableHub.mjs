@@ -39,7 +39,7 @@ export async function viewTimetableHub(root) {
   // `.sidebar,.topbar,.no-print{display:none!important}` print rule).
   root.innerHTML = `
     <div class="page-head no-print"><div><h2>Timetable</h2><p>Generate a conflict-free school timetable, view it by class or by teacher, and print it.</p></div></div>
-    <div class="tabs settings-tabs no-print">
+    <div class="fin-tabs no-print">
       ${TABS.map((t) => `<button data-tab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</button>`).join('')}
     </div>
     <div id="tt-hub-body"></div>

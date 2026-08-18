@@ -8,21 +8,33 @@
  * after a successful save(), same pattern as students. See
  * netlify/functions/README.md.
  */
-import { ok, err } from './_util.mjs';
+import { ok, err, createMemoCache, clearAllCaches } from './_util.mjs';
 
 export function createStaffApi(supabase) {
+  // Same short-window in-memory memoization pattern as the rest of the app
+  // (see _util.mjs's createMemoCache header comment for the app-wide
+  // invalidation bus this shares) — Staff/Teachers is read on the
+  // Dashboard, Attendance, Messaging, and every "assign a class teacher"
+  // picker. Scoped per createStaffApi() CALL, not module-level — see the
+  // same note in academics.mjs/students.mjs.
+  const { cached } = createMemoCache(20000);
+  function clearCache() { clearAllCaches(); }
   return {
     async list() {
-      const { data, error } = await supabase.from('staff').select('*').order('full_name', { ascending: true });
-      if (error) return err(error.message);
-      return ok(data || []);
+      return cached('staff.list', null, async () => {
+        const { data, error } = await supabase.from('staff').select('*').order('full_name', { ascending: true });
+        if (error) return err(error.message);
+        return ok(data || []);
+      });
     },
 
     async get(id) {
-      const { data, error } = await supabase.from('staff').select('*').eq('id', id).maybeSingle();
-      if (error) return err(error.message);
-      if (!data) return err('Staff member not found.');
-      return ok(data);
+      return cached('staff.get', id, async () => {
+        const { data, error } = await supabase.from('staff').select('*').eq('id', id).maybeSingle();
+        if (error) return err(error.message);
+        if (!data) return err('Staff member not found.');
+        return ok(data);
+      });
     },
 
     async save(payload) {
@@ -65,16 +77,19 @@ export function createStaffApi(supabase) {
       if (payload.id) {
         const { data, error } = await supabase.from('staff').update(rec).eq('id', payload.id).select().single();
         if (error) return err(error.message);
+        clearCache();
         return ok(data);
       }
       const { data, error } = await supabase.from('staff').insert(rec).select().single();
       if (error) return err(error.message);
+      clearCache();
       return ok(data);
     },
 
     async remove(id) {
       const { error } = await supabase.from('staff').delete().eq('id', id);
       if (error) return err(error.message);
+      clearCache();
       return ok(true);
     },
 
@@ -143,6 +158,7 @@ export function createStaffApi(supabase) {
         // member (with the right admin/teacher role) without a second
         // round-trip — mirrors students.bulkCreate's createdRows.
         createdRows = (data || []).map((r, i) => ({ ...r, is_admin: isAdminFlags[i] }));
+        clearCache();
       }
       return ok(null, { created, createdRows, skipped, total: rows.length });
     }

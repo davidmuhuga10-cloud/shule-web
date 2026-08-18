@@ -236,7 +236,7 @@ async function renderDetailScreen(root, years, terms, exam, classId, sel) {
         <p>Enter marks, then review and publish — all in one place.</p>
       </div>
     </div>
-    <div class="tabs" style="max-width:560px">
+    <div class="fin-tabs">
       <button data-tab="publish" class="${sel.tab === 'marks' || sel.tab === 'bulk' ? '' : 'active'}">✅ Review and Publish</button>
       <button data-tab="marks" class="${sel.tab === 'marks' ? 'active' : ''}">✍️ Marks Entry</button>
       <button data-tab="bulk" class="${sel.tab === 'bulk' ? 'active' : ''}">📥 Bulk Upload</button>

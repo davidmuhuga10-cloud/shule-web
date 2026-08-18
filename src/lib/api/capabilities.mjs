@@ -7,7 +7,7 @@
  * "Supervisor" login — that role in the chain is simply an admin, or any
  * teacher an admin has explicitly granted this capability to.
  */
-import { ok, err } from './_util.mjs';
+import { ok, err, createMemoCache, clearAllCaches } from './_util.mjs';
 
 // Sprint: Finance module — two granular grants (see migrations/
 // 0031_finance_module.sql's header comment): 'finance_record_collections'
@@ -25,12 +25,20 @@ export const CAPABILITY_LABELS = {
 };
 
 export function createCapabilitiesApi(supabase) {
+  // Same short-window in-memory memoization pattern as the rest of the app
+  // (see _util.mjs's createMemoCache header comment for the app-wide
+  // invalidation bus this shares). Scoped per createCapabilitiesApi() CALL,
+  // not module-level — see the same note in academics.mjs/students.mjs.
+  const { cached } = createMemoCache(20000);
+  function clearCache() { clearAllCaches(); }
   return {
     async listForStaff(staffId) {
       if (!staffId) return ok([]);
-      const { data, error } = await supabase.from('staff_capabilities').select('*').eq('staff_id', staffId);
-      if (error) return err(error.message);
-      return ok((data || []).map((r) => r.capability));
+      return cached('capabilities.listForStaff', staffId, async () => {
+        const { data, error } = await supabase.from('staff_capabilities').select('*').eq('staff_id', staffId);
+        if (error) return err(error.message);
+        return ok((data || []).map((r) => r.capability));
+      });
     },
 
     async grant(staffId, capability) {
@@ -41,6 +49,7 @@ export function createCapabilitiesApi(supabase) {
       if (existing) return ok(true);
       const { error } = await supabase.from('staff_capabilities').insert({ staff_id: staffId, capability });
       if (error) return err(error.message);
+      clearCache();
       return ok(true);
     },
 
@@ -48,6 +57,7 @@ export function createCapabilitiesApi(supabase) {
       if (!staffId) return err('Missing staff member.');
       const { error } = await supabase.from('staff_capabilities').delete().eq('staff_id', staffId).eq('capability', capability);
       if (error) return err(error.message);
+      clearCache();
       return ok(true);
     }
   };

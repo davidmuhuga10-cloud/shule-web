@@ -19,7 +19,7 @@
  * same subjects) and is what actually fixes the reported "every class
  * attached to 30+ subjects" problem — a class only shows what belongs to it.
  */
-import { ok, err } from './_util.mjs';
+import { ok, err, createMemoCache, clearAllCaches } from './_util.mjs';
 import { CBC_SUBJECTS, levelBucketForClassName } from './cbcDefaults.mjs';
 
 /** Auto-populate a brand-new stream with its grade's default CBC subjects
@@ -119,6 +119,18 @@ export async function getEffectiveClassSubjectIdsBatch(supabase, classIds) {
 }
 
 export function createAssignmentsApi(supabase) {
+  // Same short-window in-memory memoization pattern as the rest of the app
+  // (see _util.mjs's createMemoCache header comment for the app-wide
+  // invalidation bus this shares). Scoped per createAssignmentsApi() CALL,
+  // not module-level — see the same note in academics.mjs/students.mjs.
+  //
+  // NOTE: the standalone getEffectiveClassSubjectIds/Batch functions above
+  // (used directly by results.mjs's deliberately-live exam board/broadsheet
+  // reads) are NOT cached here — left fully live to match that same
+  // decision, not to partially reintroduce the staleness risk those were
+  // written to avoid.
+  const { cached } = createMemoCache(20000);
+  function clearCache() { clearAllCaches(); }
   // Round 4 §7: also selects id/periods_per_week/double_periods_per_week
   // (not just subject_id) so getStreamSubjects() can surface the Timetable
   // module's per-subject weekly period count alongside everything else this
@@ -134,8 +146,10 @@ export function createAssignmentsApi(supabase) {
 
   return {
     async getClassSubjects(classId) {
-      const ids = await getEffectiveClassSubjectIds(supabase, classId);
-      return ok(ids.map((subject_id) => ({ subject_id })));
+      return cached('getClassSubjects', classId, async () => {
+        const ids = await getEffectiveClassSubjectIds(supabase, classId);
+        return ok(ids.map((subject_id) => ({ subject_id })));
+      });
     },
 
     /** Legacy whole-class assignment — kept for any old data/callers, but no
@@ -162,6 +176,7 @@ export function createAssignmentsApi(supabase) {
         supabase.from('classes').select('name').eq('id', classId).maybeSingle(),
         supabase.from('streams').select('id', { count: 'exact', head: true }).eq('class_id', classId)
       ]);
+      clearCache();
       return ok(null, { count: subjectIds.length, streamCount: streamCount || 0, className: cls ? cls.name : '' });
     },
 
@@ -172,36 +187,38 @@ export function createAssignmentsApi(supabase) {
      *  customized yet — it's showing the class-wide default (or nothing). */
     async getStreamSubjects(streamId) {
       if (!streamId) return err('Please choose an arm.');
-      const { data: stream } = await supabase.from('streams').select('id, class_id, name').eq('id', streamId).maybeSingle();
-      if (!stream) return err('Arm not found.');
-      const { ids: subjectIds, rows: assignmentRows, inherited } = await effectiveSubjectIdsForStream(streamId, stream.class_id);
-      const assignmentBySubject = {}; assignmentRows.forEach((r) => { assignmentBySubject[r.subject_id] = r; });
+      return cached('getStreamSubjects', streamId, async () => {
+        const { data: stream } = await supabase.from('streams').select('id, class_id, name').eq('id', streamId).maybeSingle();
+        if (!stream) return err('Arm not found.');
+        const { ids: subjectIds, rows: assignmentRows, inherited } = await effectiveSubjectIdsForStream(streamId, stream.class_id);
+        const assignmentBySubject = {}; assignmentRows.forEach((r) => { assignmentBySubject[r.subject_id] = r; });
 
-      const [{ data: subjects }, { data: teacherRows }, { data: staffAll }, { data: cls }] = await Promise.all([
-        subjectIds.length ? supabase.from('subjects').select('id, name, code, level').in('id', subjectIds) : Promise.resolve({ data: [] }),
-        subjectIds.length ? supabase.from('subject_teacher_assignments').select('subject_id, staff_id').eq('stream_id', streamId).in('subject_id', subjectIds) : Promise.resolve({ data: [] }),
-        supabase.from('staff').select('id, full_name'),
-        supabase.from('classes').select('name').eq('id', stream.class_id).maybeSingle()
-      ]);
-      const staffMap = {}; (staffAll || []).forEach((s) => { staffMap[s.id] = s.full_name; });
-      const teacherBySubject = {}; (teacherRows || []).forEach((t) => { teacherBySubject[t.subject_id] = t.staff_id; });
+        const [{ data: subjects }, { data: teacherRows }, { data: staffAll }, { data: cls }] = await Promise.all([
+          subjectIds.length ? supabase.from('subjects').select('id, name, code, level').in('id', subjectIds) : Promise.resolve({ data: [] }),
+          subjectIds.length ? supabase.from('subject_teacher_assignments').select('subject_id, staff_id').eq('stream_id', streamId).in('subject_id', subjectIds) : Promise.resolve({ data: [] }),
+          supabase.from('staff').select('id, full_name'),
+          supabase.from('classes').select('name').eq('id', stream.class_id).maybeSingle()
+        ]);
+        const staffMap = {}; (staffAll || []).forEach((s) => { staffMap[s.id] = s.full_name; });
+        const teacherBySubject = {}; (teacherRows || []).forEach((t) => { teacherBySubject[t.subject_id] = t.staff_id; });
 
-      const rows = (subjects || []).map((s) => {
-        const a = assignmentBySubject[s.id] || {};
-        return {
-          subject_id: s.id, name: s.name, code: s.code, level: s.level,
-          teacher_staff_id: teacherBySubject[s.id] || null,
-          teacher_name: teacherBySubject[s.id] ? (staffMap[teacherBySubject[s.id]] || '(deleted)') : '',
-          // Round 4 §7 (Timetable module): the subject_class_assignments row
-          // this came from, plus its weekly-period config — assignment_id is
-          // what timetable.mjs's requirements.save() targets to update it.
-          assignment_id: a.id || null,
-          periods_per_week: a.periods_per_week === undefined ? null : a.periods_per_week,
-          double_periods_per_week: a.double_periods_per_week || 0
-        };
-      }).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        const rows = (subjects || []).map((s) => {
+          const a = assignmentBySubject[s.id] || {};
+          return {
+            subject_id: s.id, name: s.name, code: s.code, level: s.level,
+            teacher_staff_id: teacherBySubject[s.id] || null,
+            teacher_name: teacherBySubject[s.id] ? (staffMap[teacherBySubject[s.id]] || '(deleted)') : '',
+            // Round 4 §7 (Timetable module): the subject_class_assignments row
+            // this came from, plus its weekly-period config — assignment_id is
+            // what timetable.mjs's requirements.save() targets to update it.
+            assignment_id: a.id || null,
+            periods_per_week: a.periods_per_week === undefined ? null : a.periods_per_week,
+            double_periods_per_week: a.double_periods_per_week || 0
+          };
+        }).sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
-      return ok(rows, { inherited, class_id: stream.class_id, class_name: cls ? cls.name : '', stream_name: stream.name });
+        return ok(rows, { inherited, class_id: stream.class_id, class_name: cls ? cls.name : '', stream_name: stream.name });
+      });
     },
 
     /** Replace the full set of subjects for ONE stream in one call — this is
@@ -228,6 +245,7 @@ export function createAssignmentsApi(supabase) {
         await supabase.from('subject_class_assignments').delete().eq('id', a.id);
         await supabase.from('subject_teacher_assignments').delete().eq('stream_id', streamId).eq('subject_id', a.subject_id);
       }
+      clearCache();
       return ok(null, { count: subjectIds.length });
     },
 
@@ -238,6 +256,7 @@ export function createAssignmentsApi(supabase) {
       const { data: existing } = await supabase.from('subject_class_assignments').select('id').eq('stream_id', streamId).eq('subject_id', subjectId);
       for (const a of existing || []) await supabase.from('subject_class_assignments').delete().eq('id', a.id);
       await supabase.from('subject_teacher_assignments').delete().eq('stream_id', streamId).eq('subject_id', subjectId);
+      clearCache();
       return ok(true);
     },
 
@@ -252,16 +271,18 @@ export function createAssignmentsApi(supabase) {
       const { data: existing } = await supabase.from('subject_teacher_assignments').select('id')
         .eq('stream_id', payload.stream_id).eq('subject_id', payload.subject_id);
       for (const e of existing || []) await supabase.from('subject_teacher_assignments').delete().eq('id', e.id);
-      if (!payload.staff_id) return ok(null);
+      if (!payload.staff_id) { clearCache(); return ok(null); }
       const { error } = await supabase.from('subject_teacher_assignments').insert({
         subject_id: payload.subject_id, staff_id: payload.staff_id, class_id: payload.class_id, stream_id: payload.stream_id
       });
       if (error) return err(error.message);
+      clearCache();
       return ok(true);
     },
 
     async listTeacherAssignments(filters) {
       filters = filters || {};
+      return cached('listTeacherAssignments', filters, async () => {
       let q = supabase.from('subject_teacher_assignments').select('*');
       if (filters.staff_id) q = q.eq('staff_id', filters.staff_id);
       if (filters.class_id) q = q.eq('class_id', filters.class_id);
@@ -293,6 +314,7 @@ export function createAssignmentsApi(supabase) {
       });
       rows.sort((a, b) => String(a.class_name + a.stream_name + a.subject_name).localeCompare(String(b.class_name + b.stream_name + b.subject_name)));
       return ok(rows);
+      });
     },
 
     async saveTeacherAssignment(payload) {
@@ -315,12 +337,14 @@ export function createAssignmentsApi(supabase) {
         term_id: payload.term_id || null
       }).select().single();
       if (error) return err(error.message);
+      clearCache();
       return ok(data);
     },
 
     async deleteTeacherAssignment(id) {
       const { error } = await supabase.from('subject_teacher_assignments').delete().eq('id', id);
       if (error) return err(error.message);
+      clearCache();
       return ok(true);
     }
   };

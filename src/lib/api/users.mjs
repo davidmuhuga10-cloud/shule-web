@@ -11,22 +11,32 @@
  * (rather than importing `fetch` directly) keeps this module unit-testable
  * without a live Netlify function.
  */
-import { ok, err } from './_util.mjs';
+import { ok, err, createMemoCache, clearAllCaches } from './_util.mjs';
 
 export function createUsersApi(supabase, callAdminFunction) {
+  // Same short-window in-memory memoization pattern as the rest of the app
+  // (see _util.mjs's createMemoCache header comment for the app-wide
+  // invalidation bus this shares). Scoped per createUsersApi() CALL, not
+  // module-level — see the same note in academics.mjs/students.mjs.
+  const { cached } = createMemoCache(20000);
+  function clearCache() { clearAllCaches(); }
   return {
     async list() {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, name, email, username, phone, role, status, staff_id, student_id')
-        .order('name', { ascending: true });
-      if (error) return err(error.message);
-      return ok(data || []);
+      return cached('users.list', null, async () => {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id, name, email, username, phone, role, status, staff_id, student_id')
+          .order('name', { ascending: true });
+        if (error) return err(error.message);
+        return ok(data || []);
+      });
     },
 
     async provisionStudentLogin({ student_id, admission_no, full_name }) {
       if (!student_id || !admission_no || !full_name) return err('Missing student details for login provisioning.');
-      return callAdminFunction('create_student', { student_id, admission_no, full_name });
+      const res = await callAdminFunction('create_student', { student_id, admission_no, full_name });
+      if (res && res.ok) clearCache();
+      return res;
     },
 
     /** Provisions a whole batch of student logins in ONE Netlify function
@@ -36,12 +46,16 @@ export function createUsersApi(supabase, callAdminFunction) {
      *  feedback between chunks (see bulkUpload.mjs). */
     async provisionStudentLogins(rows) {
       if (!Array.isArray(rows) || !rows.length) return err('No students to provision.');
-      return callAdminFunction('create_students_bulk', { rows });
+      const res = await callAdminFunction('create_students_bulk', { rows });
+      if (res && res.ok) clearCache();
+      return res;
     },
 
     async provisionStaffLogin({ staff_id, full_name, role, phone }) {
       if (!staff_id || !full_name) return err('Missing staff details for login provisioning.');
-      return callAdminFunction('create_staff', { staff_id, full_name, role, phone });
+      const res = await callAdminFunction('create_staff', { staff_id, full_name, role, phone });
+      if (res && res.ok) clearCache();
+      return res;
     },
 
     /** Bulk equivalent of provisionStaffLogin — one Netlify function call
@@ -50,7 +64,9 @@ export function createUsersApi(supabase, callAdminFunction) {
      *  itself for incremental progress feedback (see staffBulkUpload.mjs). */
     async provisionStaffLogins(rows) {
       if (!Array.isArray(rows) || !rows.length) return err('No staff to provision.');
-      return callAdminFunction('create_staff_bulk', { rows });
+      const res = await callAdminFunction('create_staff_bulk', { rows });
+      if (res && res.ok) clearCache();
+      return res;
     },
 
     async resetPassword(profileId, newPassword) {
@@ -60,7 +76,9 @@ export function createUsersApi(supabase, callAdminFunction) {
 
     async setLoginStatus(profileId, status) {
       if (!profileId || (status !== 'active' && status !== 'inactive')) return err('Missing profile or invalid status.');
-      return callAdminFunction('set_login_status', { profile_id: profileId, status });
+      const res = await callAdminFunction('set_login_status', { profile_id: profileId, status });
+      if (res && res.ok) clearCache();
+      return res;
     },
 
     /** Grant or revoke admin (full) access for an existing staff login —
@@ -80,6 +98,7 @@ export function createUsersApi(supabase, callAdminFunction) {
       }
       const { error } = await supabase.from('profiles').update({ role }).eq('id', profileId);
       if (error) return err(error.message);
+      clearCache();
       return ok(true);
     }
   };

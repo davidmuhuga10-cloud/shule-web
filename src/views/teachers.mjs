@@ -51,10 +51,11 @@ async function render(root, query) {
     </div>`).join('');
 
   root.innerHTML = `
-    <div class="page-head"><div><h2>Teachers</h2><p>Your teaching staff, at a glance.</p></div>
-      <div class="spacer"></div><button class="btn" id="add-teacher">+ Add New Teacher</button></div>
-    <div class="toolbar">
-      <div class="field grow"><input id="teacher-search" placeholder="Search teachers by name…" value="${esc(query || '')}"></div>
+    <div class="page-head"><div><h2>Teachers</h2><p>Your teaching staff, at a glance.</p></div></div>
+    <div class="fin-toolbar">
+      <div class="fin-search field"><input id="teacher-search" placeholder="🔍 Search teachers by name…" value="${esc(query || '')}"></div>
+      <div class="spacer"></div>
+      <button class="btn" id="add-teacher">+ Add New Teacher</button>
     </div>
     ${filtered.length ? `<div class="teacher-grid">${cards}</div>` : `<div class="card"><div class="card-b"><div class="empty">
       <div class="e-ico">🧑‍🏫</div><h3>${teachers.length ? 'No teachers match your search' : 'No teachers yet'}</h3>

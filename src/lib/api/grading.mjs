@@ -3,7 +3,7 @@
  * Configurable grading scales and their grade bands. One scale is flagged
  * default and is used for all grading.
  */
-import { ok, err, gradeScore } from './_util.mjs';
+import { ok, err, gradeScore, createMemoCache, clearAllCaches } from './_util.mjs';
 
 /** The official 8-band CBC competency scale (Below/Approaching/Meeting/Exceeding
  *  Expectation, split 1/2) — Round 3 §8: this is now the scale every new
@@ -28,6 +28,15 @@ export const CBC_COMPETENCY_BANDS = [
 ];
 
 export function createGradingApi(supabase) {
+  // Same short-window in-memory memoization pattern as the rest of the app
+  // (see _util.mjs's createMemoCache header comment for the app-wide
+  // invalidation bus this shares). Grading bands in particular
+  // (defaultScaleBands/scaleBands) are looked up repeatedly during marks
+  // entry and report generation, so caching them is a real speed win, not
+  // just the scales list screen. Scoped per createGradingApi() CALL, not
+  // module-level — see the same note in academics.mjs/students.mjs.
+  const { cached } = createMemoCache(20000);
+  function clearCache() { clearAllCaches(); }
   const api = {
     // Perf fix: this used to fetch each scale's bands with its own round
     // trip, one scale at a time (a school with several scales meant that
@@ -35,18 +44,20 @@ export function createGradingApi(supabase) {
     // bands for every scale are now fetched together in one query and
     // grouped client-side by grading_scale_id.
     async listScales() {
-      const { data: scales, error } = await supabase.from('grading_scales').select('*');
-      if (error) return err(error.message);
-      const rows = scales || [];
-      if (rows.length) {
-        const { data: allBands } = await supabase.from('grade_ranges').select('*').in('grading_scale_id', rows.map((sc) => sc.id));
-        const bandsByScale = {};
-        (allBands || []).forEach((b) => { (bandsByScale[b.grading_scale_id] = bandsByScale[b.grading_scale_id] || []).push(b); });
-        rows.forEach((sc) => {
-          sc.bands = (bandsByScale[sc.id] || []).slice().sort((a, b) => Number(b.min_score) - Number(a.min_score));
-        });
-      }
-      return ok(rows);
+      return cached('listScales', null, async () => {
+        const { data: scales, error } = await supabase.from('grading_scales').select('*');
+        if (error) return err(error.message);
+        const rows = scales || [];
+        if (rows.length) {
+          const { data: allBands } = await supabase.from('grade_ranges').select('*').in('grading_scale_id', rows.map((sc) => sc.id));
+          const bandsByScale = {};
+          (allBands || []).forEach((b) => { (bandsByScale[b.grading_scale_id] = bandsByScale[b.grading_scale_id] || []).push(b); });
+          rows.forEach((sc) => {
+            sc.bands = (bandsByScale[sc.id] || []).slice().sort((a, b) => Number(b.min_score) - Number(a.min_score));
+          });
+        }
+        return ok(rows);
+      });
     },
 
     async saveScale(payload) {
@@ -57,12 +68,14 @@ export function createGradingApi(supabase) {
         const { data, error } = await supabase.from('grading_scales')
           .update({ name, description: payload.description || '' }).eq('id', payload.id).select().single();
         if (error) return err(error.message);
+        clearCache();
         return ok(data);
       }
       const { count } = await supabase.from('grading_scales').select('id', { count: 'exact', head: true });
       const { data, error } = await supabase.from('grading_scales')
         .insert({ name, description: payload.description || '', is_default: (count || 0) === 0 }).select().single();
       if (error) return err(error.message);
+      clearCache();
       return ok(data);
     },
 
@@ -71,6 +84,7 @@ export function createGradingApi(supabase) {
       for (const sc of scales || []) {
         await supabase.from('grading_scales').update({ is_default: String(sc.id) === String(id) }).eq('id', sc.id);
       }
+      clearCache();
       return ok(true);
     },
 
@@ -82,6 +96,7 @@ export function createGradingApi(supabase) {
       // grade_ranges cascade-delete automatically (ON DELETE CASCADE in schema.sql).
       const { error } = await supabase.from('grading_scales').delete().eq('id', id);
       if (error) return err(error.message);
+      clearCache();
       return ok(true);
     },
 
@@ -102,16 +117,19 @@ export function createGradingApi(supabase) {
       if (payload.id) {
         const { data, error } = await supabase.from('grade_ranges').update(rec).eq('id', payload.id).select().single();
         if (error) return err(error.message);
+        clearCache();
         return ok(data);
       }
       const { data, error } = await supabase.from('grade_ranges').insert(rec).select().single();
       if (error) return err(error.message);
+      clearCache();
       return ok(data);
     },
 
     async deleteBand(id) {
       const { error } = await supabase.from('grade_ranges').delete().eq('id', id);
       if (error) return err(error.message);
+      clearCache();
       return ok(true);
     },
 
@@ -151,10 +169,13 @@ export function createGradingApi(supabase) {
 
     /** The default scale's bands — used internally by results.mjs to grade a score. */
     async defaultScaleBands() {
-      const { data: scale } = await supabase.from('grading_scales').select('id').eq('is_default', true).maybeSingle();
-      if (!scale) return [];
-      const { data: bands } = await supabase.from('grade_ranges').select('*').eq('grading_scale_id', scale.id);
-      return bands || [];
+      const res = await cached('defaultScaleBands', null, async () => {
+        const { data: scale } = await supabase.from('grading_scales').select('id').eq('is_default', true).maybeSingle();
+        if (!scale) return ok([]);
+        const { data: bands } = await supabase.from('grade_ranges').select('*').eq('grading_scale_id', scale.id);
+        return ok(bands || []);
+      });
+      return res.ok ? res.data : [];
     },
 
     /** A SPECIFIC scale's bands, by id — brief Step 10's "Overall Grading
@@ -165,8 +186,11 @@ export function createGradingApi(supabase) {
      *  `exam_classes.grading_scale_id` straight through without a null check. */
     async scaleBands(scaleId) {
       if (!scaleId) return api.defaultScaleBands();
-      const { data: bands } = await supabase.from('grade_ranges').select('*').eq('grading_scale_id', scaleId);
-      return bands || [];
+      const res = await cached('scaleBands', scaleId, async () => {
+        const { data: bands } = await supabase.from('grade_ranges').select('*').eq('grading_scale_id', scaleId);
+        return ok(bands || []);
+      });
+      return res.ok ? res.data : [];
     },
 
     gradeScore

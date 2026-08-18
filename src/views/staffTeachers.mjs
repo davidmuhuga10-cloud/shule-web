@@ -25,7 +25,7 @@ export async function viewStaffHub(root) {
 
   root.innerHTML = `
     <div class="page-head"><div><h2>Teachers and Staff</h2><p>Teachers and other staff members, in one place.</p></div></div>
-    <div class="tabs staff-teachers-tabs">
+    <div class="fin-tabs">
       ${TABS.map((t) => `<button data-tab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</button>`).join('')}
     </div>
     <div id="staff-teachers-tab-body"></div>

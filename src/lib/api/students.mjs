@@ -1,7 +1,24 @@
 /**
  * students.mjs — Supabase equivalent of Students.gs.
+ *
+ * Caching: same short-window in-memory memoization pattern as the Finance
+ * module (see finance.mjs's header comment for the full reasoning) — the
+ * read-heavy calls here (list/search/get/existingAdmissionNumbers) are
+ * memoized for CACHE_MS, keyed by their arguments, so re-opening Students,
+ * flipping between classes, or re-searching the same query within a few
+ * seconds doesn't re-hit the database.
+ *
+ * This shares the app-wide invalidation bus (_util.mjs's createMemoCache/
+ * clearAllCaches) — every write below calls clearCache(), which clears
+ * every OTHER cached module too (Academics, Results, ...), not just this
+ * one. That's deliberate: several of THEIR cached reads (Exam Desk's board,
+ * broadsheets, the Classes screen's per-class counts) read the students
+ * table too, and this module is the only one that ever writes it — a
+ * narrower, students-only clear left exactly that kind of cross-module
+ * staleness bug caught during this round's testing (a newly-enrolled
+ * student not showing up on the exam board for up to 20 seconds).
  */
-import { ok, err, byAdmissionNo } from './_util.mjs';
+import { ok, err, byAdmissionNo, createMemoCache, clearAllCaches } from './_util.mjs';
 
 const VALID_GENDERS = ['Male', 'Female'];
 export const LEAVING_REASONS = ['transferred', 'graduated', 'withdrawn', 'other'];
@@ -27,6 +44,13 @@ async function classHasStreams(supabase, classId) {
 }
 
 export function createStudentsApi(supabase) {
+  // Scoped per createStudentsApi() CALL, not module-level — production only
+  // ever calls this once (see index.mjs), so behaviour is identical, but it
+  // also means each test's fresh mock client gets its own cache instead of
+  // sharing one across every test case in the file. See _util.mjs's
+  // createMemoCache header comment for the app-wide invalidation bus.
+  const { cached } = createMemoCache(20000);
+  function clearCache() { clearAllCaches(); }
   async function withNames(rows) {
     const classIds = [...new Set(rows.map((r) => r.class_id).filter(Boolean))];
     const streamIds = [...new Set(rows.map((r) => r.stream_id).filter(Boolean))];
@@ -42,15 +66,17 @@ export function createStudentsApi(supabase) {
   return {
     async list(filters) {
       filters = filters || {};
-      let q = supabase.from('students').select('*');
-      if (filters.class_id) q = q.eq('class_id', filters.class_id);
-      if (filters.stream_id) q = q.eq('stream_id', filters.stream_id);
-      q = q.eq('status', filters.status || 'active');
-      const { data, error } = await q;
-      if (error) return err(error.message);
-      const withN = await withNames(data || []);
-      withN.sort(byAdmissionNo);
-      return ok(withN);
+      return cached('students.list', filters, async () => {
+        let q = supabase.from('students').select('*');
+        if (filters.class_id) q = q.eq('class_id', filters.class_id);
+        if (filters.stream_id) q = q.eq('stream_id', filters.stream_id);
+        q = q.eq('status', filters.status || 'active');
+        const { data, error } = await q;
+        if (error) return err(error.message);
+        const withN = await withNames(data || []);
+        withN.sort(byAdmissionNo);
+        return ok(withN);
+      });
     },
 
     /** Search ACROSS every active student (ignoring any class/stream filter
@@ -62,23 +88,27 @@ export function createStudentsApi(supabase) {
     async search(query) {
       query = String(query || '').trim().toLowerCase();
       if (!query) return ok([]);
-      const { data, error } = await supabase.from('students').select('*').eq('status', 'active');
-      if (error) return err(error.message);
-      const matched = (data || []).filter((s) =>
-        String(s.admission_no || '').toLowerCase().indexOf(query) !== -1 ||
-        String(s.full_name || '').toLowerCase().indexOf(query) !== -1
-      );
-      const withN = await withNames(matched);
-      withN.sort(byAdmissionNo);
-      return ok(withN);
+      return cached('students.search', query, async () => {
+        const { data, error } = await supabase.from('students').select('*').eq('status', 'active');
+        if (error) return err(error.message);
+        const matched = (data || []).filter((s) =>
+          String(s.admission_no || '').toLowerCase().indexOf(query) !== -1 ||
+          String(s.full_name || '').toLowerCase().indexOf(query) !== -1
+        );
+        const withN = await withNames(matched);
+        withN.sort(byAdmissionNo);
+        return ok(withN);
+      });
     },
 
     async get(id) {
-      const { data, error } = await supabase.from('students').select('*').eq('id', id).maybeSingle();
-      if (error) return err(error.message);
-      if (!data) return err('Student not found.');
-      const [withN] = await withNames([data]);
-      return ok(withN);
+      return cached('students.get', id, async () => {
+        const { data, error } = await supabase.from('students').select('*').eq('id', id).maybeSingle();
+        if (error) return err(error.message);
+        if (!data) return err('Student not found.');
+        const [withN] = await withNames([data]);
+        return ok(withN);
+      });
     },
 
     /** Round 3 §2: lets the bulk-upload PREVIEW step catch a duplicate
@@ -88,9 +118,11 @@ export function createStudentsApi(supabase) {
      *  check), since an admission number stays reserved even for an
      *  archived/left student. */
     async existingAdmissionNumbers() {
-      const { data, error } = await supabase.from('students').select('admission_no');
-      if (error) return err(error.message);
-      return ok((data || []).map((r) => String(r.admission_no || '').trim().toLowerCase()).filter(Boolean));
+      return cached('students.existingAdmissionNumbers', null, async () => {
+        const { data, error } = await supabase.from('students').select('admission_no');
+        if (error) return err(error.message);
+        return ok((data || []).map((r) => String(r.admission_no || '').trim().toLowerCase()).filter(Boolean));
+      });
     },
 
     async save(payload) {
@@ -134,10 +166,12 @@ export function createStudentsApi(supabase) {
       if (payload.id) {
         const { data, error } = await supabase.from('students').update(rec).eq('id', payload.id).select().single();
         if (error) return err(error.message);
+        clearCache();
         return ok(data);
       }
       const { data, error } = await supabase.from('students').insert(rec).select().single();
       if (error) return err(error.message);
+      clearCache();
       return ok(data);
     },
 
@@ -150,6 +184,7 @@ export function createStudentsApi(supabase) {
     async remove(id) {
       const { error } = await supabase.from('students').delete().eq('id', id);
       if (error) return err(error.message);
+      clearCache();
       return ok(true);
     },
 
@@ -170,6 +205,7 @@ export function createStudentsApi(supabase) {
       };
       const { data, error } = await supabase.from('students').update(rec).eq('id', id).select().single();
       if (error) return err(error.message);
+      clearCache();
       return ok(data);
     },
 
@@ -179,6 +215,7 @@ export function createStudentsApi(supabase) {
       const { data, error } = await supabase.from('students')
         .update({ status: 'active', left_reason: null, left_date: null, left_notes: null }).eq('id', id).select().single();
       if (error) return err(error.message);
+      clearCache();
       return ok(data);
     },
 
@@ -193,6 +230,7 @@ export function createStudentsApi(supabase) {
       const rec = { class_id: payload.class_id, stream_id: payload.stream_id || null };
       const { error } = await supabase.from('students').update(rec).in('id', ids);
       if (error) return err(error.message);
+      clearCache();
       return ok(null, { moved: ids.length });
     },
 
@@ -291,6 +329,7 @@ export function createStudentsApi(supabase) {
       }
       // createdRows lets the caller provision a login for each new student
       // (see netlify/functions/README.md) without a second round-trip.
+      if (created) clearCache();
       return ok(null, { created, createdRows, skipped, total: rows.length });
     }
   };

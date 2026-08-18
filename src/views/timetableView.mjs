@@ -90,7 +90,7 @@ function render(root, state) {
         <div class="field"></div>
       </div>
     </div>
-    <div class="tabs no-print" style="margin-bottom:16px">
+    <div class="fin-tabs no-print">
       <button data-mode="stream" class="${sel.mode === 'stream' ? 'active' : ''}">By Class / Arm</button>
       <button data-mode="teacher" class="${sel.mode === 'teacher' ? 'active' : ''}">By Teacher</button>
     </div>

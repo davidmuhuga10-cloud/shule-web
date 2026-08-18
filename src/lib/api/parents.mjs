@@ -17,26 +17,35 @@
  * service role: RLS's parent_links_admin_write policy already lets a signed-in
  * admin insert directly, so that goes straight through the plain client.
  */
-import { ok, err, byAdmissionNo, indexById } from './_util.mjs';
+import { ok, err, byAdmissionNo, indexById, createMemoCache, clearAllCaches } from './_util.mjs';
 
 export function createParentsApi(supabase, callAdminFunction) {
+  // Same short-window in-memory memoization pattern as the rest of the app
+  // (see _util.mjs's createMemoCache header comment for the app-wide
+  // invalidation bus this shares). Scoped per createParentsApi() CALL, not
+  // module-level — see the same note in academics.mjs/students.mjs.
+  const { cached } = createMemoCache(20000);
+  function clearCache() { clearAllCaches(); }
   return {
     // ---- Admin ----
 
     /** All parent accounts (profiles with role='parent') in this school. */
     async list() {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, name, email, status, created_at')
-        .eq('role', 'parent')
-        .order('name', { ascending: true });
-      if (error) return err(error.message);
-      return ok(data || []);
+      return cached('parents.list', null, async () => {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id, name, email, status, created_at')
+          .eq('role', 'parent')
+          .order('name', { ascending: true });
+        if (error) return err(error.message);
+        return ok(data || []);
+      });
     },
 
     /** Every parent<->student link in this school, with parent + student
      *  names attached, for the admin's "Parent Accounts" management view. */
     async links() {
+      return cached('parents.links', null, async () => {
       const { data: rows, error } = await supabase
         .from('parent_links')
         .select('id, parent_profile_id, student_id, relationship, created_at')
@@ -60,6 +69,7 @@ export function createParentsApi(supabase, callAdminFunction) {
         student_name: studentMap[r.student_id] ? studentMap[r.student_id].full_name : '(unknown)',
         admission_no: studentMap[r.student_id] ? studentMap[r.student_id].admission_no : ''
       })));
+      });
     },
 
     /** Create a parent's login. payload: { full_name, phone, student_id } —
@@ -67,7 +77,9 @@ export function createParentsApi(supabase, callAdminFunction) {
      *  that child's admission number (not a generic default password). */
     async provision({ full_name, phone, student_id }) {
       if (!full_name || !phone || !student_id) return err('Parent name, phone number, and a child to link are required.');
-      return callAdminFunction('create_parent', { full_name, phone, student_id });
+      const res = await callAdminFunction('create_parent', { full_name, phone, student_id });
+      if (res && res.ok) clearCache();
+      return res;
     },
 
     /** Link an already-provisioned parent account to one of their children.
@@ -85,6 +97,7 @@ export function createParentsApi(supabase, callAdminFunction) {
         }
         return err(error.message);
       }
+      clearCache();
       return ok(data);
     },
 
@@ -92,6 +105,7 @@ export function createParentsApi(supabase, callAdminFunction) {
       if (!linkId) return err('Missing link.');
       const { error } = await supabase.from('parent_links').delete().eq('id', linkId);
       if (error) return err(error.message);
+      clearCache();
       return ok(true);
     },
 
@@ -100,30 +114,36 @@ export function createParentsApi(supabase, callAdminFunction) {
     /** The signed-in parent's own children — RLS (parent_links_self_read)
      *  already limits the parent_links row this returns to their own. */
     async myChildren() {
-      const { data: links, error } = await supabase.from('parent_links').select('student_id, relationship');
-      if (error) return err(error.message);
-      const studentIds = [...new Set((links || []).map((l) => l.student_id))];
-      if (!studentIds.length) return ok([]);
+      // Cached like classes.list()/streams.list() in academics.mjs, which
+      // read the students table the same way — safe because ANY write to
+      // students (via students.mjs) calls clearAllCaches(), which clears
+      // this too. See _util.mjs's createMemoCache header comment.
+      return cached('parents.myChildren', null, async () => {
+        const { data: links, error } = await supabase.from('parent_links').select('student_id, relationship');
+        if (error) return err(error.message);
+        const studentIds = [...new Set((links || []).map((l) => l.student_id))];
+        if (!studentIds.length) return ok([]);
 
-      const { data: students, error: sErr } = await supabase
-        .from('students')
-        .select('id, admission_no, full_name, class_id, stream_id, guardian_name, guardian_contact')
-        .in('id', studentIds);
-      if (sErr) return err(sErr.message);
+        const { data: students, error: sErr } = await supabase
+          .from('students')
+          .select('id, admission_no, full_name, class_id, stream_id, guardian_name, guardian_contact')
+          .in('id', studentIds);
+        if (sErr) return err(sErr.message);
 
-      const relMap = {}; (links || []).forEach((l) => { relMap[l.student_id] = l.relationship || ''; });
+        const relMap = {}; (links || []).forEach((l) => { relMap[l.student_id] = l.relationship || ''; });
 
-      const classIds = [...new Set((students || []).map((s) => s.class_id).filter(Boolean))];
-      const { data: classes } = classIds.length
-        ? await supabase.from('classes').select('id, name').in('id', classIds)
-        : { data: [] };
-      const classMap = {}; (classes || []).forEach((c) => { classMap[c.id] = c.name; });
+        const classIds = [...new Set((students || []).map((s) => s.class_id).filter(Boolean))];
+        const { data: classes } = classIds.length
+          ? await supabase.from('classes').select('id, name').in('id', classIds)
+          : { data: [] };
+        const classMap = {}; (classes || []).forEach((c) => { classMap[c.id] = c.name; });
 
-      const rows = (students || []).map((s) => ({
-        ...s, relationship: relMap[s.id] || '', class_name: classMap[s.class_id] || ''
-      }));
-      rows.sort(byAdmissionNo);
-      return ok(rows);
+        const rows = (students || []).map((s) => ({
+          ...s, relationship: relMap[s.id] || '', class_name: classMap[s.class_id] || ''
+        }));
+        rows.sort(byAdmissionNo);
+        return ok(rows);
+      });
     }
   };
 }

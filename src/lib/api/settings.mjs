@@ -30,21 +30,37 @@
  *     means true too" rule as show_papers_separately above — see
  *     broadsheet.mjs's showAchievementLevels().
  */
-import { ok, err, titleCase } from './_util.mjs';
+import { ok, err, titleCase, createMemoCache, clearAllCaches } from './_util.mjs';
 
 export function createSettingsApi(supabase) {
+  // Same short-window in-memory memoization pattern as finance.mjs/
+  // students.mjs (see finance.mjs's header comment, and _util.mjs's
+  // createMemoCache header comment for why this shares the app-wide
+  // invalidation bus) — settings.get() is read on almost every screen
+  // (print headers, receipts, the dashboard greeting), so memoizing it here
+  // is one of the highest-traffic wins in the app.
+  //
+  // Scoped per createSettingsApi() CALL, not module-level — production only
+  // ever calls this once (see index.mjs), so behaviour is identical, but it
+  // also means each test's fresh mock client gets its own cache instead of
+  // sharing one across every test case in the file.
+  const { cached: cachedRaw } = createMemoCache(20000);
+  async function cached(key, fn) { return cachedRaw(key, null, fn); }
+  function clearCache() { clearAllCaches(); }
   return {
     async get() {
-      const { data, error } = await supabase.from('settings').select('*');
-      if (error) return err(error.message);
-      const map = {};
-      (data || []).forEach((r) => { map[r.key] = r.value; });
-      // Brief: "Capitalize school name to always even when entered in small
-      // letter" — normalized here (read time, not save time) so it's
-      // corrected everywhere the name is shown, including names that were
-      // already saved in lowercase before this existed.
-      if (map.school_name) map.school_name = titleCase(map.school_name);
-      return ok(map);
+      return cached('settings.get', async () => {
+        const { data, error } = await supabase.from('settings').select('*');
+        if (error) return err(error.message);
+        const map = {};
+        (data || []).forEach((r) => { map[r.key] = r.value; });
+        // Brief: "Capitalize school name to always even when entered in small
+        // letter" — normalized here (read time, not save time) so it's
+        // corrected everywhere the name is shown, including names that were
+        // already saved in lowercase before this existed.
+        if (map.school_name) map.school_name = titleCase(map.school_name);
+        return ok(map);
+      });
     },
 
     // System Fixes brief §12/§13 (performance): this used to be one SELECT
@@ -71,6 +87,7 @@ export function createSettingsApi(supabase) {
       const results = await Promise.all(writes);
       const failed = results.find((r) => r.error);
       if (failed) return err(failed.error.message);
+      clearCache();
       return ok(true);
     }
   };

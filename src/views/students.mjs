@@ -71,7 +71,7 @@ async function renderHome(root, classes, view) {
       <div class="spacer"></div>
       ${!isArchived ? `<button class="btn secondary" id="move-students">🔀 Move students</button>` : ''}
       <button class="btn" id="add-student">+ Add student</button></div>
-    <div class="tabs" style="max-width:320px">
+    <div class="fin-tabs">
       <button data-view="active" class="${!isArchived ? 'active' : ''}">Active</button>
       <button data-view="archived" class="${isArchived ? 'active' : ''}">Left / Archived</button>
     </div>
@@ -195,9 +195,14 @@ async function renderClassStudents(root, classes, cls) {
       <div class="page-head">
         <div><a class="back-link" id="back-to-students">← Students</a><h2>${esc(cls.name)}</h2><p>All active students in this class — filter by arm or gender, print, or download as Excel.</p></div>
       </div>
-      <div class="toolbar">
-        <select id="f-stream" class="grow">${streams.length ? `<option value="">All arms</option>${options(streams, 'id', 'name', filters.stream_id)}` : '<option value="">No arms on this class</option>'}</select>
-        <select id="f-gender"><option value="">All genders</option><option value="Male" ${filters.gender === 'Male' ? 'selected' : ''}>Male</option><option value="Female" ${filters.gender === 'Female' ? 'selected' : ''}>Female</option></select>
+      <div class="fin-toolbar">
+        <div class="fin-filters">
+          <div class="field"><label>Arm</label>
+            <select id="f-stream">${streams.length ? `<option value="">All arms</option>${options(streams, 'id', 'name', filters.stream_id)}` : '<option value="">No arms on this class</option>'}</select></div>
+          <div class="field"><label>Gender</label>
+            <select id="f-gender"><option value="">All genders</option><option value="Male" ${filters.gender === 'Male' ? 'selected' : ''}>Male</option><option value="Female" ${filters.gender === 'Female' ? 'selected' : ''}>Female</option></select></div>
+        </div>
+        <div class="spacer"></div>
         <button class="btn secondary" id="print-class">🖨️ Print</button>
         <button class="btn secondary" id="download-class">⬇️ Download Excel</button>
       </div>

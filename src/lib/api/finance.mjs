@@ -16,23 +16,21 @@
  * same aggregate query, but a `clearCache()` call after anything that
  * changes money (record/reverse/transfer collection, generate invoices,
  * issue a note) guarantees the next read is never stale.
+ *
+ * This now shares the app-wide invalidation bus (see _util.mjs's
+ * createMemoCache/clearAllCaches header comment) — clearCache() below
+ * clears every OTHER cached module too, not just this one, since e.g. a
+ * Finance write can affect a student's balance shown elsewhere.
  */
-import { ok, err, fromResult } from './_util.mjs';
-
-const CACHE_MS = 20000;
-const cache = new Map();
-function cacheKey(name, args) { return name + '|' + JSON.stringify(args || []); }
-async function cached(name, args, fn) {
-  const key = cacheKey(name, args);
-  const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
-  const value = await fn();
-  if (value && value.ok) cache.set(key, { at: Date.now(), value });
-  return value;
-}
-function clearCache() { cache.clear(); }
+import { ok, err, fromResult, createMemoCache, clearAllCaches } from './_util.mjs';
 
 export function createFinanceApi(supabase) {
+  // Scoped per createFinanceApi() CALL, not module-level — production only
+  // ever calls this once (see index.mjs), so behaviour is identical, but it
+  // also means each test's fresh mock client gets its own cache instead of
+  // sharing one across every test case in the file.
+  const { cached } = createMemoCache(20000);
+  function clearCache() { clearAllCaches(); }
   const voteHeads = {
     async list() {
       const { data, error } = await supabase.from('finance_vote_heads').select('*').order('priority').order('name');

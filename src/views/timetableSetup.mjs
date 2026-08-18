@@ -39,7 +39,7 @@ export async function viewTimetableSetup(root) {
 
 function render(root, activeSub) {
   root.innerHTML = `
-    <div class="tabs" style="margin-bottom:16px">
+    <div class="fin-tabs">
       ${SUB_TABS.map((t) => `<button data-sub="${t.key}" class="${t.key === activeSub ? 'active' : ''}">${t.label}</button>`).join('')}
     </div>
     <div id="tt-setup-body"></div>

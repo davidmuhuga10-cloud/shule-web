@@ -13,7 +13,7 @@
  * rationale and Timetable_Module_Research_and_Design_Proposal.docx for the
  * research this is built on.
  */
-import { ok, err } from './_util.mjs';
+import { ok, err, createMemoCache, clearAllCaches } from './_util.mjs';
 import { generateTimetable, checkCapacity, DEFAULT_PERIODS_PER_WEEK, CONSTRAINT_TYPES } from '../timetable/generate.mjs';
 
 export const TIMETABLE_DAYS_DEFAULT = [1, 2, 3, 4, 5];
@@ -128,12 +128,20 @@ async function buildGenerateInput(supabase, periodsApi, daysApi, constraintsApi)
 }
 
 export function createTimetableApi(supabase, settingsApi) {
+  // Same short-window in-memory memoization pattern as the rest of the app
+  // (see _util.mjs's createMemoCache header comment for the app-wide
+  // invalidation bus this shares). Scoped per createTimetableApi() CALL,
+  // not module-level — see the same note in academics.mjs/students.mjs.
+  const { cached } = createMemoCache(20000);
+  function clearCache() { clearAllCaches(); }
   return {
     rooms: {
       async list() {
-        const { data, error } = await supabase.from('rooms').select('*').order('name', { ascending: true });
-        if (error) return err(error.message);
-        return ok(data || []);
+        return cached('rooms.list', null, async () => {
+          const { data, error } = await supabase.from('rooms').select('*').order('name', { ascending: true });
+          if (error) return err(error.message);
+          return ok(data || []);
+        });
       },
       async save(payload) {
         payload = payload || {};
@@ -143,10 +151,12 @@ export function createTimetableApi(supabase, settingsApi) {
         if (payload.id) {
           const { data, error } = await supabase.from('rooms').update(rec).eq('id', payload.id).select().single();
           if (error) return err(error.message.includes('duplicate') ? `A room named "${name}" already exists.` : error.message);
+          clearCache();
           return ok(data);
         }
         const { data, error } = await supabase.from('rooms').insert(rec).select().single();
         if (error) return err(error.message.includes('duplicate') ? `A room named "${name}" already exists.` : error.message);
+        clearCache();
         return ok(data);
       },
       async remove(id) {
@@ -155,15 +165,18 @@ export function createTimetableApi(supabase, settingsApi) {
         // it, rather than blocking the delete or cascading data loss.
         const { error } = await supabase.from('rooms').delete().eq('id', id);
         if (error) return err(error.message);
+        clearCache();
         return ok(true);
       }
     },
 
     periods: {
       async list() {
-        const { data, error } = await supabase.from('timetable_periods').select('*').order('period_index', { ascending: true });
-        if (error) return err(error.message);
-        return ok(data || []);
+        return cached('periods.list', null, async () => {
+          const { data, error } = await supabase.from('timetable_periods').select('*').order('period_index', { ascending: true });
+          if (error) return err(error.message);
+          return ok(data || []);
+        });
       },
       /** Replace-all, same convention as every other "the whole set is the
        *  unit of change" save in this codebase (setStreamSubjects, etc.) —
@@ -186,6 +199,7 @@ export function createTimetableApi(supabase, settingsApi) {
         if (delError) return err(delError.message);
         const { error } = await supabase.from('timetable_periods').insert(rows);
         if (error) return err(error.message);
+        clearCache();
         return ok(true);
       }
     },
@@ -328,25 +342,27 @@ export function createTimetableApi(supabase, settingsApi) {
       async list(filters) {
         filters = filters || {};
         if (!filters.academic_year_id || !filters.term_id) return err('Missing academic year or term.');
-        let q = supabase.from('timetable_entries')
-          .select('*, subjects(name), staff(full_name), streams(name), classes(name), rooms(name)')
-          .eq('academic_year_id', filters.academic_year_id).eq('term_id', filters.term_id);
-        if (filters.class_id) q = q.eq('class_id', filters.class_id);
-        if (filters.stream_id) q = q.eq('stream_id', filters.stream_id);
-        if (filters.staff_id) q = q.eq('staff_id', filters.staff_id);
-        if (filters.version_number) q = q.eq('version_number', Number(filters.version_number));
-        else q = q.eq('is_active', true);
-        const { data, error } = await q;
-        if (error) return err(error.message);
-        const rows = (data || []).map((r) => ({
-          ...r,
-          subject_name: r.subjects ? r.subjects.name : '',
-          teacher_name: r.staff ? r.staff.full_name : '',
-          stream_name: r.streams ? r.streams.name : '',
-          class_name: r.classes ? r.classes.name : '',
-          room_name: r.rooms ? r.rooms.name : ''
-        }));
-        return ok(rows);
+        return cached('entries.list', filters, async () => {
+          let q = supabase.from('timetable_entries')
+            .select('*, subjects(name), staff(full_name), streams(name), classes(name), rooms(name)')
+            .eq('academic_year_id', filters.academic_year_id).eq('term_id', filters.term_id);
+          if (filters.class_id) q = q.eq('class_id', filters.class_id);
+          if (filters.stream_id) q = q.eq('stream_id', filters.stream_id);
+          if (filters.staff_id) q = q.eq('staff_id', filters.staff_id);
+          if (filters.version_number) q = q.eq('version_number', Number(filters.version_number));
+          else q = q.eq('is_active', true);
+          const { data, error } = await q;
+          if (error) return err(error.message);
+          const rows = (data || []).map((r) => ({
+            ...r,
+            subject_name: r.subjects ? r.subjects.name : '',
+            teacher_name: r.staff ? r.staff.full_name : '',
+            stream_name: r.streams ? r.streams.name : '',
+            class_name: r.classes ? r.classes.name : '',
+            room_name: r.rooms ? r.rooms.name : ''
+          }));
+          return ok(rows);
+        });
       },
 
       /** Manual single-cell edit (the Timetable screen's "click a slot" edit
@@ -392,12 +408,14 @@ export function createTimetableApi(supabase, settingsApi) {
         if (payload.id) {
           const { error } = await supabase.from('timetable_entries').update(rec).eq('id', payload.id);
           if (error) return err(error.message);
+          clearCache();
           return ok(true);
         }
         rec.version_number = await activeVersionNumber(supabase, payload.academic_year_id, payload.term_id);
         rec.is_active = true;
         const { error } = await supabase.from('timetable_entries').insert(rec);
         if (error) return err(error.message);
+        clearCache();
         return ok(true);
       },
 
@@ -405,6 +423,7 @@ export function createTimetableApi(supabase, settingsApi) {
         if (!id) return err('Missing entry.');
         const { error } = await supabase.from('timetable_entries').delete().eq('id', id);
         if (error) return err(error.message);
+        clearCache();
         return ok(true);
       },
 
@@ -416,6 +435,7 @@ export function createTimetableApi(supabase, settingsApi) {
         if (!academicYearId || !termId) return err('Missing academic year or term.');
         const { error } = await supabase.from('timetable_entries').delete().eq('academic_year_id', academicYearId).eq('term_id', termId);
         if (error) return err(error.message);
+        clearCache();
         return ok(true);
       },
 
@@ -461,6 +481,7 @@ export function createTimetableApi(supabase, settingsApi) {
         const { error: actErr } = await supabase.from('timetable_entries').update({ is_active: true })
           .eq('academic_year_id', academicYearId).eq('term_id', termId).eq('version_number', v);
         if (actErr) return err(actErr.message);
+        clearCache();
         return ok(true);
       }
     },
@@ -567,6 +588,7 @@ export function createTimetableApi(supabase, settingsApi) {
         stream_name: streamNameById[u.stream_id] || ''
       }));
 
+      clearCache();
       return ok({ placed: entries.length, unresolved: unresolvedNamed });
     },
 

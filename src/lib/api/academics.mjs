@@ -8,7 +8,7 @@
  * before, to keep view code familiar.
  * ----------------------------------------------------------------------------
  */
-import { ok, err, fromResult } from './_util.mjs';
+import { ok, err, fromResult, createMemoCache, clearAllCaches } from './_util.mjs';
 import { CBC_LEVELS, STANDARD_CLASS_LEVELS, CBC_SUBJECTS, levelBucketForClassName } from './cbcDefaults.mjs';
 import { seedDefaultSubjectsForNewStream } from './assignments.mjs';
 import { plainNameError } from '../validators.mjs';
@@ -22,11 +22,29 @@ import { plainNameError } from '../validators.mjs';
 export { CBC_LEVELS, STANDARD_CLASS_LEVELS, CBC_SUBJECTS };
 
 export function createAcademicsApi(supabase) {
+  // Same short-window in-memory memoization pattern as finance.mjs/
+  // students.mjs (see _util.mjs's createMemoCache header comment for the
+  // app-wide invalidation bus this shares) — Academic Years/Terms/Classes/
+  // Streams/Subjects are read on nearly every screen in the app (every
+  // filter dropdown, every "choose a class" picker), so this is one of the
+  // highest-traffic caching wins available. clearCache() below clears every
+  // OTHER cached module too — deliberate, since e.g. classes.list()/
+  // streams.list() read student counts from the students table, which only
+  // students.mjs writes to.
+  //
+  // Scoped per createAcademicsApi() CALL (not module-level) — production
+  // only ever calls this once (see index.mjs), so behaviour is identical,
+  // but it also means each test's fresh mock client gets its own cache
+  // instead of accidentally sharing one across every test in the file.
+  const { cached } = createMemoCache(20000);
+  function clearCache() { clearAllCaches(); }
   return {
     academicYears: {
       async list() {
-        const res = await supabase.from('academic_years').select('*').order('name', { ascending: false });
-        return fromResult(res);
+        return cached('academicYears.list', null, async () => {
+          const res = await supabase.from('academic_years').select('*').order('name', { ascending: false });
+          return fromResult(res);
+        });
       },
       async save(payload) {
         const name = String((payload || {}).name || '').trim();
@@ -52,6 +70,7 @@ export function createAcademicsApi(supabase) {
         if (rec.status === 'active') {
           await supabase.from('academic_years').update({ status: 'archived' }).neq('id', saved.id).eq('status', 'active');
         }
+        clearCache();
         return ok(saved);
       },
       async remove(id) {
@@ -59,21 +78,24 @@ export function createAcademicsApi(supabase) {
         if (count > 0) return err('This academic year has terms linked to it. Delete those terms first.');
         const { error } = await supabase.from('academic_years').delete().eq('id', id);
         if (error) return err(error.message);
+        clearCache();
         return ok(true);
       }
     },
 
     terms: {
       async list(academicYearId) {
-        let q = supabase.from('terms').select('*, academic_years(name)');
-        if (academicYearId) q = q.eq('academic_year_id', academicYearId);
-        const { data, error } = await q.order('name', { ascending: true });
-        if (error) return err(error.message);
-        const rows = (data || []).map((t) => ({
-          ...t,
-          academic_year_name: t.academic_years ? t.academic_years.name : ''
-        }));
-        return ok(rows);
+        return cached('terms.list', academicYearId, async () => {
+          let q = supabase.from('terms').select('*, academic_years(name)');
+          if (academicYearId) q = q.eq('academic_year_id', academicYearId);
+          const { data, error } = await q.order('name', { ascending: true });
+          if (error) return err(error.message);
+          const rows = (data || []).map((t) => ({
+            ...t,
+            academic_year_name: t.academic_years ? t.academic_years.name : ''
+          }));
+          return ok(rows);
+        });
       },
       async save(payload) {
         payload = payload || {};
@@ -102,11 +124,13 @@ export function createAcademicsApi(supabase) {
         if (rec.status === 'active') {
           await supabase.from('terms').update({ status: 'archived' }).neq('id', saved.id).eq('status', 'active');
         }
+        clearCache();
         return ok(saved);
       },
       async remove(id) {
         const { error } = await supabase.from('terms').delete().eq('id', id);
         if (error) return err(error.message);
+        clearCache();
         return ok(true);
       }
     },
@@ -121,28 +145,30 @@ export function createAcademicsApi(supabase) {
       // in the same single Promise.all as the classes themselves, and counts
       // are derived client-side — one round trip regardless of class count.
       async list() {
-        const { data, error } = await supabase.from('classes').select('*');
-        if (error) return err(error.message);
-        const rows = (data || []).slice().sort((a, b) => {
-          const ao = Number(a.level_order) || 0, bo = Number(b.level_order) || 0;
-          if (ao !== bo) return ao - bo;
-          return String(a.name).localeCompare(String(b.name));
+        return cached('classes.list', null, async () => {
+          const { data, error } = await supabase.from('classes').select('*');
+          if (error) return err(error.message);
+          const rows = (data || []).slice().sort((a, b) => {
+            const ao = Number(a.level_order) || 0, bo = Number(b.level_order) || 0;
+            if (ao !== bo) return ao - bo;
+            return String(a.name).localeCompare(String(b.name));
+          });
+          if (!rows.length) return ok(rows);
+          const classIds = rows.map((c) => c.id);
+          const [{ data: streams }, { data: students }] = await Promise.all([
+            supabase.from('streams').select('id, class_id').in('class_id', classIds),
+            supabase.from('students').select('id, class_id').in('class_id', classIds)
+          ]);
+          const streamCountByClass = {};
+          (streams || []).forEach((s) => { streamCountByClass[s.class_id] = (streamCountByClass[s.class_id] || 0) + 1; });
+          const studentCountByClass = {};
+          (students || []).forEach((s) => { studentCountByClass[s.class_id] = (studentCountByClass[s.class_id] || 0) + 1; });
+          rows.forEach((c) => {
+            c.stream_count = streamCountByClass[c.id] || 0;
+            c.student_count = studentCountByClass[c.id] || 0;
+          });
+          return ok(rows);
         });
-        if (!rows.length) return ok(rows);
-        const classIds = rows.map((c) => c.id);
-        const [{ data: streams }, { data: students }] = await Promise.all([
-          supabase.from('streams').select('id, class_id').in('class_id', classIds),
-          supabase.from('students').select('id, class_id').in('class_id', classIds)
-        ]);
-        const streamCountByClass = {};
-        (streams || []).forEach((s) => { streamCountByClass[s.class_id] = (streamCountByClass[s.class_id] || 0) + 1; });
-        const studentCountByClass = {};
-        (students || []).forEach((s) => { studentCountByClass[s.class_id] = (studentCountByClass[s.class_id] || 0) + 1; });
-        rows.forEach((c) => {
-          c.stream_count = streamCountByClass[c.id] || 0;
-          c.student_count = studentCountByClass[c.id] || 0;
-        });
-        return ok(rows);
       },
       /** payload.streams: optional array of stream names to ensure exist for this class.
        *  level_order is derived automatically when `name` matches one of
@@ -233,6 +259,7 @@ export function createAcademicsApi(supabase) {
             }
           }
         }
+        clearCache();
         return ok(saved, { streamsAdded });
       },
       async remove(id) {
@@ -241,12 +268,14 @@ export function createAcademicsApi(supabase) {
         // Streams cascade-delete automatically (ON DELETE CASCADE in schema.sql).
         const { error } = await supabase.from('classes').delete().eq('id', id);
         if (error) return err(error.message);
+        clearCache();
         return ok(true);
       }
     },
 
     streams: {
       async list(classId) {
+        return cached('streams.list', classId, async () => {
         let q = supabase.from('streams').select('*, classes(name)');
         if (classId) q = q.eq('class_id', classId);
         const { data, error } = await q;
@@ -263,6 +292,7 @@ export function createAcademicsApi(supabase) {
           ? String(a.class_name).localeCompare(String(b.class_name))
           : String(a.name).localeCompare(String(b.name)));
         return ok(rows);
+        });
       },
       async save(payload) {
         payload = payload || {};
@@ -285,6 +315,7 @@ export function createAcademicsApi(supabase) {
         if (payload.id) {
           const { data, error } = await supabase.from('streams').update(rec).eq('id', payload.id).select().single();
           if (error) return err(error.message);
+          clearCache();
           return ok(data);
         }
         const { data, error } = await supabase.from('streams').insert(rec).select().single();
@@ -295,6 +326,7 @@ export function createAcademicsApi(supabase) {
         // subjects manually from the class's subject screen).
         const { data: cls } = await supabase.from('classes').select('name').eq('id', payload.class_id).maybeSingle();
         if (cls) await seedDefaultSubjectsForNewStream(supabase, data.id, payload.class_id, cls.name);
+        clearCache();
         return ok(data);
       },
       async remove(id) {
@@ -312,12 +344,14 @@ export function createAcademicsApi(supabase) {
         }
         const { error } = await supabase.from('streams').delete().eq('id', id);
         if (error) return err(error.message);
+        clearCache();
         return ok(true);
       }
     },
 
     subjects: {
       async list() {
+        return cached('subjects.list', null, async () => {
         const { data, error } = await supabase.from('subjects').select('*');
         if (error) return err(error.message);
         const order = {};
@@ -329,6 +363,7 @@ export function createAcademicsApi(supabase) {
           return String(a.name).localeCompare(String(b.name));
         });
         return ok(rows, { levels: CBC_LEVELS });
+        });
       },
       async save(payload) {
         payload = payload || {};
@@ -339,6 +374,7 @@ export function createAcademicsApi(supabase) {
         if (payload.id) {
           const { data, error } = await supabase.from('subjects').update(rec).eq('id', payload.id).select().single();
           if (error) return err(error.message);
+          clearCache();
           return ok(data);
         }
         let dupQuery = supabase.from('subjects').select('id').ilike('name', name);
@@ -347,12 +383,14 @@ export function createAcademicsApi(supabase) {
         if (dup) return err('That subject already exists for this level.');
         const { data, error } = await supabase.from('subjects').insert(rec).select().single();
         if (error) return err(error.message);
+        clearCache();
         return ok(data);
       },
       async remove(id) {
         // subject_class_assignments / subject_teacher_assignments cascade-delete automatically.
         const { error } = await supabase.from('subjects').delete().eq('id', id);
         if (error) return err(error.message);
+        clearCache();
         return ok(true);
       },
       /** (Re)load the CBC master subject list. Returns the number newly added. */
@@ -365,6 +403,7 @@ export function createAcademicsApi(supabase) {
           })
           .select();
         if (error) return err(error.message);
+        clearCache();
         return ok(null, { added: (data || []).length });
       }
     },

@@ -61,7 +61,7 @@ export async function viewMessaging(root) {
 function render(root, data, sel) {
   root.innerHTML = `
     <div class="page-head"><div><h2>Messaging</h2><p>Send SMS-style messages to guardians and staff, and review what's been sent.</p></div></div>
-    <div class="tabs" style="max-width:460px">
+    <div class="fin-tabs">
       <button data-tab="compose" class="${sel.tab === 'compose' ? 'active' : ''}">Compose</button>
       <button data-tab="history" class="${sel.tab === 'history' ? 'active' : ''}">History</button>
       <button data-tab="buy-sms" class="${sel.tab === 'buy-sms' ? 'active' : ''}">Buy Bulk SMS</button>

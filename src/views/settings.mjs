@@ -34,7 +34,7 @@ export async function viewSettingsHub(root) {
 
   root.innerHTML = `
     <div class="page-head"><div><h2>Settings</h2><p>School profile, admin access, and the academic calendar — all in one place.</p></div></div>
-    <div class="tabs settings-tabs">
+    <div class="fin-tabs">
       ${TABS.map((t) => `<button data-tab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</button>`).join('')}
     </div>
     <div id="settings-tab-body"></div>

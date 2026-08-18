@@ -20,8 +20,35 @@
  *                      result_submissions in schema.sql. Staff always see
  *                      everything in their own school regardless of status.
  */
-import { ok, err, byAdmissionNo, admissionNumberValue, indexById } from './_util.mjs';
+import { ok, err, byAdmissionNo, admissionNumberValue, indexById, createMemoCache, clearAllCaches } from './_util.mjs';
 import { getEffectiveClassSubjectIds, getEffectiveClassSubjectIdsBatch } from './assignments.mjs';
+
+// Same short-window in-memory memoization pattern as finance.mjs/students.mjs
+// (see finance.mjs's header comment, and _util.mjs's createMemoCache header
+// comment for why this shares the app-wide invalidation bus) — this
+// module's read-heavy calls (exam lists, submissions, subjects) are
+// memoized for CACHE_MS, keyed by their arguments, so switching between
+// Exam Desk's tabs within a few seconds doesn't re-run the same query.
+// Every write below calls clearCache(), which clears every OTHER cached
+// module too (Students, Academics, ...) — deliberate, not accidental
+// over-clearing: some reads elsewhere may depend on results/result_
+// submissions data changing here.
+//
+// NOTE: a few reads in this file (getBroadsheet, listSubmissions,
+// listExamClasses) are deliberately left UNCACHED — each reads the
+// students table directly for a live roster/count, and this file has no
+// visibility into when students.mjs writes it. An earlier version cached
+// listExamClasses and a test caught the resulting bug immediately (a
+// newly-enrolled student not appearing on the exam board for up to 20
+// seconds) — see the comment on listExamClasses below.
+//
+// The per-call memoization (`cached`) is created INSIDE createResultsApi()
+// below, not here at module scope — production only ever calls that once
+// (see index.mjs) so behaviour is identical, but it means each test's
+// fresh mock client gets its own cache instead of sharing one across every
+// test case in the file. clearAllCaches() itself IS truly global/imported
+// directly (no per-instance state), so the module-level helper below
+// (setSubmissionStatus) can call it without needing an instance.
 
 // "Target Exam Analysis Workflow, Benchmarked Against Zeraki" brief, Step 1:
 // Zeraki's own exam-type vocabulary, replacing the old generic Summative/
@@ -61,11 +88,13 @@ async function setSubmissionStatus(supabase, examId, classId, subjectId, nextSta
   if (existing) {
     const { data, error } = await supabase.from('result_submissions').update({ status: nextStatus }).eq('id', existing.id).select().single();
     if (error) return err(error.message || 'You do not have permission to do that.');
+    clearAllCaches();
     return ok(data);
   }
   const { data, error } = await supabase.from('result_submissions')
     .insert({ exam_id: examId, class_id: classId, subject_id: subjectId, status: nextStatus }).select().single();
   if (error) return err(error.message || 'You do not have permission to do that.');
+  clearAllCaches();
   return ok(data);
 }
 
@@ -142,20 +171,28 @@ async function resolveMinSubjects(supabase, examId, classId) {
 }
 
 export function createResultsApi(supabase, gradingApi) {
+  // Scoped per createResultsApi() CALL, not module-level — production only
+  // ever calls this once (see index.mjs), so behaviour is identical, but it
+  // also means each test's fresh mock client gets its own cache instead of
+  // sharing one across every test case in the file.
+  const { cached } = createMemoCache(20000);
+  function clearCache() { clearAllCaches(); }
   return {
     // System Fixes brief §8: a soft-deleted exam (exams.deleted_at set) is
     // never returned by the normal exam list — it only shows up in Deleted
     // Exams (listDeletedExams below) until it's restored or auto-purged.
     async listExams() {
-      const { data, error } = await supabase.from('exams').select('*, academic_years(name), terms(name)').is('deleted_at', null);
-      if (error) return err(error.message);
-      const rows = (data || []).map((e) => ({
-        ...e,
-        academic_year_name: e.academic_years ? e.academic_years.name : '',
-        term_name: e.terms ? e.terms.name : ''
-      }));
-      rows.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
-      return ok(rows);
+      return cached('listExams', null, async () => {
+        const { data, error } = await supabase.from('exams').select('*, academic_years(name), terms(name)').is('deleted_at', null);
+        if (error) return err(error.message);
+        const rows = (data || []).map((e) => ({
+          ...e,
+          academic_year_name: e.academic_years ? e.academic_years.name : '',
+          term_name: e.terms ? e.terms.name : ''
+        }));
+        rows.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+        return ok(rows);
+      });
     },
 
     /** Round 4 §4 ("change the flow to ask for Class first, then Exam — if
@@ -170,19 +207,21 @@ export function createResultsApi(supabase, gradingApi) {
      *  no exams shows that immediately, before an Exam is even chosen. */
     async listExamsForClass(classId) {
       if (!classId) return ok([]);
-      const { data: examClassRows, error: ecErr } = await supabase.from('exam_classes').select('exam_id').eq('class_id', classId);
-      if (ecErr) return err(ecErr.message);
-      const examIds = [...new Set((examClassRows || []).map((r) => r.exam_id).filter(Boolean))];
-      if (!examIds.length) return ok([]);
-      const { data, error } = await supabase.from('exams').select('*, academic_years(name), terms(name)').is('deleted_at', null).in('id', examIds);
-      if (error) return err(error.message);
-      const rows = (data || []).map((e) => ({
-        ...e,
-        academic_year_name: e.academic_years ? e.academic_years.name : '',
-        term_name: e.terms ? e.terms.name : ''
-      }));
-      rows.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
-      return ok(rows);
+      return cached('listExamsForClass', classId, async () => {
+        const { data: examClassRows, error: ecErr } = await supabase.from('exam_classes').select('exam_id').eq('class_id', classId);
+        if (ecErr) return err(ecErr.message);
+        const examIds = [...new Set((examClassRows || []).map((r) => r.exam_id).filter(Boolean))];
+        if (!examIds.length) return ok([]);
+        const { data, error } = await supabase.from('exams').select('*, academic_years(name), terms(name)').is('deleted_at', null).in('id', examIds);
+        if (error) return err(error.message);
+        const rows = (data || []).map((e) => ({
+          ...e,
+          academic_year_name: e.academic_years ? e.academic_years.name : '',
+          term_name: e.terms ? e.terms.name : ''
+        }));
+        rows.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+        return ok(rows);
+      });
     },
 
     async saveExam(payload) {
@@ -255,6 +294,7 @@ export function createResultsApi(supabase, gradingApi) {
           await supabase.from('exam_classes').delete().eq('id', a.id);
         }
       }
+      clearCache();
       return ok(saved);
     },
 
@@ -268,6 +308,7 @@ export function createResultsApi(supabase, gradingApi) {
     async deleteExam(id) {
       const { error } = await supabase.from('exams').delete().eq('id', id);
       if (error) return err(error.message);
+      clearCache();
       return ok(true);
     },
 
@@ -279,6 +320,7 @@ export function createResultsApi(supabase, gradingApi) {
       if (!id) return err('Missing exam.');
       const { data, error } = await supabase.from('exams').update({ deleted_at: new Date().toISOString() }).eq('id', id).select().single();
       if (error) return err(error.message);
+      clearCache();
       return ok(data);
     },
 
@@ -317,6 +359,7 @@ export function createResultsApi(supabase, gradingApi) {
       if (!id) return err('Missing exam.');
       const { data, error } = await supabase.from('exams').update({ deleted_at: null }).eq('id', id).select().single();
       if (error) return err(error.message);
+      clearCache();
       return ok(data);
     },
 
@@ -409,11 +452,13 @@ export function createResultsApi(supabase, gradingApi) {
       if (existing) {
         const { data, error } = await supabase.from('result_submissions').update({ max_marks: mm }).eq('id', existing.id).select().single();
         if (error) return err(error.message);
+        clearCache();
         return ok(data);
       }
       const { data, error } = await supabase.from('result_submissions')
         .insert({ exam_id: examId, class_id: classId, subject_id: subjectId, max_marks: mm }).select().single();
       if (error) return err(error.message);
+      clearCache();
       return ok(data);
     },
 
@@ -453,6 +498,7 @@ export function createResultsApi(supabase, gradingApi) {
       });
       if (error) return err(error.message || 'Could not save marks.');
       const row = Array.isArray(data) ? data[0] : data;
+      clearCache();
       return ok(null, { saved: (row && row.saved) || 0, cleared: (row && row.cleared) || 0 });
     },
 
@@ -474,6 +520,7 @@ export function createResultsApi(supabase, gradingApi) {
       const { error, count } = await supabase.from('results').delete({ count: 'exact' })
         .eq('exam_id', examId).eq('class_id', classId).eq('subject_id', subjectId);
       if (error) return err(error.message);
+      clearCache();
       return ok(null, { deleted: count || 0 });
     },
 
@@ -485,6 +532,11 @@ export function createResultsApi(supabase, gradingApi) {
      *  school's rows), respects the min-subjects-for-ranking setting, and
      *  surfaces each subject's publishing-workflow status so staff can see
      *  at a glance what's still draft/submitted/approved vs published. */
+    // NOT cached — reads the students table directly for its roster (same
+    // staleness risk as listExamClasses above: a student added/moved/
+    // archived through a path this module can't see would leave a stale
+    // roster showing here for up to CACHE_MS, which is wrong on a screen
+    // whose whole job is showing current marks per current student).
     async getBroadsheet(q) {
       q = q || {};
       if (!q.exam_id) return err('Please choose an exam.');
@@ -862,6 +914,8 @@ export function createResultsApi(supabase, gradingApi) {
      *  A subject that has results but is no longer in the assigned set
      *  (e.g. unassigned after marks were entered) is still included, so
      *  recorded marks are never silently dropped from the review. */
+    // NOT cached — reads the students table (expectedCount) directly, same
+    // staleness risk noted on getBroadsheet/listExamClasses above.
     async listSubmissions(examId, classId) {
       if (!examId) return err('Please choose an exam.');
       if (!classId) return err('Please choose a class.');
@@ -929,6 +983,12 @@ export function createResultsApi(supabase, gradingApi) {
      *  plus who last published and when, so the UI can show one obvious
      *  next action per class instead of making an admin dig into each
      *  subject one by one. */
+    // NOT cached — its status per class depends on the students table (which
+    // this class's roster live-count of), and a school can add/move/archive
+    // a student through paths this module has no visibility into. Staleness
+    // here would show a wrong "no_students"/in-progress status on the
+    // exam board, which is a correctness issue, not just a UI nit — worth
+    // more than a 20s cache hit saves.
     async listExamClasses(examId) {
       if (!examId) return err('Please choose an exam.');
       const { data: examClassRows } = await supabase.from('exam_classes').select('*').eq('exam_id', examId);
@@ -1044,15 +1104,17 @@ export function createResultsApi(supabase, gradingApi) {
      *  only shows Grade 9-ish subjects, not the whole school's catalogue. */
     async listExamSubjects(examId) {
       if (!examId) return err('Please choose an exam.');
-      const { data: examClassRows } = await supabase.from('exam_classes').select('class_id').eq('exam_id', examId);
-      const classIds = [...new Set((examClassRows || []).map((r) => r.class_id).filter(Boolean))];
-      if (!classIds.length) return ok([]);
-      const idsByClass = await getEffectiveClassSubjectIdsBatch(supabase, classIds);
-      const subjectIds = [...new Set(Object.values(idsByClass).flat())];
-      if (!subjectIds.length) return ok([]);
-      const { data: subjects, error } = await supabase.from('subjects').select('id, name, code').in('id', subjectIds);
-      if (error) return err(error.message);
-      return ok((subjects || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name))));
+      return cached('listExamSubjects', examId, async () => {
+        const { data: examClassRows } = await supabase.from('exam_classes').select('class_id').eq('exam_id', examId);
+        const classIds = [...new Set((examClassRows || []).map((r) => r.class_id).filter(Boolean))];
+        if (!classIds.length) return ok([]);
+        const idsByClass = await getEffectiveClassSubjectIdsBatch(supabase, classIds);
+        const subjectIds = [...new Set(Object.values(idsByClass).flat())];
+        if (!subjectIds.length) return ok([]);
+        const { data: subjects, error } = await supabase.from('subjects').select('id, name, code').in('id', subjectIds);
+        if (error) return err(error.message);
+        return ok((subjects || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name))));
+      });
     },
 
     /** Every class ALREADY assigned to this exam, just id+name (the
@@ -1064,12 +1126,14 @@ export function createResultsApi(supabase, gradingApi) {
      *  underlying exam_classes source, completely different shape/purpose. */
     async listExamClassNames(examId) {
       if (!examId) return err('Please choose an exam.');
-      const { data: examClassRows } = await supabase.from('exam_classes').select('class_id').eq('exam_id', examId);
-      const classIds = [...new Set((examClassRows || []).map((r) => r.class_id).filter(Boolean))];
-      if (!classIds.length) return ok([]);
-      const { data: classes, error } = await supabase.from('classes').select('id, name').in('id', classIds);
-      if (error) return err(error.message);
-      return ok((classes || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name))));
+      return cached('listExamClassNames', examId, async () => {
+        const { data: examClassRows } = await supabase.from('exam_classes').select('class_id').eq('exam_id', examId);
+        const classIds = [...new Set((examClassRows || []).map((r) => r.class_id).filter(Boolean))];
+        if (!classIds.length) return ok([]);
+        const { data: classes, error } = await supabase.from('classes').select('id, name').in('id', classIds);
+        if (error) return err(error.message);
+        return ok((classes || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name))));
+      });
     },
 
     /** Every class NOT yet added to this exam — the exam-edit modal's "add
@@ -1179,6 +1243,7 @@ export function createResultsApi(supabase, gradingApi) {
       if (!existing) return err('This class is not on this exam yet.');
       const { data, error } = await supabase.from('exam_classes').update(rec).eq('id', existing.id).select().single();
       if (error) return err(error.message || 'You do not have permission to change publish settings.');
+      clearCache();
       return ok(data);
     },
 
@@ -1237,6 +1302,7 @@ export function createResultsApi(supabase, gradingApi) {
       const { data, error } = await supabase.from('exam_classes')
         .update({ released_at: new Date().toISOString(), released_by: staffId || null }).eq('id', ec.id).select().single();
       if (error) return err(error.message);
+      clearCache();
       return ok(data);
     },
 
@@ -1251,15 +1317,17 @@ export function createResultsApi(supabase, gradingApi) {
     /** Student portal: list exams the student has any results for. */
     async getStudentExams(studentId) {
       if (!studentId) return ok([]);
-      const { data: mine } = await supabase.from('results').select('exam_id').eq('student_id', studentId);
-      const examIds = [...new Set((mine || []).map((r) => r.exam_id))];
-      if (!examIds.length) return ok([], { student_id: studentId });
-      const { data: exams } = await supabase.from('exams').select('*, academic_years(name), terms(name)').in('id', examIds);
-      const rows = (exams || []).map((e) => ({
-        ...e, academic_year_name: e.academic_years ? e.academic_years.name : '', term_name: e.terms ? e.terms.name : ''
-      }));
-      rows.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
-      return ok(rows, { student_id: studentId });
+      return cached('getStudentExams', studentId, async () => {
+        const { data: mine } = await supabase.from('results').select('exam_id').eq('student_id', studentId);
+        const examIds = [...new Set((mine || []).map((r) => r.exam_id))];
+        if (!examIds.length) return ok([], { student_id: studentId });
+        const { data: exams } = await supabase.from('exams').select('*, academic_years(name), terms(name)').in('id', examIds);
+        const rows = (exams || []).map((e) => ({
+          ...e, academic_year_name: e.academic_years ? e.academic_years.name : '', term_name: e.terms ? e.terms.name : ''
+        }));
+        rows.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+        return ok(rows, { student_id: studentId });
+      });
     }
   };
 }
