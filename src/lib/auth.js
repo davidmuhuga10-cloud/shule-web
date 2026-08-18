@@ -89,6 +89,7 @@ export async function loginStaff(identifier, password, schoolCode) {
 
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) return { ok: false, message: friendlyAuthError(error) };
+  if (!isGenuineSession(data, email)) { await supabase.auth.signOut(); return { ok: false, message: 'Incorrect username/phone or password.' }; }
   const guard = await verifySchoolMatch(schoolCode);
   if (!guard.ok) { await supabase.auth.signOut(); return guard; }
   return { ok: true, session: data.session };
@@ -102,6 +103,7 @@ export async function loginStaffByUsername(username, password, schoolCode) {
   const email = staffEmailFor(username, schoolCode);
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) return { ok: false, message: friendlyAuthError(error) };
+  if (!isGenuineSession(data, email)) { await supabase.auth.signOut(); return { ok: false, message: 'Incorrect username/phone or password.' }; }
   const guard = await verifySchoolMatch(schoolCode);
   if (!guard.ok) { await supabase.auth.signOut(); return guard; }
   return { ok: true, session: data.session };
@@ -116,6 +118,7 @@ export async function loginStudent(admissionNo, password, schoolCode) {
   const email = studentEmailFor(admissionNo, schoolCode);
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) return { ok: false, message: friendlyAuthError(error) };
+  if (!isGenuineSession(data, email)) { await supabase.auth.signOut(); return { ok: false, message: 'Incorrect admission number or password.' }; }
   const guard = await verifySchoolMatch(schoolCode);
   if (!guard.ok) { await supabase.auth.signOut(); return guard; }
   return { ok: true, session: data.session };
@@ -129,9 +132,30 @@ export async function loginParent(phone, password, schoolCode) {
   const email = parentEmailFor(phone, schoolCode);
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) return { ok: false, message: friendlyAuthError(error) };
+  if (!isGenuineSession(data, email)) { await supabase.auth.signOut(); return { ok: false, message: 'Incorrect phone number or password.' }; }
   const guard = await verifySchoolMatch(schoolCode);
   if (!guard.ok) { await supabase.auth.signOut(); return guard; }
   return { ok: true, session: data.session };
+}
+
+/**
+ * Belt-and-braces guard on top of Supabase's own password check (Next Sprint
+ * 2 §5 — "as long as the phone number entered is correct, any password is
+ * accepted"). Reading the vendored supabase-js client confirms
+ * signInWithPassword() really does POST to Supabase's own
+ * /token?grant_type=password endpoint and only returns a session when THAT
+ * call succeeds — the real password check happens server-side, not
+ * something this app's code can silently skip. Since that couldn't be
+ * reproduced from the code alone, this closes every edge case this app COULD
+ * control instead of guessing: reject a "success" response that isn't
+ * actually backed by a real session/token, and reject a session whose
+ * authenticated email doesn't exactly match the email we asked to sign in
+ * as. Either would previously have been treated as a successful login.
+ */
+function isGenuineSession(data, expectedEmail) {
+  if (!data || !data.session || !data.session.access_token || !data.user) return false;
+  if (expectedEmail && String(data.user.email || '').toLowerCase() !== String(expectedEmail).toLowerCase()) return false;
+  return true;
 }
 
 /** Defence-in-depth: confirm the just-authenticated profile really belongs to
