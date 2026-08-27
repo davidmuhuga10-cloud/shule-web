@@ -624,10 +624,35 @@ export function createResultsApi(supabase, gradingApi) {
       // each other (or on subjects/submissions/papers above) — fired
       // together instead of `results` waiting its turn after streamMap is
       // built below, even though nothing in between actually needs it yet.
-      const [{ data: students }, { data: results }] = await Promise.all([
+      const [{ data: studentsRaw }, { data: results }] = await Promise.all([
         studentQuery,
         supabase.from('results').select('*').eq('exam_id', q.exam_id).eq('class_id', q.class_id)
       ]);
+
+      // Next Sprint 2 §9 (BUG): "Newly added students (added after exam
+      // creation) auto-appear on that exam's merit list as grade 'X' —
+      // should only appear if deliberately added." A student joining the
+      // class after this exam already existed has no results for it by
+      // definition; they used to show up anyway (every active student in
+      // the class, full stop) and get graded 'X' across every subject,
+      // which reads as "this student failed to sit the exam" rather than
+      // "this student wasn't here yet." Kept in the list if EITHER they
+      // already have at least one result recorded for this exam (someone
+      // deliberately entered a mark for them — respect that), OR they
+      // joined the class on/before the exam was created.
+      // Note: compare with `== null` here, not a plain truthiness check —
+      // a valid timestamp at the epoch (getTime() === 0, which some seed/
+      // test data uses as its default "unset" stand-in) is falsy but still
+      // a real, comparable date, and must NOT be treated the same as
+      // "genuinely no created_at at all".
+      const examCreatedAtMs = exam.created_at ? new Date(exam.created_at).getTime() : null;
+      const studentIdsWithResults = new Set((results || []).map((r) => r.student_id));
+      const students = (studentsRaw || []).filter((s) => {
+        if (studentIdsWithResults.has(s.id)) return true;
+        if (examCreatedAtMs == null) return true;
+        const joinedAtMs = s.created_at ? new Date(s.created_at).getTime() : 0;
+        return joinedAtMs <= examCreatedAtMs;
+      });
 
       const streamIds = [...new Set((students || []).map((s) => s.stream_id).filter(Boolean))];
       const { data: streamRows } = streamIds.length
@@ -926,16 +951,22 @@ export function createResultsApi(supabase, gradingApi) {
       const resultSubjectIds = [...new Set((examResults || []).map((r) => r.subject_id))];
       const subjectIds = [...new Set([...assignedIds, ...resultSubjectIds])];
       if (!subjectIds.length) return ok([]);
-      const { data: subjects } = await supabase.from('subjects').select('id, name, code').in('id', subjectIds);
+      // Next Sprint 2 §7 (Performance): these four queries are all
+      // independent of each other once subjectIds is known (none reads a
+      // result the others produce) — they used to run one after another,
+      // each paying its own network round trip. Running them together cuts
+      // this screen's load time to roughly the slowest single query instead
+      // of the sum of all four.
+      const [{ data: subjects }, { data: submissions }, { count: expectedCount }, { data: teacherRows }] = await Promise.all([
+        supabase.from('subjects').select('id, name, code').in('id', subjectIds),
+        supabase.from('result_submissions').select('*').eq('exam_id', examId).eq('class_id', classId).in('subject_id', subjectIds),
+        supabase.from('students').select('id', { count: 'exact', head: true }).eq('class_id', classId).eq('status', 'active'),
+        supabase.from('subject_teacher_assignments').select('subject_id, staff_id').eq('class_id', classId).in('subject_id', subjectIds)
+      ]);
       const subjectMap = indexById(subjects || []);
-      const { data: submissions } = await supabase.from('result_submissions').select('*')
-        .eq('exam_id', examId).eq('class_id', classId).in('subject_id', subjectIds);
       const subMap = {};
       (submissions || []).forEach((s) => { subMap[s.subject_id] = s; });
 
-      const { count: expectedCount } = await supabase.from('students').select('id', { count: 'exact', head: true }).eq('class_id', classId).eq('status', 'active');
-
-      const { data: teacherRows } = await supabase.from('subject_teacher_assignments').select('subject_id, staff_id').eq('class_id', classId).in('subject_id', subjectIds);
       const staffIds = [...new Set((teacherRows || []).map((r) => r.staff_id).filter(Boolean))];
       const { data: staffRows } = staffIds.length ? await supabase.from('staff').select('id, full_name').in('id', staffIds) : { data: [] };
       const staffMap = indexById(staffRows || []);

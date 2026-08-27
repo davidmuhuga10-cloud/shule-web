@@ -161,6 +161,15 @@ input,select,textarea{width:100%;padding:9px 11px;border:1px solid var(--line);b
   font-size:14px;font-family:inherit;background:#fff;color:var(--ink);transition:.15s}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(18,122,107,.12)}
 .field{margin-bottom:15px}
+/* Next Sprint 2 §4: show/hide password toggle — see passwordFieldHtml()/
+   wirePasswordToggle() in app.js. The toggle button sits inside the input's
+   own box (absolutely positioned over the right-padding it reserves) so it
+   reads as part of the field, not a separate control next to it. */
+.pw-wrap{position:relative}
+.pw-wrap input{padding-right:40px}
+.pw-toggle{position:absolute;right:2px;top:2px;bottom:2px;width:36px;border:none;background:transparent;
+  cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.pw-toggle:hover{color:var(--ink)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
 /* Round 3 §12: Report Forms gained a Stream filter alongside its existing
@@ -287,7 +296,12 @@ table.data td.num,table.data th.num{text-align:center}
    blowing the sheet past printable landscape width. Every column type below
    gets an explicit width so switching to fixed layout doesn't just squash
    the Name column or the summary columns instead. */
-.mark-list-grid{border-collapse:collapse;font-size:12.5px;table-layout:fixed;width:100%;color:var(--grid-text)}
+/* Next Sprint 2 §8: font size bumped (12.5px -> 13.5px, th 10.5px -> 11.5px)
+   now that broadsheet.mjs prints this screen with halved page margins
+   (5mm instead of the app-wide 10mm — see wirePrintOptions()'s marginMm
+   param) — the freed-up horizontal room absorbs the larger text without
+   the wide, many-subject-column grid overflowing the printed page. */
+.mark-list-grid{border-collapse:collapse;font-size:13.5px;table-layout:fixed;width:100%;color:var(--grid-text)}
 .mark-list-grid th,.mark-list-grid td{border:1.3px solid var(--grid-ink);padding:7px 8px}
 /* Header-truncation fix (feature brief §6): "Total Marks" was printing as
    "Total Mk" and "Stream Position" as "Stream Po..." because every header
@@ -305,17 +319,19 @@ table.data td.num,table.data th.num{text-align:center}
    the specificity fight; overflow-wrap:break-word then wraps normally at
    word boundaries and only breaks inside a single long word if that word
    alone doesn't fit the column. */
-.mark-list-grid th{font-size:10.5px;font-weight:800;color:var(--grid-text);background:#f7f9fb;text-transform:uppercase;letter-spacing:.3px;text-align:left;white-space:normal;word-break:normal;overflow-wrap:break-word;vertical-align:bottom;overflow:visible}
+.mark-list-grid th{font-size:11.5px;font-weight:800;color:var(--grid-text);background:#f7f9fb;text-transform:uppercase;letter-spacing:.3px;text-align:left;white-space:normal;word-break:normal;overflow-wrap:break-word;vertical-align:bottom;overflow:visible}
 .mark-list-grid td{white-space:nowrap;overflow:hidden}
 .mark-list-grid td.num,.mark-list-grid th.num{text-align:center}
 .mark-list-grid th.id-col,.mark-list-grid td.id-col{width:64px}
-.mark-list-grid th.name-col,.mark-list-grid td.name-col{width:150px;white-space:normal;word-break:normal}
-.mark-list-grid th.str-col,.mark-list-grid td.str-col{width:44px}
+.mark-list-grid th.name-col,.mark-list-grid td.name-col{width:165px;white-space:normal;word-break:normal}
+.mark-list-grid th.str-col,.mark-list-grid td.str-col{width:56px}
 /* Subject header cells: fixed width regardless of the subject's name length
    — a long name wraps onto multiple lines (row height grows) instead of
-   stretching the column horizontally. */
-.mark-list-grid th.subj-col{width:70px}
-.mark-list-grid th.sum-col,.mark-list-grid td.sum-col{width:50px}
+   stretching the column horizontally. Widened slightly (70px -> 78px)
+   alongside the Next Sprint 2 §8 font bump above so headers like "ENGLISH"/
+   "KISWAHILI" still fit on one line instead of wrapping awkwardly. */
+.mark-list-grid th.subj-col{width:78px}
+.mark-list-grid th.sum-col,.mark-list-grid td.sum-col{width:52px}
 /* Sprint Review redo: the earned/possible ("870/1200") format moved from
    the per-student TT MKS column to the class-level TOTAL row's subject
    columns (subj-col, already 70px — wider than sum-col — which is enough
@@ -413,6 +429,14 @@ table.data td.num,table.data th.num{text-align:center}
    a search field squeezed into a regular toolbar row. */
 .search-hero{max-width:640px;margin:0 auto 20px}
 .search-hero input{padding:16px 20px;font-size:16px;border-radius:12px;box-shadow:var(--shadow-sm,0 1px 3px rgba(16,32,45,.08))}
+
+/* Next Sprint 2 §14: Finance's "Search Student" box, now pinned to the top
+   right of the module header (same line as the "Finance" title) instead of
+   being its own tab — large and prominent per the request, same visual
+   weight as .search-hero's own input, just sized to sit inline in a header
+   instead of centered as its own block. */
+.fin-search-prominent{width:100%;min-width:280px;padding:14px 18px;font-size:15.5px;border-radius:12px;
+  box-shadow:var(--shadow-sm,0 1px 3px rgba(16,32,45,.08))}
 
 /* ---------- Modal ---------- */
 .modal-back{position:fixed;inset:0;background:rgba(16,32,45,.45);display:grid;place-items:center;z-index:100;padding:20px}

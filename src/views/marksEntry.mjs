@@ -51,8 +51,10 @@ async function ensureTeacherVisibility() {
  *  subject_id (used by Publish & Review's "Edit Marks"/"Upload" quick-links
  *  to land straight on that subject instead of whichever sorts first). */
 export async function renderMarksPanel(container, sel) {
-  await ensureTeacherVisibility();
-  const subjectsRes = await Db.subjects.list();
+  // Next Sprint 2 §7 (Performance): these two don't depend on each other —
+  // running them together instead of one after another shaves a full
+  // network round trip off every Marks Entry tab open.
+  const [, subjectsRes] = await Promise.all([ensureTeacherVisibility(), Db.subjects.list()]);
   const subjects = subjectsRes.ok ? subjectsRes.data : [];
   container.innerHTML = '<div id="mk-panel"></div>';
   if (!subjects.length) {
@@ -73,7 +75,6 @@ export async function renderMarksPanel(container, sel) {
  *  called — the underlying template/import behavior is unchanged, only
  *  where it's surfaced in the UI moved. */
 export async function renderMarksBulkPanel(container, sel) {
-  await ensureTeacherVisibility();
   if (!isLikelyPc()) {
     container.innerHTML = `<div class="card"><div class="card-b"><div class="empty">
       <div class="e-ico">💻</div><h3>Bulk upload is available on a computer</h3>
@@ -81,7 +82,9 @@ export async function renderMarksBulkPanel(container, sel) {
     </div></div></div>`;
     return;
   }
-  const subjectsRes = await Db.subjects.list();
+  // Next Sprint 2 §7 (Performance): same fix as renderMarksPanel above —
+  // these two are independent, so they run together instead of in series.
+  const [, subjectsRes] = await Promise.all([ensureTeacherVisibility(), Db.subjects.list()]);
   const subjects = subjectsRes.ok ? subjectsRes.data : [];
   if (!subjects.length) {
     container.innerHTML = `<div class="card"><div class="card-b"><div class="empty">

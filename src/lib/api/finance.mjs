@@ -225,6 +225,16 @@ export function createFinanceApi(supabase) {
       const { data, error } = await supabase.from('finance_debit_notes').select('*, finance_vote_heads(name)').eq('student_id', studentId).order('created_at');
       if (error) return err(error.message);
       return ok(data || []);
+    },
+    /** Next Sprint 2 §12: reverse a wrongly-entered debit note — inserts a
+     *  matching opposite (credit) note and flags this one as reversed,
+     *  never deletes anything. See finance_reverse_debit_note() in
+     *  schema.sql for the full rationale. */
+    async reverse(noteId, reason) {
+      const { data, error } = await supabase.rpc('finance_reverse_debit_note', { p_note_id: noteId, p_reason: reason || null });
+      if (error) return err(error.message);
+      clearCache();
+      return ok(data);
     }
   };
 
@@ -242,6 +252,14 @@ export function createFinanceApi(supabase) {
       const { data, error } = await supabase.from('finance_credit_notes').select('*, finance_vote_heads(name)').eq('student_id', studentId).order('created_at');
       if (error) return err(error.message);
       return ok(data || []);
+    },
+    /** Same idea as debitNotes.reverse() above, just the opposite direction
+     *  — inserts a matching debit note and flags this credit note reversed. */
+    async reverse(noteId, reason) {
+      const { data, error } = await supabase.rpc('finance_reverse_credit_note', { p_note_id: noteId, p_reason: reason || null });
+      if (error) return err(error.message);
+      clearCache();
+      return ok(data);
     }
   };
 
@@ -317,6 +335,23 @@ export function createFinanceApi(supabase) {
       if (error) return err(error.message);
       clearCache();
       return ok(data || []);
+    },
+    /** Next Sprint 2 §13: move a chosen amount of a student's CURRENT
+     *  overpayment/credit to another student (e.g. siblings) — the RPC
+     *  re-derives the balance server-side and refuses if the source
+     *  student doesn't actually have that much overpayment. */
+    async transferOverpayment(fromStudentId, toStudentId, amount, academicYearId, termId, reason) {
+      const { data, error } = await supabase.rpc('finance_transfer_overpayment', {
+        p_from_student_id: fromStudentId,
+        p_to_student_id: toStudentId,
+        p_amount: Number(amount),
+        p_academic_year_id: academicYearId || null,
+        p_term_id: termId || null,
+        p_reason: reason || null
+      });
+      if (error) return err(error.message);
+      clearCache();
+      return ok(data);
     }
   };
 

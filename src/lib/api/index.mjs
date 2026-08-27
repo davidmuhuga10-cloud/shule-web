@@ -22,6 +22,7 @@ import { createParentsApi } from './parents.mjs';
 import { createCapabilitiesApi } from './capabilities.mjs';
 import { createTimetableApi } from './timetable.mjs';
 import { createFinanceApi } from './finance.mjs';
+import { createSmsCreditsApi } from './smsCredits.mjs';
 
 async function callAdminFunction(action, payload) {
   const token = await getAccessToken();
@@ -85,5 +86,6 @@ export const Db = {
   // `settings.timetable_days` through the exact same batched save() every
   // other settings field already uses.
   timetable: createTimetableApi(supabase, settings),
-  finance: createFinanceApi(supabase)
+  finance: createFinanceApi(supabase),
+  smsCredits: createSmsCreditsApi(supabase)
 };

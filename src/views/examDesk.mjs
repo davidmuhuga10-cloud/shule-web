@@ -25,7 +25,7 @@
  * Deleted Exams (brief §8) is its own module (deletedExams.mjs) and its own
  * nav tile, not part of this file — see examsHub.mjs.
  */
-import { esc, modal, closeModal, toast, confirmAction, options, renderPrereq, renderPrereqOrConnectivity, loader, go } from '../app.js';
+import { esc, modal, closeModal, toast, confirmAction, options, renderPrereq, renderPrereqOrConnectivity, loader, go, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { EXAM_TYPE_LABELS } from '../lib/api/results.mjs';
 import { setNavIntent } from '../lib/navIntent.mjs';
@@ -103,9 +103,15 @@ async function renderBoard(root, exams, classes, years, terms) {
     // for this exam+class instead, with the matching tab pre-selected.
     // (Round 3 §9 removed the separate data-continue action — every
     // pre-publish state now shares this same data-review button.)
-    card.querySelectorAll('[data-review]').forEach((b) => b.onclick = () => {
-      renderDetailScreen(root, years, terms, e, b.dataset.review, { tab: 'publish' });
-    });
+    // Next Sprint 2 §6 (BUG): "still missing 'please wait' feedback on
+    // Review and Publish" — per the standing rule ("one click should freeze
+    // the button and immediately show 'please wait' — this applies to
+    // every button across the whole system"), withBusy freezes the button
+    // and relabels it the instant it's clicked, for however long the
+    // detail screen's own data fetch takes.
+    card.querySelectorAll('[data-review]').forEach((b) => b.onclick = () => withBusy(b, () => {
+      return renderDetailScreen(root, years, terms, e, b.dataset.review, { tab: 'publish' });
+    }, 'Please wait…'));
     card.querySelectorAll('[data-print]').forEach((b) => b.onclick = () => {
       setNavIntent('report-forms', { exam_id: e.id, class_id: b.dataset.print });
       go('reports');
@@ -228,6 +234,15 @@ async function renderDetailScreen(root, years, terms, exam, classId, sel) {
   const classes = classesRes.ok ? classesRes.data : [];
   const cls = classes.find((c) => String(c.id) === String(classId));
 
+  // Next Sprint 2 §7 (Performance): switching between Review and Publish /
+  // Marks Entry / Bulk Upload used to re-render this ENTIRE screen — header,
+  // tab bar and all — on every click, which meant re-fetching Db.classes.
+  // list() and rebuilding markup that hadn't actually changed just to swap
+  // the one panel underneath. The header/tab bar are now built ONCE here;
+  // showTab() below only ever touches #ed-panel (and shows loader()
+  // immediately, before its data fetch, so a click always gets instant
+  // visible feedback per the standing "please wait" rule) instead of
+  // tearing down and rebuilding the whole screen for every tab switch.
   root.innerHTML = `
     <div class="page-head">
       <div>
@@ -245,23 +260,26 @@ async function renderDetailScreen(root, years, terms, exam, classId, sel) {
   `;
 
   root.querySelector('#ed-back').onclick = () => renderBoardScreen(root, years, terms);
-  root.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => renderDetailScreen(root, years, terms, exam, classId, { tab: b.dataset.tab }));
-
   const panel = root.querySelector('#ed-panel');
-  if (sel.tab === 'marks') {
-    await renderMarksPanel(panel, { exam_id: exam.id, class_id: classId, subject_id: sel.subject_id || '' });
-  } else if (sel.tab === 'bulk') {
-    await renderMarksBulkPanel(panel, { exam_id: exam.id, class_id: classId });
-  } else {
-    // The "Edit Marks"/"Upload" shortcuts inside the Publish tab flip this
-    // same screen back to the Marks Entry tab, pre-selected to that
-    // subject, instead of navigating away — see publishing.mjs's
-    // onEditSubject callback plumbing. Defaults here (no tab, or tab:
-    // 'publish') land on "Review and Publish" — now the first tab.
-    await renderPublishPanel(panel, { exam_id: exam.id, class_id: classId }, (subjectId) => {
-      renderDetailScreen(root, years, terms, exam, classId, { tab: 'marks', subject_id: subjectId });
-    });
+
+  async function showTab(tab, subjectId) {
+    root.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('active',
+      tab === 'marks' ? b.dataset.tab === 'marks' : tab === 'bulk' ? b.dataset.tab === 'bulk' : b.dataset.tab === 'publish'));
+    panel.innerHTML = loader();
+    if (tab === 'marks') {
+      await renderMarksPanel(panel, { exam_id: exam.id, class_id: classId, subject_id: subjectId || '' });
+    } else if (tab === 'bulk') {
+      await renderMarksBulkPanel(panel, { exam_id: exam.id, class_id: classId });
+    } else {
+      // The "Edit Marks"/"Upload" shortcuts inside the Publish tab flip
+      // back to the Marks Entry tab, pre-selected to that subject, instead
+      // of navigating away — see publishing.mjs's onEditSubject plumbing.
+      await renderPublishPanel(panel, { exam_id: exam.id, class_id: classId }, (sid) => showTab('marks', sid));
+    }
   }
+  root.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => showTab(b.dataset.tab));
+
+  await showTab(sel.tab, sel.subject_id);
 }
 
 /** Brief §7.1 (unchanged from the old Manage Exams): creating (or editing)
