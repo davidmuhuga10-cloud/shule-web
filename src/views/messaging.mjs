@@ -2,14 +2,19 @@
  * messaging.mjs (view) — compose a message to a class's guardians, a single
  * guardian, a single staff member, every guardian in the school, or (brief
  * G1) exam/term results per guardian; a history of past sends grouped by
- * batch (see groupMessagesByBatch); and (brief G2) a placeholder "Buy Bulk
- * SMS" tab since the real Africa's Talking billing integration is a later
- * sprint.
+ * batch (see groupMessagesByBatch); and an "SMS Credits" tab (moved here
+ * per direct request — this used to be its own top-level sidebar item, and
+ * before that, a placeholder "Buy Bulk SMS" tab that just hand-edited a
+ * settings balance with no real request/approval flow behind it. The real
+ * SMS Credits submodule (submit a payment confirmation, see its status,
+ * reviewed by the Super Admin dashboard) lives in smsCredits.mjs and is
+ * just hosted inside this tab bar now).
  */
-import { esc, options, toast, renderPrereq, renderPrereqOrConnectivity, loader, fmtDate, withBusy } from '../app.js';
+import { esc, options, toast, renderPrereq, renderPrereqOrConnectivity, loader, fmtDate } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { groupMessagesByBatch } from '../lib/api/messaging.mjs';
 import { takeNavIntent } from '../lib/navIntent.mjs';
+import { renderSmsCredits } from './smsCredits.mjs';
 
 const SCOPE_LABELS = {
   class: 'A whole class (guardians)',
@@ -18,18 +23,6 @@ const SCOPE_LABELS = {
   broadcast: 'Every guardian in the school',
   exam_results: 'Exam/term results (per guardian)'
 };
-
-// Placeholder-only credit "packages" for the Buy Bulk SMS tab (brief G2) —
-// there's no real payment/billing provider wired up yet (Africa's Talking is
-// a later sprint per the brief), so these just top up the same manually-
-// tracked sms_credit_balance settings key that used to be hand-edited in
-// Settings, with an honest "demo" label rather than pretending real money
-// changed hands.
-const SMS_PACKAGES = [
-  { credits: 1000, label: '1,000 credits' },
-  { credits: 5000, label: '5,000 credits' },
-  { credits: 10000, label: '10,000 credits' }
-];
 
 export async function viewMessaging(root) {
   const [classesRes, studentsRes, staffRes, examsRes] = await Promise.all([
@@ -64,7 +57,7 @@ function render(root, data, sel) {
     <div class="fin-tabs">
       <button data-tab="compose" class="${sel.tab === 'compose' ? 'active' : ''}">Compose</button>
       <button data-tab="history" class="${sel.tab === 'history' ? 'active' : ''}">History</button>
-      <button data-tab="buy-sms" class="${sel.tab === 'buy-sms' ? 'active' : ''}">Buy Bulk SMS</button>
+      <button data-tab="sms-credits" class="${sel.tab === 'sms-credits' ? 'active' : ''}">SMS Credits</button>
     </div>
     <div id="msg-body"></div>
   `;
@@ -72,7 +65,7 @@ function render(root, data, sel) {
 
   const body = root.querySelector('#msg-body');
   if (sel.tab === 'compose') renderCompose(body, data, sel, root);
-  else if (sel.tab === 'buy-sms') renderBuySms(body);
+  else if (sel.tab === 'sms-credits') renderSmsCredits(body);
   else renderHistory(body);
 }
 
@@ -213,46 +206,6 @@ async function sendExamResults(examId, classId, classes, students) {
     if (res.ok) sent++; else failed++;
   }
   return { ok: true, sent, failed, eligible: attempted };
-}
-
-/** Brief G2: "Buy Bulk SMS" tab — Africa's Talking billing isn't wired up
- *  yet, so this is an honest placeholder: it shows the current balance
- *  (same sms_credit_balance settings key the old Settings screen used to
- *  expose) and lets an admin top it up on the spot, clearly labelled as a
- *  demo top-up rather than a real purchase. */
-async function renderBuySms(body) {
-  body.innerHTML = `<div class="card"><div class="card-b">${loader()}</div></div>`;
-  const res = await Db.settings.get();
-  const settings = res.ok ? res.data : {};
-  const balance = settings.sms_credit_balance;
-  const balanceLabel = balance === null || balance === undefined || balance === '' ? '0' : String(balance);
-
-  body.innerHTML = `
-    <div class="card">
-      <div class="card-b">
-        <p class="hint" style="margin-top:0">⚠️ Billing isn't connected yet (Africa's Talking integration is planned for a later update) — top-ups here just adjust the balance shown on your dashboard, no real payment is taken.</p>
-        <div style="display:flex;align-items:baseline;gap:8px;margin:10px 0 18px">
-          <div style="font-size:28px;font-weight:750">${esc(balanceLabel)}</div>
-          <div class="muted">current balance</div>
-        </div>
-        <label style="font-weight:600;font-size:13px;display:block;margin-bottom:10px">Top up</label>
-        <div class="chips" id="sms-packages">
-          ${SMS_PACKAGES.map((p) => `<div class="chip" data-credits="${p.credits}">${esc(p.label)}</div>`).join('')}
-        </div>
-      </div>
-    </div>
-  `;
-
-  body.querySelectorAll('#sms-packages [data-credits]').forEach((chip) => {
-    chip.onclick = () => withBusy(chip, async () => {
-      const credits = Number(chip.dataset.credits) || 0;
-      const current = Number(balance) || 0;
-      const r = await Db.settings.save({ sms_credit_balance: String(current + credits) });
-      if (!r.ok) { toast(r.message, 'err'); return; }
-      toast(`Added ${credits.toLocaleString()} credits (demo — no real billing yet).`, 'ok');
-      renderBuySms(body);
-    }, 'Adding…');
-  });
 }
 
 async function renderHistory(body) {
