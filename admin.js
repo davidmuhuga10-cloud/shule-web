@@ -146,16 +146,25 @@ function go(key) {
 
 /* ------------------------------ Dashboard --------------------------------- */
 async function renderDashboard(body) {
-  let summary, trials, recent, trend;
+  // The whole render — not just the RPC awaits — lives inside this try
+  // block on purpose: an interactive test caught a real bug here where an
+  // unexpected/malformed RPC result threw OUTSIDE the try (at trend.map),
+  // which left the loading spinner stuck forever instead of showing the
+  // friendly error message this catch is meant to guarantee.
   try {
-    [summary, trials, recent, trend] = await Promise.all([
+    const [summary, trials, recent, trend] = await Promise.all([
       rpc('admin_dashboard_summary'),
       rpc('admin_list_expiring_trials', { p_within_days: 14 }),
       rpc('admin_list_recent_schools', { p_limit: 8 }),
       rpc('admin_registration_trend', { p_weeks: 10 })
     ]);
-  } catch (e) { body.innerHTML = `<div class="a-card"><div class="a-card-b">⚠️ Could not load the dashboard.</div></div>`; return; }
+    renderDashboardBody(body, summary || {}, Array.isArray(trials) ? trials : [], Array.isArray(recent) ? recent : [], Array.isArray(trend) ? trend : []);
+  } catch (e) {
+    body.innerHTML = `<div class="a-card"><div class="a-card-b">⚠️ Could not load the dashboard.</div></div>`;
+  }
+}
 
+function renderDashboardBody(body, summary, trials, recent, trend) {
   const stats = [
     { label: 'Total Schools', value: summary.total_schools },
     { label: 'Total Students', value: summary.total_students },
@@ -219,6 +228,7 @@ async function renderSchools(body, searchTerm) {
 
   let rows;
   try { rows = await rpc('admin_list_schools', { p_search: searchTerm || null }); } catch (e) { return; }
+  if (!Array.isArray(rows)) rows = [];
   const listEl = document.getElementById('a-schools-list');
   if (!rows.length) { listEl.innerHTML = `<div class="a-empty">No schools found.</div>`; return; }
 
@@ -238,7 +248,7 @@ async function openSchoolDetail(schoolId, body, searchTerm) {
   let detail;
   try { detail = await rpc('admin_school_detail', { p_school_id: schoolId }); } catch (e) { return; }
 
-  const { close } = modal({
+  const { close, root: modalRoot } = modal({
     title: detail.name,
     bodyHtml: `
       <div class="a-field"><label>School code</label><div>${esc(detail.code)}</div></div>
@@ -264,25 +274,25 @@ async function openSchoolDetail(schoolId, body, searchTerm) {
     `
   });
 
-  const walletBtn = close.root.querySelector('#a-wallet-apply');
+  const walletBtn = modalRoot.querySelector('#a-wallet-apply');
   walletBtn.onclick = () => withBusy(walletBtn, async () => {
-    const delta = parseInt(close.root.querySelector('#a-wallet-delta').value, 10);
+    const delta = parseInt(modalRoot.querySelector('#a-wallet-delta').value, 10);
     if (!delta) { toast('Enter a non-zero amount.', 'err'); return; }
     await rpc('admin_adjust_sms_wallet', { p_school_id: schoolId, p_delta: delta, p_note: 'Manual adjustment from Admin Dashboard' });
     toast('SMS wallet updated.', 'ok');
-    close.close(); renderSchools(body, searchTerm);
+    close(); renderSchools(body, searchTerm);
   });
 
-  const extendBtn = close.root.querySelector('#a-extend-apply');
+  const extendBtn = modalRoot.querySelector('#a-extend-apply');
   extendBtn.onclick = () => withBusy(extendBtn, async () => {
-    const days = parseInt(close.root.querySelector('#a-extend-days').value, 10);
+    const days = parseInt(modalRoot.querySelector('#a-extend-days').value, 10);
     if (!days || days <= 0) { toast('Enter a positive number of days.', 'err'); return; }
     await rpc('admin_extend_trial', { p_school_id: schoolId, p_extra_days: days });
     toast('Trial extended.', 'ok');
-    close.close(); renderSchools(body, searchTerm);
+    close(); renderSchools(body, searchTerm);
   });
 
-  const lockBtn = close.root.querySelector('#a-lock-toggle');
+  const lockBtn = modalRoot.querySelector('#a-lock-toggle');
   lockBtn.onclick = () => withBusy(lockBtn, async () => {
     const willLock = !detail.locked_at;
     let reason = null;
@@ -291,10 +301,10 @@ async function openSchoolDetail(schoolId, body, searchTerm) {
     }
     await rpc('admin_set_school_lock', { p_school_id: schoolId, p_locked: willLock, p_reason: reason });
     toast(willLock ? 'School locked.' : 'School unlocked.', 'ok');
-    close.close(); renderSchools(body, searchTerm);
+    close(); renderSchools(body, searchTerm);
   });
 
-  const loginAsBtn = close.root.querySelector('#a-login-as');
+  const loginAsBtn = modalRoot.querySelector('#a-login-as');
   loginAsBtn.onclick = () => withBusy(loginAsBtn, async () => {
     const { data: { session } } = await supabase.auth.getSession();
     const res = await fetch('/.netlify/functions/admin-impersonate', {
@@ -318,9 +328,9 @@ async function openSchoolDetail(schoolId, body, searchTerm) {
     window.location.href = '/index.html';
   });
 
-  const deleteBtn = close.root.querySelector('#a-delete-school');
+  const deleteBtn = modalRoot.querySelector('#a-delete-school');
   deleteBtn.onclick = () => {
-    close.close();
+    close();
     modal({
       title: `Delete "${detail.name}"`,
       bodyHtml: `<p>This is the most dangerous action here. The school will be soft-deleted and recoverable for 30 days, then permanently removed.</p>
@@ -344,6 +354,7 @@ async function renderSmsRequests(body) {
   body.innerHTML = `<div class="a-card"><div class="a-card-h">SMS Credit Purchase Requests</div><div class="a-card-b" id="a-sms-list"><div class="a-loader"><div class="a-spin"></div></div></div></div>`;
   let rows;
   try { rows = await rpc('admin_list_sms_requests', { p_status: null }); } catch (e) { return; }
+  if (!Array.isArray(rows)) rows = [];
   const listEl = document.getElementById('a-sms-list');
   if (!rows.length) { listEl.innerHTML = `<div class="a-empty">No SMS credit requests yet.</div>`; return; }
 
@@ -378,6 +389,7 @@ async function renderAuditLog(body) {
   body.innerHTML = `<div class="a-card"><div class="a-card-h">Audit Log</div><div class="a-card-b" id="a-audit-list"><div class="a-loader"><div class="a-spin"></div></div></div></div>`;
   let rows;
   try { rows = await rpc('admin_list_audit_log', { p_limit: 300 }); } catch (e) { return; }
+  if (!Array.isArray(rows)) rows = [];
   const listEl = document.getElementById('a-audit-list');
   if (!rows.length) { listEl.innerHTML = `<div class="a-empty">No admin actions recorded yet.</div>`; return; }
   listEl.innerHTML = `<div class="a-table-wrap"><table class="a-data">
