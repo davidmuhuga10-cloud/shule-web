@@ -1,0 +1,84 @@
+/* admin.css — Super Admin mini-app. Deliberately its own small stylesheet
+   (not main.css) — see Admin_Dashboard_Architecture3.docx: a distinct
+   mini-app, not bolted onto the main school SPA's look. */
+* { box-sizing: border-box; }
+body {
+  margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+  background: #0f172a; color: #0f172a;
+}
+.a-loader { display: flex; align-items: center; justify-content: center; height: 100vh; }
+.a-spin { width: 34px; height: 34px; border: 3px solid #334155; border-top-color: #38bdf8; border-radius: 50%; animation: aspin 0.8s linear infinite; }
+@keyframes aspin { to { transform: rotate(360deg); } }
+
+#admin-toasts { position: fixed; top: 16px; right: 16px; z-index: 10000; display: flex; flex-direction: column; gap: 8px; }
+.a-toast { background: #1e293b; color: #fff; padding: 10px 16px; border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.3); font-size: 14px; }
+.a-toast.err { background: #b91c1c; }
+.a-toast.ok { background: #15803d; }
+
+/* ---- Login screen ---- */
+.a-login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #0f172a; }
+.a-login-box { background: #1e293b; padding: 36px 32px; border-radius: 14px; width: 340px; color: #e2e8f0; }
+.a-login-box h1 { font-size: 20px; margin: 0 0 4px; }
+.a-login-box p.a-sub { color: #94a3b8; font-size: 13px; margin: 0 0 20px; }
+.a-field { margin-bottom: 14px; }
+.a-field label { display: block; font-size: 12px; color: #94a3b8; margin-bottom: 4px; }
+.a-field input, .a-field textarea, .a-field select {
+  width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 14px;
+}
+.a-btn { display: inline-block; padding: 10px 18px; border-radius: 8px; border: none; background: #38bdf8; color: #0f172a; font-weight: 700; cursor: pointer; font-size: 14px; }
+.a-btn:hover { background: #7dd3fc; }
+.a-btn.secondary { background: #334155; color: #e2e8f0; }
+.a-btn.danger { background: #dc2626; color: #fff; }
+.a-btn.sm { padding: 6px 12px; font-size: 13px; }
+.a-btn:disabled { opacity: .6; cursor: default; }
+.a-err { color: #fca5a5; font-size: 13px; margin-top: 10px; }
+
+/* ---- Shell ---- */
+.a-shell { display: flex; min-height: 100vh; background: #f1f5f9; color: #0f172a; }
+.a-sidebar { width: 220px; background: #0f172a; color: #e2e8f0; padding: 20px 0; flex-shrink: 0; }
+.a-brand { padding: 0 20px 20px; font-weight: 800; font-size: 17px; border-bottom: 1px solid #1e293b; margin-bottom: 12px; }
+.a-brand small { display: block; font-weight: 400; color: #94a3b8; font-size: 11px; margin-top: 2px; }
+.a-nav a { display: flex; align-items: center; gap: 10px; padding: 10px 20px; color: #cbd5e1; text-decoration: none; cursor: pointer; font-size: 14px; }
+.a-nav a:hover { background: #1e293b; }
+.a-nav a.active { background: #1e293b; color: #38bdf8; font-weight: 600; border-left: 3px solid #38bdf8; }
+.a-nav-foot { padding: 16px 20px; margin-top: auto; border-top: 1px solid #1e293b; }
+.a-main { flex: 1; padding: 28px 32px; overflow-x: auto; }
+.a-topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.a-topbar h2 { margin: 0; font-size: 22px; }
+.a-topbar .a-who { font-size: 13px; color: #64748b; }
+
+/* ---- Cards / stats ---- */
+.a-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 22px; }
+.a-stat { background: #fff; border-radius: 12px; padding: 16px 18px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+.a-stat .a-stat-label { font-size: 12px; color: #64748b; margin-bottom: 6px; }
+.a-stat .a-stat-value { font-size: 26px; font-weight: 700; }
+.a-card { background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.06); margin-bottom: 20px; overflow: hidden; }
+.a-card-h { padding: 14px 18px; font-weight: 700; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
+.a-card-b { padding: 16px 18px; }
+.a-muted { color: #64748b; font-size: 13px; }
+.a-empty { text-align: center; padding: 24px; color: #94a3b8; }
+
+/* ---- Table ---- */
+.a-table-wrap { overflow-x: auto; }
+table.a-data { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.a-data th { text-align: left; padding: 10px 12px; border-bottom: 2px solid #e2e8f0; color: #475569; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+table.a-data td { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; }
+table.a-data tr:hover td { background: #f8fafc; }
+
+.a-badge { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.a-badge.green { background: #dcfce7; color: #166534; }
+.a-badge.red { background: #fee2e2; color: #991b1b; }
+.a-badge.amber { background: #fef3c7; color: #92400e; }
+.a-badge.grey { background: #e2e8f0; color: #475569; }
+
+.a-row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.a-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 13px; }
+.a-bar-track { flex: 1; background: #e2e8f0; border-radius: 4px; height: 10px; overflow: hidden; }
+.a-bar-fill { background: #38bdf8; height: 100%; }
+
+/* ---- Modal ---- */
+.a-modal-scrim { position: fixed; inset: 0; background: rgba(15,23,42,.55); display: flex; align-items: center; justify-content: center; z-index: 9998; }
+.a-modal { background: #fff; border-radius: 12px; width: 460px; max-width: 92vw; max-height: 86vh; overflow-y: auto; }
+.a-modal-h { padding: 16px 20px; font-weight: 700; border-bottom: 1px solid #e2e8f0; }
+.a-modal-b { padding: 18px 20px; }
+.a-modal-f { padding: 14px 20px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 10px; }

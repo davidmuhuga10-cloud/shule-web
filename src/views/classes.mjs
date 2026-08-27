@@ -42,6 +42,7 @@ async function renderList(root) {
         <td class="num">${c.student_count}</td>
         <td>${esc(staffMap[c.class_teacher_staff_id] || '—')}</td>
         <td class="row-actions">
+          <button class="btn sm secondary" data-manage="${c.id}">📂 Manage Class</button>
           <button class="btn sm secondary" data-edit="${c.id}">Edit</button>
           <button class="btn sm danger" data-del="${c.id}">Delete</button>
         </td></tr>`).join('')
@@ -49,7 +50,9 @@ async function renderList(root) {
 
   root.innerHTML = `
     <div class="page-head"><div><h2>Classes &amp; Arms</h2><p>Click a class to manage its arms, subjects and teachers.</p></div>
-      <div class="spacer"></div><button class="btn" id="add-class">+ Add class</button></div>
+      <div class="spacer"></div>
+      <button class="btn secondary" id="bulk-add-classes">+ Bulk Add Classes</button>
+      <button class="btn" id="add-class">+ Add class</button></div>
     <div class="card">
       ${classes.length ? `<div class="table-wrap"><table class="data">
         <thead><tr><th>Class</th><th class="num">Arms</th><th class="num">Students</th><th>Class Teacher</th><th></th></tr></thead>
@@ -61,12 +64,24 @@ async function renderList(root) {
     </div>`;
 
   root.querySelector('#add-class').onclick = () => openClassModal(root, undefined, staff, classes);
+  // Next Sprint 2 §2: bulk-add several classes at once, each with its own
+  // (possibly multi-stream) arm list — the existing single-class flow above
+  // is untouched, this is a separate, additional entry point.
+  root.querySelector('#bulk-add-classes').onclick = () => openBulkAddClassesModal(root, classes);
   const emptyBtn = root.querySelector('#empty-add-class');
   if (emptyBtn) emptyBtn.onclick = () => openClassModal(root, undefined, staff, classes);
   root.querySelectorAll('[data-open]').forEach((tr) => tr.onclick = (e) => {
-    if (e.target.closest('[data-edit],[data-del]')) return;
+    if (e.target.closest('[data-edit],[data-del],[data-manage]')) return;
     renderLoading(root, 'Loading arms, please wait…');
     renderClassDetail(root, classes.find((c) => c.id === tr.dataset.open), staff);
+  });
+  // Next Sprint 2 §1: the row itself was already clickable to drill into a
+  // class's arms/subjects/teachers, but that wasn't obvious at a glance —
+  // this button makes the same action explicit, sitting before Edit.
+  root.querySelectorAll('[data-manage]').forEach((b) => b.onclick = (e) => {
+    e.stopPropagation();
+    renderLoading(root, 'Loading arms, please wait…');
+    renderClassDetail(root, classes.find((c) => c.id === b.dataset.manage), staff);
   });
   root.querySelectorAll('[data-edit]').forEach((b) => b.onclick = (e) => {
     e.stopPropagation();
@@ -78,6 +93,75 @@ async function renderList(root) {
       const r = await Db.classes.remove(b.dataset.del);
       if (r.ok) { toast('Class deleted.', 'ok'); renderList(root); } else toast(r.message, 'err');
     }, true);
+  });
+}
+
+/**
+ * Next Sprint 2 §2: "Bulk Add Classes — tick boxes to pick several classes
+ * at once, type streams for each, support multiple streams per class." One
+ * row per still-available standard class level; ticking a row reveals a
+ * text input for that class's arm names (comma-separated, so "Blue, Red"
+ * gives it two arms in one go). Goes through Db.classes.bulkSave() —
+ * per-class save() calls under the hood, same validation as the existing
+ * single-class flow, just looped — and reports a summary of what saved vs.
+ * what didn't (e.g. a duplicate slipped in) rather than silently dropping
+ * failures.
+ */
+function openBulkAddClassesModal(root, allClasses) {
+  const usedNames = allClasses.map((c) => c.name.toLowerCase());
+  const available = STANDARD_CLASS_LEVELS.filter((n) => usedNames.indexOf(n.toLowerCase()) === -1);
+  if (!available.length) {
+    modal({
+      title: 'Bulk Add Classes',
+      body: '<p class="hint" style="margin-top:0">All standard classes (Daycare through Grade 9) have already been added.</p>',
+      okLabel: 'Close',
+      onOk: () => closeModal()
+    });
+    return;
+  }
+  const checked = new Set();
+  modal({
+    title: 'Bulk Add Classes',
+    wide: true,
+    body: `
+      <p class="hint" style="margin-top:0">Tick every class you want to add, then type its arm names (comma-separated — e.g. "Blue, Red") before saving.</p>
+      <table class="data"><thead><tr><th style="width:36px"></th><th>Class</th><th>Arms</th></tr></thead>
+      <tbody>${available.map((n) => `<tr>
+        <td><input type="checkbox" data-bulk-pick="${esc(n)}"></td>
+        <td>${esc(n)}</td>
+        <td><input type="text" data-bulk-streams="${esc(n)}" placeholder="e.g. Blue, Red" disabled></td>
+      </tr>`).join('')}</tbody></table>
+    `,
+    okLabel: 'Save selected classes',
+    busyLabel: 'Adding classes, please wait…',
+    onOk: async () => {
+      const items = [...checked].map((n) => {
+        const input = document.querySelector(`[data-bulk-streams="${CSS.escape(n)}"]`);
+        const streams = (input ? input.value : '').split(',').map((s) => s.trim()).filter(Boolean);
+        return { name: n, streams };
+      });
+      if (!items.length) { toast('Tick at least one class.', 'err'); return; }
+      const missingStreams = items.find((it) => !it.streams.length);
+      if (missingStreams) { toast(`Add at least one arm for ${missingStreams.name}.`, 'err'); return; }
+      const res = await Db.classes.bulkSave(items);
+      if (!res.ok) { toast(res.message, 'err'); return; }
+      const { created, total, failed } = res.data;
+      closeModal();
+      if (failed && failed.length) {
+        toast(`Added ${created} of ${total} classes. Failed: ${failed.map((f) => f.name).join(', ')}.`, created ? 'ok' : 'err');
+      } else {
+        toast(`Added ${created} class(es).`, 'ok');
+      }
+      renderList(root);
+    },
+    onOpen: () => {
+      document.querySelectorAll('[data-bulk-pick]').forEach((cb) => cb.onchange = () => {
+        const name = cb.dataset.bulkPick;
+        const streamInput = document.querySelector(`[data-bulk-streams="${CSS.escape(name)}"]`);
+        if (cb.checked) { checked.add(name); if (streamInput) streamInput.disabled = false; }
+        else { checked.delete(name); if (streamInput) { streamInput.disabled = true; streamInput.value = ''; } }
+      });
+    }
   });
 }
 

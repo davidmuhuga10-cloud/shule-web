@@ -16,20 +16,24 @@
  * 0031_finance_module.sql), this is just so the UI doesn't invite a click
  * that's just going to be rejected.
  */
-import { renderLoading, renderPrereq, state } from '../app.js';
+import { renderLoading, renderPrereq, esc, state } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { viewFinanceDashboard } from './financeDashboard.mjs';
 import { viewFinanceInvoicing } from './financeInvoicing.mjs';
 import { viewFinanceCollections } from './financeCollections.mjs';
-import { viewFinanceStudent } from './financeStudent.mjs';
+import { openStudentProfile } from './financeStudent.mjs';
 import { viewFinanceReports } from './financeReports.mjs';
 import { viewFinanceTransport } from './financeTransport.mjs';
 
+// Next Sprint 2 §14: "Search Student" is no longer its own tab — it moved
+// up here, to the top-right of the Finance page header (same line as the
+// "Finance" title), large and prominent, and stays visible no matter which
+// tab below is open. See the header markup + wiring at the bottom of
+// viewFinanceHub() below.
 const TABS = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'invoicing', label: 'Invoicing' },
   { key: 'collections', label: 'Collections' },
-  { key: 'student', label: 'Student Search' },
   { key: 'reports', label: 'Reports' },
   { key: 'transport', label: 'Transport' }
 ];
@@ -61,7 +65,13 @@ export async function viewFinanceHub(root) {
 
   let active = TABS[0].key;
   root.innerHTML = `
-    <div class="page-head no-print"><div><h2>Finance</h2><p>Fees, invoicing, collections, transport billing and basic bookkeeping reports.</p></div></div>
+    <div class="page-head no-print" style="justify-content:space-between;align-items:flex-start;gap:20px">
+      <div><h2>Finance</h2></div>
+      <div style="position:relative;flex:1 1 480px;min-width:280px;max-width:640px">
+        <input id="fin-search-q" class="fin-search-prominent" placeholder="🔍 Search student — admission no. or name…" autocomplete="off">
+        <div id="fin-search-results" class="search-results"></div>
+      </div>
+    </div>
     <div class="fin-tabs no-print">
       ${TABS.map((t) => `<button data-tab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</button>`).join('')}
     </div>
@@ -76,10 +86,36 @@ export async function viewFinanceHub(root) {
     if (key === 'dashboard') viewFinanceDashboard(body, access);
     else if (key === 'invoicing') viewFinanceInvoicing(body, access);
     else if (key === 'collections') viewFinanceCollections(body, access);
-    else if (key === 'student') viewFinanceStudent(body, access);
     else if (key === 'reports') viewFinanceReports(body, access);
     else viewFinanceTransport(body, access);
   };
   root.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => showTab(b.dataset.tab));
   showTab(active);
+
+  // Next Sprint 2 §14: picking a search result opens that student's profile
+  // right in the tab body (same screen the old "Student Search" tab used —
+  // see openStudentProfile() in financeStudent.mjs) and deselects every tab
+  // button, since the profile isn't any one of them. The search box itself
+  // stays put in the header, so searching again from the profile screen (or
+  // from any other tab) always works the same way.
+  const qEl = root.querySelector('#fin-search-q');
+  const resultsEl = root.querySelector('#fin-search-results');
+  let searchTimer = null;
+  qEl.oninput = () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(async () => {
+      const q = qEl.value.trim();
+      if (q.length < 2) { resultsEl.innerHTML = ''; return; }
+      const r = await Db.finance.students.search(q);
+      const list = r.ok ? r.data : [];
+      resultsEl.innerHTML = list.map((s) => `<div class="search-hit" data-id="${s.id}">${esc(s.full_name)} <span class="muted">${esc(s.admission_no)} · ${esc(s.classes ? s.classes.name : '')}</span></div>`).join('') || '<div class="muted" style="padding:6px">No matches.</div>';
+      resultsEl.querySelectorAll('[data-id]').forEach((h) => h.onclick = () => {
+        const student = list.find((s) => s.id === h.dataset.id);
+        resultsEl.innerHTML = '';
+        qEl.value = student.full_name;
+        root.querySelectorAll('[data-tab]').forEach((b) => b.classList.remove('active'));
+        openStudentProfile(body, access, student);
+      });
+    }, 250);
+  };
 }

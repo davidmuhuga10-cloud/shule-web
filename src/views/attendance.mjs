@@ -68,17 +68,31 @@ async function renderMarkStudents(body, classes, sel) {
 
   const marks = {};
   roster.forEach((r) => { marks[r.student_id] = r.status || ''; });
+  // Next Sprint 2 §10: "Bulk Mark Attendance — tick multiple students or
+  // select a specific group and mark together." selected tracks which
+  // students are currently ticked; the "Mark selected ___" row below
+  // applies one status to every ticked student at once, on top of (not
+  // instead of) marking students one at a time or the existing "Mark all
+  // Present" shortcut.
+  const selected = new Set();
 
   rosterEl.innerHTML = `<div class="table-wrap"><table class="data">
-    <thead><tr><th>Admission No.</th><th>Name</th><th colspan="4">Status</th></tr></thead>
+    <thead><tr><th style="width:34px"><input type="checkbox" id="att-select-all"></th><th>Admission No.</th><th>Name</th><th colspan="4">Status</th></tr></thead>
     <tbody>${roster.map((r) => `<tr data-row="${r.student_id}">
+      <td><input type="checkbox" class="att-row-check" data-check="${r.student_id}"></td>
       <td>${esc(r.admission_no)}</td><td>${esc(r.full_name)}</td>
       ${STATUSES.map((s) => `<td class="num"><button class="status-btn ${s.cls} ${marks[r.student_id] === s.key ? 'on' : ''}" data-student="${r.student_id}" data-status="${s.key}">${s.label}</button></td>`).join('')}
     </tr>`).join('')}</tbody>
   </table></div>
-  <div class="card-b" style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line)">
-    <button class="btn secondary" id="att-mark-all-present">Mark all Present</button>
-    <button class="btn" id="att-save">Save attendance</button>
+  <div class="card-b" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;border-top:1px solid var(--line)">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <span class="muted" style="font-size:12.5px">Bulk-mark ticked:</span>
+      ${STATUSES.map((s) => `<button class="btn ghost sm" data-bulk-status="${s.key}">Mark selected ${s.label}</button>`).join('')}
+    </div>
+    <div style="display:flex;gap:10px">
+      <button class="btn secondary" id="att-mark-all-present">Mark all Present</button>
+      <button class="btn" id="att-save">Save attendance</button>
+    </div>
   </div>`;
 
   rosterEl.querySelectorAll('.status-btn').forEach((b) => b.onclick = () => {
@@ -90,6 +104,35 @@ async function renderMarkStudents(body, classes, sel) {
     roster.forEach((r) => { marks[r.student_id] = 'present'; });
     rosterEl.querySelectorAll('.status-btn').forEach((b) => b.classList.toggle('on', b.dataset.status === 'present'));
   };
+
+  const selectAllCb = rosterEl.querySelector('#att-select-all');
+  const rowChecks = rosterEl.querySelectorAll('.att-row-check');
+  const syncSelectAll = () => {
+    const total = rowChecks.length;
+    const on = selected.size;
+    selectAllCb.checked = total > 0 && on === total;
+    selectAllCb.indeterminate = on > 0 && on < total;
+  };
+  rowChecks.forEach((cb) => cb.onchange = () => {
+    if (cb.checked) selected.add(cb.dataset.check); else selected.delete(cb.dataset.check);
+    syncSelectAll();
+  });
+  selectAllCb.onchange = () => {
+    rowChecks.forEach((cb) => {
+      cb.checked = selectAllCb.checked;
+      if (selectAllCb.checked) selected.add(cb.dataset.check); else selected.delete(cb.dataset.check);
+    });
+    syncSelectAll();
+  };
+  rosterEl.querySelectorAll('[data-bulk-status]').forEach((b) => b.onclick = () => {
+    if (!selected.size) { toast('Tick at least one student first.', 'err'); return; }
+    const status = b.dataset.bulkStatus;
+    selected.forEach((sid) => {
+      marks[sid] = status;
+      rosterEl.querySelectorAll(`[data-student="${sid}"]`).forEach((x) => x.classList.toggle('on', x.dataset.status === status));
+    });
+    toast(`Marked ${selected.size} student(s) ${STATUSES.find((s) => s.key === status).label}.`, 'ok');
+  });
 
   const saveAttBtn = rosterEl.querySelector('#att-save');
   saveAttBtn.onclick = () => withBusy(saveAttBtn, async () => {

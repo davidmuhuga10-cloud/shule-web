@@ -14,6 +14,21 @@
   # node_modules upload step needed for the function itself.
   node_bundler = "esbuild"
 
+## --- Super Admin mini-app -------------------------------------------------
+## admin.html/admin.js/admin.css are a SEPARATE static mini-app (Admin_
+## Dashboard_Architecture3.docx: not bolted onto the main SPA's hash router),
+## reached at /admin. Must come BEFORE the catch-all "/*" redirect below —
+## Netlify applies redirects in order, first match wins — or every request
+## for /admin would be served index.html instead.
+[[redirects]]
+  from = "/admin"
+  to = "/admin.html"
+  status = 200
+[[redirects]]
+  from = "/admin/*"
+  to = "/admin.html"
+  status = 200
+
 ## --- Client-side routing -----------------------------------------------
 ## The app uses hash-based routing (index.html#/students, #/exams, ...), so
 ## every real "page" is still just index.html — the browser never asks the

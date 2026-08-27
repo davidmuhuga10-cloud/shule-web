@@ -13,36 +13,61 @@ import { loginStaff, loginStaffByUsername, loginParent, logout as authLogout, ge
 import { supabase } from './lib/supabaseClient.js';
 import { Db } from './lib/api/index.mjs';
 
-import { viewDashboard } from './views/dashboard.mjs';
-import { viewClasses } from './views/classes.mjs';
-import { viewStudents } from './views/students.mjs';
-import { viewBulkUpload } from './views/bulkUpload.mjs';
-import { viewStaffBulkUpload } from './views/staffBulkUpload.mjs';
-import { viewStaffHub } from './views/staffTeachers.mjs';
-import { viewGrading } from './views/gradingScales.mjs';
-import { viewExamsHub } from './views/examsHub.mjs';
-import { viewExamDesk } from './views/examDesk.mjs';
-import { viewDeletedExams } from './views/deletedExams.mjs';
-import { viewReportsHub } from './views/reportsHub.mjs';
-import { viewBroadsheet } from './views/broadsheet.mjs';
-import { viewExamAnalysis } from './views/examAnalysis.mjs';
-import { viewScoreSheet } from './views/scoreSheet.mjs';
-import { viewReports } from './views/reportForms.mjs';
-import { viewClassList } from './views/classList.mjs';
-import { viewTranscript } from './views/transcript.mjs';
-import { viewCertificates } from './views/certificates.mjs';
-import { viewMyResults } from './views/myResults.mjs';
-import { viewSettingsHub } from './views/settings.mjs';
-import { viewAttendance } from './views/attendance.mjs';
-import { viewMessaging } from './views/messaging.mjs';
-import { viewMyChildren } from './views/myChildren.mjs';
-import { viewTimetableHub } from './views/timetableHub.mjs';
-import { viewMyTimetable } from './views/myTimetable.mjs';
-import { viewFinanceHub } from './views/financeHub.mjs';
 import { renderComingSoon } from './views/_comingSoon.mjs';
 
+// Next Sprint 2 §3 (BUG: "very slow first load on a new/different device"):
+// every one of the ~26 screens above used to be a static top-of-file import,
+// so the FIRST page load (before the browser has anything cached) had to
+// download and parse every view module up front — dashboard.mjs, exams,
+// timetable, the ~900KB vendored xlsx library pulled in by bulk-upload and
+// the broadsheet's Excel export, all of it — before the login screen could
+// even render. None of that is needed until the admin actually visits that
+// screen. ROUTE_LOADERS defers each one behind a dynamic import() that only
+// fires the first time its route is opened; resolveRouteFn() below caches
+// the resolved function per page-load so repeat visits to the same route
+// don't re-await the (already-settled) import promise for no reason.
+const ROUTE_LOADERS = {
+  'dashboard': () => import('./views/dashboard.mjs').then((m) => m.viewDashboard),
+  'classes': () => import('./views/classes.mjs').then((m) => m.viewClasses),
+  'students': () => import('./views/students.mjs').then((m) => m.viewStudents),
+  'bulk-upload': () => import('./views/bulkUpload.mjs').then((m) => m.viewBulkUpload),
+  'staff-bulk-upload': () => import('./views/staffBulkUpload.mjs').then((m) => m.viewStaffBulkUpload),
+  'staff-teachers': () => import('./views/staffTeachers.mjs').then((m) => m.viewStaffHub),
+  'grading': () => import('./views/gradingScales.mjs').then((m) => m.viewGrading),
+  'exams-hub': () => import('./views/examsHub.mjs').then((m) => m.viewExamsHub),
+  'exam-desk': () => import('./views/examDesk.mjs').then((m) => m.viewExamDesk),
+  'deleted-exams': () => import('./views/deletedExams.mjs').then((m) => m.viewDeletedExams),
+  'reports-hub': () => import('./views/reportsHub.mjs').then((m) => m.viewReportsHub),
+  'broadsheet': () => import('./views/broadsheet.mjs').then((m) => m.viewBroadsheet),
+  'exam-analysis': () => import('./views/examAnalysis.mjs').then((m) => m.viewExamAnalysis),
+  'score-sheet': () => import('./views/scoreSheet.mjs').then((m) => m.viewScoreSheet),
+  'reports': () => import('./views/reportForms.mjs').then((m) => m.viewReports),
+  'class-list': () => import('./views/classList.mjs').then((m) => m.viewClassList),
+  'transcript': () => import('./views/transcript.mjs').then((m) => m.viewTranscript),
+  'certificates': () => import('./views/certificates.mjs').then((m) => m.viewCertificates),
+  'my-results': () => import('./views/myResults.mjs').then((m) => m.viewMyResults),
+  'settings': () => import('./views/settings.mjs').then((m) => m.viewSettingsHub),
+  'attendance': () => import('./views/attendance.mjs').then((m) => m.viewAttendance),
+  'messaging': () => import('./views/messaging.mjs').then((m) => m.viewMessaging),
+  'my-children': () => import('./views/myChildren.mjs').then((m) => m.viewMyChildren),
+  'timetable': () => import('./views/timetableHub.mjs').then((m) => m.viewTimetableHub),
+  'my-timetable': () => import('./views/myTimetable.mjs').then((m) => m.viewMyTimetable),
+  'finance': () => import('./views/financeHub.mjs').then((m) => m.viewFinanceHub),
+  'my-profile': () => import('./views/myProfile.mjs').then((m) => m.viewMyProfile),
+  'sms-credits': () => import('./views/smsCredits.mjs').then((m) => m.viewSmsCredits)
+};
+const _routeFnCache = {};
+async function resolveRouteFn(route) {
+  if (_routeFnCache[route]) return _routeFnCache[route];
+  const loader = ROUTE_LOADERS[route];
+  if (!loader) return null;
+  const fn = await loader();
+  _routeFnCache[route] = fn;
+  return fn;
+}
+
 /* ------------------------------ Shared state ----------------------------- */
-export const state = { profile: null, settings: null };
+export const state = { profile: null, settings: null, impersonation: null };
 
 /* ------------------------------ DOM helpers ------------------------------ */
 export function $(sel, root) { return (root || document).querySelector(sel); }
@@ -91,12 +116,19 @@ export function printLandscape() {
  *  "page" property + a named @page rule is unreliable across browsers, this
  *  boring swap-in/swap-out approach is not. */
 const PRINT_PAPER_SIZES = { A4: 'A4', A5: 'A5', Letter: 'letter' };
-export function printWithOptions(orientation, paperSize) {
+/** marginMm (optional) lets one specific screen ask for tighter page
+ *  margins than the 10mm app-wide default — added for Next Sprint 2 §8 (the
+ *  Mark List's own margins halved, ~5mm, to make room for a larger font
+ *  within the same page width) without touching every other printable
+ *  screen that shares this same function (Class List, Score Sheet, Report
+ *  Form, Finance statements, etc.). */
+export function printWithOptions(orientation, paperSize, marginMm) {
   const size = PRINT_PAPER_SIZES[paperSize] || 'A4';
   const orient = orientation === 'landscape' ? 'landscape' : 'portrait';
+  const margin = Number.isFinite(marginMm) && marginMm > 0 ? marginMm : 10;
   const style = document.createElement('style');
   style.id = 'print-options-override';
-  style.textContent = `@page{size:${size} ${orient};margin:10mm}`;
+  style.textContent = `@page{size:${size} ${orient};margin:${margin}mm}`;
   document.head.appendChild(style);
   const cleanup = () => { style.remove(); window.removeEventListener('afterprint', cleanup); };
   window.addEventListener('afterprint', cleanup);
@@ -133,7 +165,7 @@ export function printOptionsHtml(idPrefix, defaultOrientation) {
  *  printing and restored right after — browsers' "Save as PDF" print target
  *  defaults its filename to the page title, so this is what actually makes
  *  that suggestion show up in the save dialog. */
-export function wirePrintOptions(root, idPrefix, suggestedFilename) {
+export function wirePrintOptions(root, idPrefix, suggestedFilename, marginMm) {
   const btn = root.querySelector(`#${idPrefix}-print-btn`);
   if (!btn) return;
   btn.onclick = () => {
@@ -146,7 +178,7 @@ export function wirePrintOptions(root, idPrefix, suggestedFilename) {
       window.addEventListener('afterprint', restore);
       setTimeout(restore, 5000);
     }
-    printWithOptions(orient, size);
+    printWithOptions(orient, size, marginMm);
   };
 }
 export function initials(name) {
@@ -208,6 +240,32 @@ export function renderPrereqOrConnectivity(root, { ok, title, text, route, label
   }
   renderPrereq(root, title, text, route, label);
 }
+/** Next Sprint 2 §4: "show/hide password" toggle during login (and, since
+ *  the same fix applies everywhere per the standing rule, every other
+ *  password field in the app — forgot-password, signup, change-password).
+ *  passwordFieldHtml() wraps a plain password <input> with a toggle button
+ *  positioned over it; wirePasswordToggle(inputId) wires that button to
+ *  flip the input's type between 'password' and 'text'. Two small helpers
+ *  instead of one, because a couple of call sites (forgot-password's two
+ *  fields) need the wrapper markup built with slightly different attributes
+ *  than a plain call would give them — building the exact <input> string is
+ *  left to the caller; this only wraps whatever they already have. */
+export function passwordFieldHtml(inputHtml) {
+  return `<div class="pw-wrap">${inputHtml}<button type="button" class="pw-toggle" tabindex="-1" aria-label="Show password">👁️</button></div>`;
+}
+export function wirePasswordToggle(inputId) {
+  const input = $('#' + inputId);
+  if (!input) return;
+  const btn = input.parentElement && input.parentElement.querySelector('.pw-toggle');
+  if (!btn) return;
+  btn.onclick = () => {
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    btn.textContent = show ? '🙈' : '👁️';
+    btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+  };
+}
+
 export function options(list, valKey, labKey, selected, placeholder) {
   let html = placeholder ? `<option value="">${esc(placeholder)}</option>` : '';
   (list || []).forEach((it) => {
@@ -339,7 +397,7 @@ export function renderAuth(errorMsg) {
         </div>
         <div class="field">
           <label>Password</label>
-          <input id="login-pw" type="password" autocomplete="current-password" required>
+          ${passwordFieldHtml('<input id="login-pw" type="password" autocomplete="current-password" required>')}
         </div>
         <button class="btn block" type="submit" id="login-btn">Sign in</button>
       </form>
@@ -355,6 +413,7 @@ export function renderAuth(errorMsg) {
   $('#login-form').onsubmit = doLogin;
   $('#go-signup').onclick = (e) => { e.preventDefault(); renderSignup(); };
   $('#go-forgot').onclick = (e) => { e.preventDefault(); renderForgotPassword(); };
+  wirePasswordToggle('login-pw');
 }
 
 async function doLogin(e) {
@@ -447,8 +506,8 @@ function renderForgotPassword(errorMsg) {
       ${errorMsg ? `<div class="auth-err">${esc(errorMsg)}</div>` : ''}
       <form id="forgot-form">
         <div class="field"><label>Phone number</label><input id="fp-phone" type="tel" placeholder="e.g. 0712345678" value="${esc(lastPhone)}" required></div>
-        <div class="field"><label>New password</label><input id="fp-pw" type="password" autocomplete="new-password" required></div>
-        <div class="field"><label>Confirm new password</label><input id="fp-pw2" type="password" autocomplete="new-password" required></div>
+        <div class="field"><label>New password</label>${passwordFieldHtml('<input id="fp-pw" type="password" autocomplete="new-password" required>')}</div>
+        <div class="field"><label>Confirm new password</label>${passwordFieldHtml('<input id="fp-pw2" type="password" autocomplete="new-password" required>')}</div>
         <button class="btn block" type="submit" id="forgot-btn">Reset password</button>
       </form>
       <p class="hint">⚠️ This doesn't verify it's really you yet — anyone who knows this phone number could reset this password. A verified (OTP) reset is planned for a later update.</p>
@@ -460,6 +519,8 @@ function renderForgotPassword(errorMsg) {
 
   $('#forgot-back').onclick = (e) => { e.preventDefault(); renderAuth(); };
   $('#forgot-form').onsubmit = doForgotPassword;
+  wirePasswordToggle('fp-pw');
+  wirePasswordToggle('fp-pw2');
 }
 
 async function doForgotPassword(e) {
@@ -529,7 +590,7 @@ function renderSignup() {
         </div>
         <div class="field"><label>Your full name</label><input id="su-admin-name" placeholder="e.g. Jane Wanjiru" required></div>
         <div class="field"><label>Your phone number</label><input id="su-phone" type="tel" placeholder="e.g. 0712345678" required></div>
-        <div class="field"><label>Password</label><input id="su-pw" type="password" autocomplete="new-password" required></div>
+        <div class="field"><label>Password</label>${passwordFieldHtml('<input id="su-pw" type="password" autocomplete="new-password" required>')}</div>
         <button class="btn block" type="submit" id="signup-btn">Create school account</button>
       </form>
       <p class="hint">Already have an account? <a href="#" id="go-login">Sign in instead</a></p>
@@ -548,6 +609,7 @@ function renderSignup() {
 
   $('#go-login').onclick = (e) => { e.preventDefault(); renderAuth(); };
   $('#signup-form').onsubmit = doSignup;
+  wirePasswordToggle('su-pw');
 }
 
 async function doSignup(e) {
@@ -695,7 +757,12 @@ const NAV = {
     // manage()/finance_can_collect() both bypass on is_admin() — see
     // migrations/0031_finance_module.sql); a teacher only sees this same
     // entry (below) once granted a finance capability.
-    { route: 'finance', label: 'Finance', ico: '💰' }
+    { route: 'finance', label: 'Finance', ico: '💰' },
+    // Super Admin dashboard §"buy SMS credits" — the school-side half of
+    // that flow (submit a payment confirmation; see migrations/0035_admin_
+    // dashboard.sql). Admin-only; the platform-wide review queue is a
+    // completely separate mini-app at /admin, not part of this sidebar.
+    { route: 'sms-credits', label: 'SMS Credits', ico: '📶' }
   ],
   teacher: [
     { route: 'dashboard', label: 'Dashboard', ico: '🏠' },
@@ -714,7 +781,11 @@ const NAV = {
     { route: 'messaging', label: 'Messaging', ico: '💬' },
     { section: 'Assessment' },
     { route: 'exams-hub', label: 'Exams', ico: '📝' },
-    { route: 'reports-hub', label: 'Reports', ico: '🧾' }
+    { route: 'reports-hub', label: 'Reports', ico: '🧾' },
+    // Next Sprint 2 §11: teacher self-service profile updates (phone,
+    // gender, other personal details) — was admin-only before.
+    { section: 'Account' },
+    { route: 'my-profile', label: 'My Profile', ico: '🙍' }
   ],
   student: [
     { route: 'my-results', label: 'My Results', ico: '🧾' }
@@ -784,50 +855,18 @@ export function go(route) {
   App.toggleSidebar(false);
 }
 
-// Routes implemented so far. Anything in NAV but not listed here renders a
-// friendly "coming soon" placeholder instead of crashing — the next phase of
-// the migration fills these in one by one.
-const ROUTES = {
-  'dashboard': viewDashboard,
-  'classes': viewClasses,
-  'students': viewStudents,
-  'bulk-upload': viewBulkUpload,
-  'staff-bulk-upload': viewStaffBulkUpload,
-  'staff-teachers': viewStaffHub,
-  'grading': viewGrading,
-  'exams-hub': viewExamsHub,
-  'exam-desk': viewExamDesk,
-  'deleted-exams': viewDeletedExams,
-  'reports-hub': viewReportsHub,
-  'broadsheet': viewBroadsheet,
-  'exam-analysis': viewExamAnalysis,
-  'score-sheet': viewScoreSheet,
-  'reports': viewReports,
-  'class-list': viewClassList,
-  'transcript': viewTranscript,
-  'certificates': viewCertificates,
-  'my-results': viewMyResults,
-  'settings': viewSettingsHub,
-  'attendance': viewAttendance,
-  'messaging': viewMessaging,
-  'my-children': viewMyChildren,
-  'timetable': viewTimetableHub,
-  'my-timetable': viewMyTimetable,
-  'finance': viewFinanceHub
-};
-
 async function router() {
   let route = (location.hash || '').replace(/^#\/?/, '') || defaultRoute();
   route = route.split('/')[0];
   const allowed = allowedRoutes(state.profile.role)[route] === true;
-  const fn = ROUTES[route];
   if (!allowed) route = defaultRoute();
   setActiveNav(route);
   const view = $('#view');
   view.innerHTML = loader();
   try {
-    if (typeof (ROUTES[route]) === 'function') {
-      await ROUTES[route](view);
+    const fn = await resolveRouteFn(route);
+    if (typeof fn === 'function') {
+      await fn(view);
     } else {
       renderComingSoon(view, (NAV[state.profile.role] || []).flatMap((it) => it.children ? it.children : [it]).find((r) => r.route === route)?.label || route);
     }
@@ -856,9 +895,9 @@ window.App = {
     $('#usermenu').classList.add('hidden');
     modal({
       title: 'Change password',
-      body: `<div class="field"><label>Current password</label><input id="cp-cur" type="password"></div>
-        <div class="field"><label>New password</label><input id="cp-new" type="password"></div>
-        <div class="field"><label>Confirm new password</label><input id="cp-conf" type="password"></div>`,
+      body: `<div class="field"><label>Current password</label>${passwordFieldHtml('<input id="cp-cur" type="password">')}</div>
+        <div class="field"><label>New password</label>${passwordFieldHtml('<input id="cp-new" type="password">')}</div>
+        <div class="field"><label>Confirm new password</label>${passwordFieldHtml('<input id="cp-conf" type="password">')}</div>`,
       okLabel: 'Update password',
       onOk: async () => {
         const cur = $('#cp-cur').value, nw = $('#cp-new').value, cf = $('#cp-conf').value;
@@ -866,7 +905,8 @@ window.App = {
         const r = await changePassword(cur, nw);
         if (r.ok) { toast('Password updated.', 'ok'); closeModal(); }
         else toast(r.message, 'err');
-      }
+      },
+      onOpen: () => { wirePasswordToggle('cp-cur'); wirePasswordToggle('cp-new'); wirePasswordToggle('cp-conf'); }
     });
   },
   async logout() {
@@ -954,14 +994,80 @@ document.addEventListener('click', (e) => {
   if (um && !um.classList.contains('hidden') && !e.target.closest('.usermenu')) um.classList.add('hidden');
 });
 
+/* ------------------------- Super Admin impersonation ---------------------
+ * "Login as School" (Admin_Dashboard_Architecture3.docx). The /admin mini-
+ * app (admin.js) mints a genuine, server-generated magic-link token via
+ * netlify/functions/admin-impersonate.js, stashes it + the Super Admin's
+ * OWN current session in sessionStorage (same-origin, same tab — survives
+ * this navigation), then sends the browser here. On load, if that pending
+ * payload is present, this app verifies the token (a real Supabase sign-in,
+ * never a password reset/lookup) and takes over as that school's admin —
+ * showing a persistent, unmissable "Viewing as ... — Admin Mode" banner the
+ * whole time, with a one-click Exit that restores the Super Admin's own
+ * session and audit-logs the end of the impersonation.
+ * ------------------------------------------------------------------------- */
+const IMPERSONATE_PENDING_KEY = 'shule_impersonate_pending';
+const IMPERSONATE_SAVED_SESSION_KEY = 'shule_super_admin_session';
+
+async function consumePendingImpersonation() {
+  let pending;
+  try { pending = JSON.parse(sessionStorage.getItem(IMPERSONATE_PENDING_KEY) || 'null'); } catch (e) { pending = null; }
+  if (!pending) return false;
+  sessionStorage.removeItem(IMPERSONATE_PENDING_KEY);
+
+  const { data, error } = await supabase.auth.verifyOtp({ email: pending.email, token: pending.token_hash, type: 'magiclink' });
+  if (error || !data || !data.session) {
+    toast('Could not start "Login as School" — the link may have expired. Please try again from the Admin Dashboard.', 'err');
+    return false;
+  }
+  state.impersonation = { school_name: pending.school_name, session_id: pending.session_id };
+  return true;
+}
+
+function renderImpersonationBanner() {
+  if (!state.impersonation) return;
+  if ($('#impersonation-banner')) return;
+  const bar = document.createElement('div');
+  bar.id = 'impersonation-banner';
+  bar.style.cssText = 'position:sticky;top:0;z-index:9999;background:#b91c1c;color:#fff;padding:8px 16px;display:flex;align-items:center;justify-content:center;gap:14px;font-weight:600;font-size:14px';
+  bar.innerHTML = `<span>🔒 Viewing as <b>${esc(state.impersonation.school_name)}</b> — Admin Mode</span><button id="impersonation-exit" class="btn sm" style="background:#fff;color:#b91c1c">Exit to Admin Dashboard</button>`;
+  document.body.insertBefore(bar, document.body.firstChild);
+  $('#impersonation-exit').onclick = exitImpersonation;
+}
+
+async function exitImpersonation() {
+  const sessionId = state.impersonation && state.impersonation.session_id;
+  let saved;
+  try { saved = JSON.parse(sessionStorage.getItem(IMPERSONATE_SAVED_SESSION_KEY) || 'null'); } catch (e) { saved = null; }
+  if (!saved) { toast('Could not restore your Super Admin session — please sign back in at /admin.', 'err'); return; }
+
+  await supabase.auth.setSession({ access_token: saved.access_token, refresh_token: saved.refresh_token });
+  sessionStorage.removeItem(IMPERSONATE_SAVED_SESSION_KEY);
+  state.impersonation = null;
+
+  if (sessionId) {
+    try {
+      const token = await getAccessToken();
+      await fetch('/.netlify/functions/admin-impersonate', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'end', session_id: sessionId })
+      });
+    } catch (e) { /* best-effort — the start was already audit-logged */ }
+  }
+  window.location.href = '/admin.html';
+}
+
 /* ------------------------------- INIT ----------------------------------- */
 (async function init() {
   state.settings = {}; // no school context yet — the auth screen shows generic platform branding until sign-in
 
+  await consumePendingImpersonation();
+
   const { data: { session } } = await supabase.auth.getSession();
   if (session) {
     const profile = await getCurrentProfile();
-    if (profile) { state.profile = profile; await bootApp(); return; }
+    if (profile) { state.profile = profile; await bootApp(); renderImpersonationBanner(); return; }
   }
   renderAuth();
 

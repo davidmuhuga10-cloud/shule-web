@@ -76,4 +76,43 @@ async function requireStaff(event, admin) {
   return requireRole(event, admin, ['admin', 'teacher'], 'Staff');
 }
 
-module.exports = { getAdminClient, requireAdmin, requireStaff };
+/**
+ * Super Admin dashboard functions (admin-impersonate.js, sms-credit-notify.js)
+ * use this instead of requireAdmin — a per-school 'admin' is NOT enough here.
+ * Only a profile with is_super_admin = true (see migrations/0035_admin_
+ * dashboard.sql) may reach these. Deliberately its own check rather than
+ * reusing requireRole(), since role/status don't apply the same way to a
+ * Super Admin profile (school_id is null for it).
+ */
+async function requireSuperAdmin(event, admin) {
+  const authHeader = event.headers.authorization || event.headers.Authorization || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+  if (!token) {
+    const err = new Error('Missing Authorization bearer token.');
+    err.statusCode = 401;
+    throw err;
+  }
+
+  const { data: userData, error: userErr } = await admin.auth.getUser(token);
+  if (userErr || !userData || !userData.user) {
+    const err = new Error('Invalid or expired session — please log in again.');
+    err.statusCode = 401;
+    throw err;
+  }
+
+  const { data: profile, error: profileErr } = await admin
+    .from('profiles')
+    .select('id, role, status, is_super_admin')
+    .eq('id', userData.user.id)
+    .maybeSingle();
+
+  if (profileErr || !profile || !profile.is_super_admin || profile.status !== 'active') {
+    const err = new Error('Super Admin access is required for this action.');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  return { user: userData.user, profile };
+}
+
+module.exports = { getAdminClient, requireAdmin, requireStaff, requireSuperAdmin };

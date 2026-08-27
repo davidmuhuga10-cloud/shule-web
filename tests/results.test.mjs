@@ -467,6 +467,35 @@ async function run() {
     check('the actually-selected class still works normally', rightClass.ok === true);
   }
 
+  // ---- Next Sprint 2 §9 (BUG): a student who joined the class AFTER an exam
+  // was created should not auto-appear on that exam's Mark List (graded 'X'
+  // for never having sat it) unless a mark was actually, deliberately
+  // entered for them. Existing students (created at-or-before the exam)
+  // keep showing exactly as before this fix. ------------------------------
+  {
+    const { results } = freshApis({
+      students: [
+        ...BASE_TABLES.students,
+        // Joined well after the exam below will be created (mock default
+        // created_at for anything saveExam() inserts is the epoch, 1970 —
+        // see mockSupabase.mjs's insert() — so "now" is comfortably later).
+        { id: 's5', admission_no: '11', full_name: 'Late Joiner', gender: 'Male', class_id: 'c1', stream_id: 'str1', status: 'active', created_at: new Date().toISOString() }
+      ]
+    });
+    const exam = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100, class_ids: ['c1'] })).data;
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '85' }] });
+
+    const sheet = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1', includeUnpublished: true });
+    check('a student who joined after the exam was created, with no marks, is left off the Mark List', !sheet.students.some((s) => s.student_id === 's5'));
+    check('a student who already existed when the exam was created still appears', sheet.students.some((s) => s.student_id === 's1'));
+
+    // Now deliberately enter a mark for the late joiner — they should
+    // appear from that point on, exactly as if they'd been added on time.
+    await results.saveResultsEntry({ exam_id: exam.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's5', score: '60' }] });
+    const sheet2 = await results.getBroadsheet({ exam_id: exam.id, class_id: 'c1', includeUnpublished: true });
+    check('once a mark is deliberately entered for a late joiner, they appear on the Mark List', sheet2.students.some((s) => s.student_id === 's5'));
+  }
+
   // ---- getReportCard (via mocked RPC) ---------------------------------------------
   {
     const { sb, results } = freshApis();

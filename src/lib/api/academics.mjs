@@ -262,6 +262,31 @@ export function createAcademicsApi(supabase) {
         clearCache();
         return ok(saved, { streamsAdded });
       },
+      /** Next Sprint 2 §2: "Bulk Add Classes — tick boxes to pick several
+       *  classes at once, type streams for each, support multiple streams
+       *  per class." Deliberately just a loop over the same save() above
+       *  (not a separate insert path) — so bulk-added classes go through
+       *  every rule single-add already enforces (level_order, at-least-one-
+       *  stream, default CBC subjects per new stream) with zero risk of the
+       *  two paths drifting apart. items: [{ name, streams: [...] }]. A
+       *  failure on one class (e.g. a duplicate name) doesn't stop the
+       *  rest — every result is reported back so the caller can show a
+       *  clear "N of M added, these failed" summary. */
+      async bulkSave(items) {
+        items = Array.isArray(items) ? items : [];
+        if (!items.length) return err('Choose at least one class to add.');
+        const results = [];
+        for (const item of items) {
+          const name = String((item && item.name) || '').trim();
+          const streams = Array.isArray(item && item.streams) ? item.streams : [];
+          if (!name) { results.push({ name: '', ok: false, message: 'Missing class name.' }); continue; }
+          const res = await this.save({ name, streams });
+          results.push({ name, ok: res.ok, message: res.ok ? '' : res.message });
+        }
+        const created = results.filter((r) => r.ok).length;
+        const failed = results.filter((r) => !r.ok);
+        return ok(null, { created, total: items.length, failed });
+      },
       async remove(id) {
         const { count } = await supabase.from('students').select('id', { count: 'exact', head: true }).eq('class_id', id);
         if (count > 0) return err('Students are enrolled in this class. Move or remove them first.');

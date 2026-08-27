@@ -247,7 +247,10 @@ async function load(root, classes, sel) {
       ${showLevels ? summaryTablesHtml(res.students, res.subjects, bands) : ''}
     </div>
   `;
-  wirePrintOptions(sheetEl, 'bs', `${cls ? cls.name : 'Class'} Mark List — ${res.exam.name}`);
+  // Next Sprint 2 §8: margins halved (10mm -> 5mm) specifically for this
+  // screen so there's room to bump the grid's font size without the wide,
+  // many-subject-column table overflowing the printed page width.
+  wirePrintOptions(sheetEl, 'bs', `${cls ? cls.name : 'Class'} Mark List — ${res.exam.name}`, 5);
   sheetEl.querySelector('#bs-download').onclick = () => {
     const streamSel = root.querySelector('#bs-stream');
     const streamName = streamSel && streamSel.selectedIndex > 0 ? streamSel.options[streamSel.selectedIndex].textContent : '';

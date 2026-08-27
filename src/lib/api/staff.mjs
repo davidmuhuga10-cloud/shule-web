@@ -37,6 +37,26 @@ export function createStaffApi(supabase) {
       });
     },
 
+    /** Next Sprint 2 §11: a teacher updating THEIR OWN personal details
+     *  (phone, gender, date of birth, national ID, next of kin) — goes
+     *  through the narrow staff_update_own_profile RPC (see schema.sql),
+     *  never a plain table update, since a teacher has no direct write
+     *  access to the `staff` table (by design — see that RPC's comment). */
+    async updateOwnProfile(payload) {
+      payload = payload || {};
+      const { data, error } = await supabase.rpc('staff_update_own_profile', {
+        p_phone: payload.phone || null,
+        p_gender: payload.gender || null,
+        p_date_of_birth: payload.date_of_birth || null,
+        p_national_id: payload.national_id || null,
+        p_next_of_kin_name: payload.next_of_kin_name || null,
+        p_next_of_kin_contact: payload.next_of_kin_contact || null
+      });
+      if (error) return err(error.message);
+      clearCache();
+      return ok(data);
+    },
+
     async save(payload) {
       payload = payload || {};
       const fullName = String(payload.full_name || '').trim();
