@@ -4253,7 +4253,7 @@ begin
 
   select count(*) into v_total_schools from public.schools where deleted_at is null;
   select count(*) into v_total_students from public.students where status = 'active';
-  select count(*) into v_total_teachers from public.staff where status = 'active' and role = 'teacher';
+  select count(*) into v_total_teachers from public.staff where status = 'active' and lower(role) = 'teacher';
   select count(*) into v_pending_sms from public.sms_credit_requests where status = 'pending';
   select coalesce(sum(amount_paid), 0) into v_total_sms_revenue from public.sms_credit_ledger;
   select count(*) into v_new_this_week from public.schools where created_at >= now() - interval '7 days' and deleted_at is null;
@@ -4330,7 +4330,7 @@ begin
   return query
     select s.id, s.name, s.code, s.status, s.created_at, s.trial_ends_at, s.locked_at, s.deleted_at,
       (select count(*)::integer from public.students st where st.school_id = s.id and st.status = 'active'),
-      (select count(*)::integer from public.staff sf where sf.school_id = s.id and sf.status = 'active' and sf.role = 'teacher'),
+      (select count(*)::integer from public.staff sf where sf.school_id = s.id and sf.status = 'active' and lower(sf.role) = 'teacher'),
       coalesce((select w.balance from public.sms_wallets w where w.school_id = s.id), 0),
       (select max(p.updated_at) from public.profiles p where p.school_id = s.id)
     from public.schools s
@@ -4357,7 +4357,7 @@ begin
     'locked_at', v_school.locked_at, 'locked_reason', v_school.locked_reason,
     'deleted_at', v_school.deleted_at,
     'student_count', (select count(*) from public.students where school_id = v_school.id and status = 'active'),
-    'teacher_count', (select count(*) from public.staff where school_id = v_school.id and status = 'active' and role = 'teacher'),
+    'teacher_count', (select count(*) from public.staff where school_id = v_school.id and status = 'active' and lower(role) = 'teacher'),
     'sms_balance', coalesce((select balance from public.sms_wallets where school_id = v_school.id), 0),
     'last_activity', (select max(updated_at) from public.profiles where school_id = v_school.id),
     'admin_profile', (select jsonb_build_object('id', p.id, 'name', p.name, 'email', p.email)

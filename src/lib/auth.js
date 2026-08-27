@@ -169,7 +169,7 @@ async function verifySchoolMatch(schoolCode) {
   if (!session) return { ok: false, message: 'Sign-in did not complete. Please try again.' };
   const { data: profile } = await supabase
     .from('profiles')
-    .select('school_id, schools ( code )')
+    .select('school_id, schools!profiles_school_id_fkey ( code )')
     .eq('id', session.user.id)
     .maybeSingle();
   const actualCode = profile && profile.schools ? profile.schools.code : null;
@@ -183,13 +183,19 @@ export async function logout() {
   await supabase.auth.signOut();
 }
 
-/** The signed-in user's app profile (role, linked staff/student id), or null. */
+/** The signed-in user's app profile (role, linked staff/student id), or null.
+ *  The `schools!profiles_school_id_fkey` hint is required, not optional —
+ *  migrations/0035_admin_dashboard.sql added schools.deleted_by (a SECOND
+ *  foreign key between profiles and schools, for "who deleted this
+ *  school"), which makes PostgREST's embed ambiguous without it (a bare
+ *  `schools ( ... )` now 300s instead of returning data — this is exactly
+ *  what broke every login right after that migration shipped). */
 export async function getCurrentProfile() {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return null;
   const { data: profile, error } = await supabase
     .from('profiles')
-    .select('id, name, email, role, staff_id, student_id, status, school_id, schools ( code, name )')
+    .select('id, name, email, role, staff_id, student_id, status, school_id, schools!profiles_school_id_fkey ( code, name )')
     .eq('id', session.user.id)
     .maybeSingle();
   if (error || !profile) return null;
