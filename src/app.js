@@ -9,7 +9,7 @@
  * function is imported directly — no more string-name ROUTES table working
  * around load order.
  */
-import { loginStaff, loginStaffByUsername, loginParent, logout as authLogout, getCurrentProfile, changePassword, findLoginAccountsByPhone } from './lib/auth.js';
+import { loginStaff, loginStaffByUsername, loginParent, logout as authLogout, getCurrentProfile, changePassword, findLoginAccountsByPhone, getAccessToken } from './lib/auth.js';
 import { supabase } from './lib/supabaseClient.js';
 import { Db } from './lib/api/index.mjs';
 
@@ -53,8 +53,7 @@ const ROUTE_LOADERS = {
   'timetable': () => import('./views/timetableHub.mjs').then((m) => m.viewTimetableHub),
   'my-timetable': () => import('./views/myTimetable.mjs').then((m) => m.viewMyTimetable),
   'finance': () => import('./views/financeHub.mjs').then((m) => m.viewFinanceHub),
-  'my-profile': () => import('./views/myProfile.mjs').then((m) => m.viewMyProfile),
-  'sms-credits': () => import('./views/smsCredits.mjs').then((m) => m.viewSmsCredits)
+  'my-profile': () => import('./views/myProfile.mjs').then((m) => m.viewMyProfile)
 };
 const _routeFnCache = {};
 async function resolveRouteFn(route) {
@@ -250,8 +249,17 @@ export function renderPrereqOrConnectivity(root, { ok, title, text, route, label
  *  fields) need the wrapper markup built with slightly different attributes
  *  than a plain call would give them — building the exact <input> string is
  *  left to the caller; this only wraps whatever they already have. */
+// Plain-line SVG eye / eye-with-a-slash icons (24x24, currentColor stroke) —
+// a professional icon pair instead of the 👁️/🙈 emoji this used to use,
+// which read as a random monkey face rather than a password-visibility
+// control, especially out of place on a login screen.
+const ICON_EYE = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
+const ICON_EYE_OFF = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.94 10.94 0 0 1 12 5c7 0 11 7 11 7a13.16 13.16 0 0 1-3.05 3.94M6.51 6.51C3.6 8.34 1 12 1 12s4 7 11 7a10.94 10.94 0 0 0 5.49-1.49"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
+// Per spec: hidden password -> slashed eye; visible password -> plain eye
+// (the icon reflects the CURRENT state, not "what clicking it will do").
 export function passwordFieldHtml(inputHtml) {
-  return `<div class="pw-wrap">${inputHtml}<button type="button" class="pw-toggle" tabindex="-1" aria-label="Show password">👁️</button></div>`;
+  return `<div class="pw-wrap">${inputHtml}<button type="button" class="pw-toggle" tabindex="-1" aria-label="Show password">${ICON_EYE_OFF}</button></div>`;
 }
 export function wirePasswordToggle(inputId) {
   const input = $('#' + inputId);
@@ -261,7 +269,7 @@ export function wirePasswordToggle(inputId) {
   btn.onclick = () => {
     const show = input.type === 'password';
     input.type = show ? 'text' : 'password';
-    btn.textContent = show ? '🙈' : '👁️';
+    btn.innerHTML = show ? ICON_EYE : ICON_EYE_OFF;
     btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
   };
 }
@@ -757,12 +765,7 @@ const NAV = {
     // manage()/finance_can_collect() both bypass on is_admin() — see
     // migrations/0031_finance_module.sql); a teacher only sees this same
     // entry (below) once granted a finance capability.
-    { route: 'finance', label: 'Finance', ico: '💰' },
-    // Super Admin dashboard §"buy SMS credits" — the school-side half of
-    // that flow (submit a payment confirmation; see migrations/0035_admin_
-    // dashboard.sql). Admin-only; the platform-wide review queue is a
-    // completely separate mini-app at /admin, not part of this sidebar.
-    { route: 'sms-credits', label: 'SMS Credits', ico: '📶' }
+    { route: 'finance', label: 'Finance', ico: '💰' }
   ],
   teacher: [
     { route: 'dashboard', label: 'Dashboard', ico: '🏠' },
@@ -995,32 +998,48 @@ document.addEventListener('click', (e) => {
 });
 
 /* ------------------------- Super Admin impersonation ---------------------
- * "Login as School" (Admin_Dashboard_Architecture3.docx). The /admin mini-
- * app (admin.js) mints a genuine, server-generated magic-link token via
- * netlify/functions/admin-impersonate.js, stashes it + the Super Admin's
- * OWN current session in sessionStorage (same-origin, same tab — survives
- * this navigation), then sends the browser here. On load, if that pending
- * payload is present, this app verifies the token (a real Supabase sign-in,
- * never a password reset/lookup) and takes over as that school's admin —
- * showing a persistent, unmissable "Viewing as ... — Admin Mode" banner the
- * whole time, with a one-click Exit that restores the Super Admin's own
- * session and audit-logs the end of the impersonation.
+ * "Login as School" (Admin_Dashboard_Architecture3.docx). Opens in a NEW
+ * TAB: the /admin mini-app (admin.js) mints a genuine, server-generated
+ * magic-link token via netlify/functions/admin-impersonate.js and points
+ * the new tab at /index.html?impersonate=1&impersonate_email=...&
+ * impersonate_token=...&impersonate_school=...&impersonate_session=... —
+ * the payload travels via URL params, not sessionStorage, because it has
+ * to reach a DIFFERENT tab than the one that requested it.
+ *
+ * That new tab's Supabase client is configured (see supabaseClient.js) to
+ * persist its session in sessionStorage instead of the default localStorage
+ * specifically because ?impersonate=1 is present — this keeps the
+ * impersonated sign-in completely isolated to this one tab, so it can never
+ * leak into or clobber the Super Admin's own already-open /admin tab (or
+ * vice versa). Because of that isolation, this tab never holds — and never
+ * needs — the Super Admin's own credentials: there is no "restore my
+ * session" step. The Super Admin simply switches back to their original
+ * /admin tab, which was never touched, or clicks Exit here to end the
+ * session and close this tab.
  * ------------------------------------------------------------------------- */
-const IMPERSONATE_PENDING_KEY = 'shule_impersonate_pending';
-const IMPERSONATE_SAVED_SESSION_KEY = 'shule_super_admin_session';
-
 async function consumePendingImpersonation() {
-  let pending;
-  try { pending = JSON.parse(sessionStorage.getItem(IMPERSONATE_PENDING_KEY) || 'null'); } catch (e) { pending = null; }
-  if (!pending) return false;
-  sessionStorage.removeItem(IMPERSONATE_PENDING_KEY);
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('impersonate') !== '1') return false;
 
-  const { data, error } = await supabase.auth.verifyOtp({ email: pending.email, token: pending.token_hash, type: 'magiclink' });
+  const email = params.get('impersonate_email');
+  const tokenHash = params.get('impersonate_token');
+  const schoolName = params.get('impersonate_school');
+  const sessionId = params.get('impersonate_session');
+
+  // Strip the one-time credentials from the URL immediately — regardless
+  // of outcome — so they never linger in browser history or get shared if
+  // the tab's URL is copied.
+  const cleanUrl = window.location.pathname + window.location.hash;
+  history.replaceState(null, '', cleanUrl);
+
+  if (!email || !tokenHash) return false;
+
+  const { data, error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: 'magiclink' });
   if (error || !data || !data.session) {
     toast('Could not start "Login as School" — the link may have expired. Please try again from the Admin Dashboard.', 'err');
     return false;
   }
-  state.impersonation = { school_name: pending.school_name, session_id: pending.session_id };
+  state.impersonation = { school_name: schoolName || 'this school', session_id: sessionId || null };
   return true;
 }
 
@@ -1030,23 +1049,20 @@ function renderImpersonationBanner() {
   const bar = document.createElement('div');
   bar.id = 'impersonation-banner';
   bar.style.cssText = 'position:sticky;top:0;z-index:9999;background:#b91c1c;color:#fff;padding:8px 16px;display:flex;align-items:center;justify-content:center;gap:14px;font-weight:600;font-size:14px';
-  bar.innerHTML = `<span>🔒 Viewing as <b>${esc(state.impersonation.school_name)}</b> — Admin Mode</span><button id="impersonation-exit" class="btn sm" style="background:#fff;color:#b91c1c">Exit to Admin Dashboard</button>`;
+  bar.innerHTML = `<span>🔒 Viewing as <b>${esc(state.impersonation.school_name)}</b> — Admin Mode</span><button id="impersonation-exit" class="btn sm" style="background:#fff;color:#b91c1c">Exit &amp; close this tab</button>`;
   document.body.insertBefore(bar, document.body.firstChild);
   $('#impersonation-exit').onclick = exitImpersonation;
 }
 
 async function exitImpersonation() {
   const sessionId = state.impersonation && state.impersonation.session_id;
-  let saved;
-  try { saved = JSON.parse(sessionStorage.getItem(IMPERSONATE_SAVED_SESSION_KEY) || 'null'); } catch (e) { saved = null; }
-  if (!saved) { toast('Could not restore your Super Admin session — please sign back in at /admin.', 'err'); return; }
-
-  await supabase.auth.setSession({ access_token: saved.access_token, refresh_token: saved.refresh_token });
-  sessionStorage.removeItem(IMPERSONATE_SAVED_SESSION_KEY);
-  state.impersonation = null;
 
   if (sessionId) {
     try {
+      // End the session with THIS tab's own (impersonated) token — this
+      // tab never has the Super Admin's credentials to send instead. The
+      // server accepts this because it checks that the caller IS the
+      // profile the session was opened for (see admin-impersonate.js).
       const token = await getAccessToken();
       await fetch('/.netlify/functions/admin-impersonate', {
         method: 'POST',
@@ -1055,7 +1071,21 @@ async function exitImpersonation() {
       });
     } catch (e) { /* best-effort — the start was already audit-logged */ }
   }
-  window.location.href = '/admin.html';
+
+  await supabase.auth.signOut();
+  state.impersonation = null;
+
+  // This tab only ever existed for the impersonation session — the Super
+  // Admin's own /admin tab was never navigated away from, so closing this
+  // one is the correct "return to the Super Admin dashboard" action. A
+  // script can only close a tab it opened itself; if this tab wasn't
+  // opened via window.open() (e.g. someone bookmarked/reloaded the URL),
+  // window.close() is a silent no-op, so fall back to a clear message.
+  window.close();
+  setTimeout(() => {
+    toast('You can now close this tab and return to the Admin Dashboard.', 'ok');
+    document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font:15px system-ui;color:#374151">You have been signed out. You can close this tab and return to the Admin Dashboard.</div>';
+  }, 300);
 }
 
 /* ------------------------------- INIT ----------------------------------- */

@@ -16,6 +16,21 @@ if (!cfg.SUPABASE_URL || cfg.SUPABASE_URL.indexOf('YOUR-PROJECT-REF') !== -1) {
   console.warn('Shule: src/lib/config.js still has placeholder Supabase values — update it with your project URL and anon key.');
 }
 
+// "Login as School" (see admin.js + netlify/functions/admin-impersonate.js)
+// opens the school's account in a NEW TAB, navigated to
+// /index.html?impersonate=1&... . supabase-js defaults to persisting the
+// session in localStorage, which is SHARED across every same-origin tab —
+// if that impersonation tab used the default storage, signing it in would
+// silently sign the Super Admin's own /admin tab in as the school too (or
+// vice versa on sign-out). Isolate it: when the impersonate flag is
+// present, back the session with sessionStorage instead, which is scoped
+// to this one tab only and never touches the Super Admin's tab at all.
+const isImpersonationTab = new URLSearchParams(window.location.search).get('impersonate') === '1';
+
 export const supabase = createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true }
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    ...(isImpersonationTab ? { storage: window.sessionStorage } : {})
+  }
 });

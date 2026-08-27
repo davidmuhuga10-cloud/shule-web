@@ -3,24 +3,31 @@
  * ----------------------------------------------------------------------------
  * "Login as School" (Admin_Dashboard_Architecture3.docx, marked with a
  * warning: implement via a secure, server-generated session — NEVER by
- * knowing or resetting the school's actual admin password).
+ * knowing or resetting the school's actual admin password). Opens in a NEW
+ * TAB (see admin.js) so the Super Admin's own /admin tab stays open and
+ * signed in the whole time — no "restore my session" step needed, they just
+ * switch back to that tab, or the new tab's Exit button closes itself.
  *
- * action: "start" — Super Admin only. Looks up the target school's admin
- * profile, mints a genuine Supabase magic-link token for that profile's
- * email via the service_role Auth admin API (admin.auth.admin.generateLink),
- * records an admin_impersonation_sessions row + admin_audit_log entry
- * (admin_record_impersonation_start), and returns the verifiable
- * {email, token_hash} pair. The BROWSER still does the actual sign-in (via
- * supabase.auth.verifyOtp) — this function never sees or needs the target's
- * password.
+ * action: "start" — Super Admin only (requireSuperAdmin). Looks up the
+ * target school's admin profile, mints a genuine Supabase magic-link token
+ * for that profile's email via the service_role Auth admin API
+ * (admin.auth.admin.generateLink), records an admin_impersonation_sessions
+ * row + admin_audit_log entry, and returns the verifiable {email,
+ * token_hash} pair. The BROWSER still does the actual sign-in (via
+ * supabase.auth.verifyOtp, using `token_hash` — NOT `token`, a real bug
+ * this shipped with once already: verifyOtp's `token` param is for a typed
+ * 6-digit code, `token_hash` is for exactly what generateLink returns) —
+ * this function never sees or needs the target's password.
  *
- * action: "end" — records admin_audit_log end via admin_record_impersonation_
- * end. Called with the ORIGINAL super admin's token restored (see admin.js /
- * app.js's exitImpersonation()), not the impersonated session — the Super
- * Admin is the actor of record for both start and end.
+ * action: "end" — the NEW tab calls this with ITS OWN (impersonated)
+ * session's token, not the Super Admin's — that tab never has the Super
+ * Admin's credentials at all, by design (see src/lib/supabaseClient.js's
+ * per-tab sessionStorage isolation for impersonation tabs). So this is
+ * requireStaff, not requireSuperAdmin, with an ownership check: the caller
+ * must BE the profile that session was opened for.
  * ----------------------------------------------------------------------------
  */
-const { getAdminClient, requireSuperAdmin } = require('./_lib/supabaseAdmin');
+const { getAdminClient, requireSuperAdmin, requireStaff } = require('./_lib/supabaseAdmin');
 
 function json(statusCode, body) {
   return { statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
@@ -45,21 +52,27 @@ exports.handler = async (event) => {
     return json(500, { ok: false, message: e.message });
   }
 
-  let caller;
-  try {
-    caller = await requireSuperAdmin(event, admin);
-  } catch (e) {
-    return json(e.statusCode || 401, { ok: false, message: e.message });
-  }
-
   try {
     if (payload.action === 'end') {
+      let caller;
+      try {
+        caller = await requireStaff(event, admin);
+      } catch (e) {
+        return json(e.statusCode || 401, { ok: false, message: e.message });
+      }
       return json(200, await endImpersonation(admin, payload, caller.user.id));
+    }
+
+    let caller;
+    try {
+      caller = await requireSuperAdmin(event, admin);
+    } catch (e) {
+      return json(e.statusCode || 401, { ok: false, message: e.message });
     }
     return json(200, await startImpersonation(admin, payload, caller.user.id));
   } catch (e) {
     console.error('admin-impersonate error:', e);
-    return json(500, { ok: false, message: e.message || 'Unexpected server error.' });
+    return json(e.statusCode || 500, { ok: false, message: e.message || 'Unexpected server error.' });
   }
 };
 
@@ -115,23 +128,33 @@ async function startImpersonation(admin, payload, adminId) {
   };
 }
 
-async function endImpersonation(admin, payload, adminId) {
+async function endImpersonation(admin, payload, callerProfileId) {
   const sessionId = String(payload.session_id || '');
   if (!sessionId) return { ok: false, message: 'Missing session_id.' };
 
   const { data: session, error: fetchErr } = await admin
     .from('admin_impersonation_sessions')
-    .select('id, school_id, ended_at')
+    .select('id, school_id, admin_id, target_profile_id, ended_at')
     .eq('id', sessionId).maybeSingle();
   if (fetchErr || !session) return { ok: false, message: 'Impersonation session not found.' };
   if (session.ended_at) return { ok: true }; // already closed — nothing to do
+
+  // Only the profile that WAS impersonated may close out its own session
+  // this way (the caller here is a school admin/teacher token, never a
+  // Super Admin one — see the header comment). This is a narrow, checked
+  // exception, not an open "any staff member can end any session" door.
+  if (session.target_profile_id !== callerProfileId) {
+    const err = new Error('You are not authorized to end this impersonation session.');
+    err.statusCode = 403;
+    throw err;
+  }
 
   const { error } = await admin.from('admin_impersonation_sessions')
     .update({ ended_at: new Date().toISOString() }).eq('id', sessionId);
   if (error) return { ok: false, message: error.message };
 
   await admin.from('admin_audit_log').insert({
-    actor: adminId, action: 'impersonation_end', target_school_id: session.school_id,
+    actor: session.admin_id, action: 'impersonation_end', target_school_id: session.school_id,
     details: { session_id: sessionId }
   });
   return { ok: true };

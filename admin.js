@@ -306,6 +306,17 @@ async function openSchoolDetail(schoolId, body, searchTerm) {
 
   const loginAsBtn = modalRoot.querySelector('#a-login-as');
   loginAsBtn.onclick = () => withBusy(loginAsBtn, async () => {
+    // Open the tab SYNCHRONOUSLY, before any await — browsers only allow
+    // window.open() to bypass the popup blocker while it's still running
+    // inside the original click's call stack. We navigate this captured
+    // window reference to its real destination once the async fetch below
+    // resolves. about:blank shows a brief "Opening..." placeholder in the
+    // meantime rather than a blank flash.
+    const newTab = window.open('about:blank', '_blank');
+    if (newTab) {
+      try { newTab.document.write('<title>Shule</title><body style="font:15px system-ui;display:flex;align-items:center;justify-content:center;height:100vh;color:#374151">Opening school account…</body>'); } catch (e) { /* cross-origin timing edge case — harmless */ }
+    }
+
     const { data: { session } } = await supabase.auth.getSession();
     const res = await fetch('/.netlify/functions/admin-impersonate', {
       method: 'POST',
@@ -313,19 +324,31 @@ async function openSchoolDetail(schoolId, body, searchTerm) {
       body: JSON.stringify({ action: 'start', school_id: schoolId })
     });
     const out = await res.json();
-    if (!out.ok) { toast(out.message || 'Could not start impersonation.', 'err'); return; }
+    if (!out.ok) {
+      toast(out.message || 'Could not start impersonation.', 'err');
+      if (newTab && !newTab.closed) newTab.close();
+      return;
+    }
 
-    // Stash the pending magic-link + this Super Admin's own session (so
-    // Exit can restore it) — src/app.js's consumePendingImpersonation()
-    // reads these on load. Same-origin, same tab, so sessionStorage
-    // survives this navigation.
-    sessionStorage.setItem('shule_impersonate_pending', JSON.stringify({
-      email: out.email, token_hash: out.token_hash, school_name: out.school_name, session_id: out.session_id
-    }));
-    sessionStorage.setItem('shule_super_admin_session', JSON.stringify({
-      access_token: session.access_token, refresh_token: session.refresh_token
-    }));
-    window.location.href = '/index.html';
+    // The new tab's own Supabase client (see src/lib/supabaseClient.js)
+    // switches to sessionStorage-backed auth specifically because
+    // ?impersonate=1 is present, isolating it from this /admin tab's own
+    // (localStorage-backed) Super Admin session — so this tab is left
+    // completely untouched and stays signed in the whole time.
+    const url = '/index.html?impersonate=1'
+      + '&impersonate_email=' + encodeURIComponent(out.email)
+      + '&impersonate_token=' + encodeURIComponent(out.token_hash)
+      + '&impersonate_school=' + encodeURIComponent(out.school_name || '')
+      + '&impersonate_session=' + encodeURIComponent(out.session_id || '');
+
+    if (newTab && !newTab.closed) {
+      newTab.location.href = url;
+    } else {
+      // Popup was blocked despite the synchronous open (e.g. an
+      // aggressive blocker) — fall back to a link so the Super Admin can
+      // still get in with one click, without losing their own /admin tab.
+      toast('Your browser blocked the new tab. Please allow pop-ups for this site and try again.', 'err');
+    }
   });
 
   const deleteBtn = modalRoot.querySelector('#a-delete-school');

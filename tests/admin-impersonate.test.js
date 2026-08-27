@@ -94,18 +94,33 @@ function mockAdmin(opts) {
   }
 
   // ---- endImpersonation: closes the session and audits it -----------------
+  // Note: the caller here is the IMPERSONATED profile's own token (the new
+  // tab never holds Super Admin credentials — see the file header comment
+  // in admin-impersonate.js), so the third arg must match target_profile_id,
+  // not admin_id.
   {
-    const admin = mockAdmin({ tables: { admin_impersonation_sessions: [{ id: 'sess-1', school_id: 'school-1', ended_at: null }] } });
-    const res = await endImpersonation(admin, { session_id: 'sess-1' }, 'super-admin-id');
-    check('endImpersonation succeeds', res.ok === true);
+    const admin = mockAdmin({ tables: { admin_impersonation_sessions: [{ id: 'sess-1', school_id: 'school-1', admin_id: 'super-admin-id', target_profile_id: 'target-profile-1', ended_at: null }] } });
+    const res = await endImpersonation(admin, { session_id: 'sess-1' }, 'target-profile-1');
+    check('endImpersonation succeeds when the caller owns the session', res.ok === true);
     check('endImpersonation sets ended_at', !!admin._tables.admin_impersonation_sessions.find((s) => s.id === 'sess-1').ended_at);
-    check('endImpersonation writes an audit log entry', admin._tables.admin_audit_log.some((a) => a.action === 'impersonation_end' && a.actor === 'super-admin-id'));
+    check('endImpersonation writes an audit log entry with the original Super Admin as actor', admin._tables.admin_audit_log.some((a) => a.action === 'impersonation_end' && a.actor === 'super-admin-id'));
+  }
+
+  // ---- endImpersonation: refuses a caller who does not own the session ----
+  {
+    const admin = mockAdmin({ tables: { admin_impersonation_sessions: [{ id: 'sess-3', school_id: 'school-1', admin_id: 'super-admin-id', target_profile_id: 'target-profile-1', ended_at: null }] } });
+    let threw = null;
+    try {
+      await endImpersonation(admin, { session_id: 'sess-3' }, 'some-other-profile');
+    } catch (e) { threw = e; }
+    check('endImpersonation refuses a caller who is not the impersonated profile', threw && threw.statusCode === 403);
+    check('endImpersonation does not close the session on a refused attempt', !admin._tables.admin_impersonation_sessions.find((s) => s.id === 'sess-3').ended_at);
   }
 
   // ---- endImpersonation: already-ended session is a no-op, not an error ---
   {
-    const admin = mockAdmin({ tables: { admin_impersonation_sessions: [{ id: 'sess-2', school_id: 'school-1', ended_at: '2025-01-01T00:00:00Z' }] } });
-    const res = await endImpersonation(admin, { session_id: 'sess-2' }, 'super-admin-id');
+    const admin = mockAdmin({ tables: { admin_impersonation_sessions: [{ id: 'sess-2', school_id: 'school-1', admin_id: 'super-admin-id', target_profile_id: 'target-profile-1', ended_at: '2025-01-01T00:00:00Z' }] } });
+    const res = await endImpersonation(admin, { session_id: 'sess-2' }, 'target-profile-1');
     check('endImpersonation on an already-closed session returns ok without re-auditing', res.ok === true && !admin._tables.admin_audit_log.length);
   }
 
