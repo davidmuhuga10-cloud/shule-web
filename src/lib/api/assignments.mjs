@@ -20,32 +20,43 @@
  * attached to 30+ subjects" problem — a class only shows what belongs to it.
  */
 import { ok, err, createMemoCache, clearAllCaches } from './_util.mjs';
-import { CBC_SUBJECTS, levelBucketForClassName } from './cbcDefaults.mjs';
+import { levelBucketForClassName, defaultSubjectsFor } from './cbcDefaults.mjs';
 
-/** Auto-populate a brand-new stream with its grade's default CBC subjects
- *  (brief §4.2). Best-effort: creates any missing subject rows for that
- *  level first (so a school that hasn't loaded the CBC list yet still gets
+/** Auto-populate a brand-new stream with its grade's default subjects
+ *  (brief §4.2; Next Sprint 3 §1.3 extended this to Senior Secondary/Form
+ *  3-4). Best-effort: creates any missing subject rows for that level
+ *  first (so a school that hasn't loaded the CBC list yet still gets
  *  sensible defaults), then assigns them to the stream. Silently does
  *  nothing for a non-standard class name (no defaults to guess) or if
  *  something goes wrong — a failure here should never block stream
- *  creation itself. */
-export async function seedDefaultSubjectsForNewStream(supabase, streamId, classId, className) {
+ *  creation itself.
+ *
+ *  `pathway` (Next Sprint 3 §1.3) only matters when the stream's level
+ *  bucket is 'Senior Secondary' — defaultSubjectsFor() ignores it
+ *  otherwise, so every existing call site (Pri/Jss, Form 3-4) can keep
+ *  passing nothing at all. Each default is matched/created by its
+ *  `name + pathway` pair, not name alone, so a core subject (pathway:
+ *  null) never collides with a same-named specialised one tagged to a
+ *  pathway — though today's default lists never actually share a name
+ *  across pathways, this keeps a future edit safe. */
+export async function seedDefaultSubjectsForNewStream(supabase, streamId, classId, className, pathway) {
   try {
     const level = levelBucketForClassName(className);
     if (!level) return;
-    const defaults = CBC_SUBJECTS.filter((s) => s.level === level).map((s) => s.name);
+    const defaults = defaultSubjectsFor(level, pathway || null); // [{ name, pathway }]
     if (!defaults.length) return;
-    const wanted = new Set(defaults.map((n) => n.toLowerCase()));
+    const key = (name, pw) => `${String(name).toLowerCase()}::${pw || ''}`;
+    const wanted = new Set(defaults.map((d) => key(d.name, d.pathway)));
 
-    const { data: existingSubjects } = await supabase.from('subjects').select('id, name').eq('level', level);
-    const haveNames = new Set((existingSubjects || []).map((s) => String(s.name).toLowerCase()));
-    const toCreate = defaults.filter((n) => !haveNames.has(n.toLowerCase()));
+    const { data: existingSubjects } = await supabase.from('subjects').select('id, name, pathway').eq('level', level);
+    const haveKeys = new Set((existingSubjects || []).map((s) => key(s.name, s.pathway)));
+    const toCreate = defaults.filter((d) => !haveKeys.has(key(d.name, d.pathway)));
     if (toCreate.length) {
-      await supabase.from('subjects').insert(toCreate.map((name) => ({ name, level, code: '', description: '' })));
+      await supabase.from('subjects').insert(toCreate.map((d) => ({ name: d.name, level, pathway: d.pathway, code: '', description: '' })));
     }
 
-    const { data: allLevelSubjects } = await supabase.from('subjects').select('id, name').eq('level', level);
-    const idsToAssign = (allLevelSubjects || []).filter((s) => wanted.has(String(s.name).toLowerCase())).map((s) => s.id);
+    const { data: allLevelSubjects } = await supabase.from('subjects').select('id, name, pathway').eq('level', level);
+    const idsToAssign = (allLevelSubjects || []).filter((s) => wanted.has(key(s.name, s.pathway))).map((s) => s.id);
     if (idsToAssign.length) {
       await supabase.from('subject_class_assignments').insert(
         idsToAssign.map((subject_id) => ({ subject_id, class_id: classId, stream_id: streamId }))

@@ -193,9 +193,12 @@ export async function logout() {
 export async function getCurrentProfile() {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return null;
+  // Next Sprint 3 §1.2: schools.category rides along on the same embed —
+  // classes.mjs reads it (state.profile.schools.category) to decide which
+  // class-level list to offer, with no extra round trip.
   const { data: profile, error } = await supabase
     .from('profiles')
-    .select('id, name, email, role, staff_id, student_id, status, school_id, schools!profiles_school_id_fkey ( code, name )')
+    .select('id, name, email, role, staff_id, student_id, status, school_id, schools!profiles_school_id_fkey ( code, name, category )')
     .eq('id', session.user.id)
     .maybeSingle();
   if (error || !profile) return null;

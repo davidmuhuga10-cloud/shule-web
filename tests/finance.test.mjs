@@ -1,5 +1,5 @@
 import { numberToWords, amountInWords } from '../src/lib/finance/amountInWords.mjs';
-import { buildStatement } from '../src/lib/finance/statement.mjs';
+import { buildStatement, groupByTerm } from '../src/lib/finance/statement.mjs';
 import { buildBalancesAoa, buildVoteHeadCollectionsAoa, buildCashbookAoa, buildTrialBalanceAoa } from '../src/lib/finance/financeXlsx.mjs';
 
 let passed = 0, failed = 0;
@@ -44,6 +44,40 @@ function run() {
 
   const creditOpeningRows = buildStatement({ openingBalance: { amount: -150 }, invoiceItems: [], debitNotes: [], creditNotes: [], collections: [] });
   check('buildStatement treats a negative opening balance as a credit', creditOpeningRows[0].credit === 150 && creditOpeningRows[0].debit === 0);
+
+  check('buildStatement tags every row with its academic_year_id/term_id', rows.every((r) => 'academic_year_id' in r && 'term_id' in r));
+  check('buildStatement records a per-row Bal BF that matches the running balance before that row', rows[1].balBf === rows[0].balance);
+
+  // --- statement.groupByTerm ---
+  const years = [{ id: 'y1', name: '2026' }];
+  const t1 = { id: 't1', academic_year_id: 'y1', name: 'Term 1', start_date: '2026-01-01' };
+  const t2 = { id: 't2', academic_year_id: 'y1', name: 'Term 2', start_date: '2026-05-01' };
+  const t3 = { id: 't3', academic_year_id: 'y1', name: 'Term 3', start_date: '2026-09-01' };
+  const taggedRows = buildStatement({
+    openingBalance: { amount: 500, created_at: '2026-01-01', academic_year_id: 'y1' },
+    invoiceItems: [{ created_at: '2026-01-05', amount: 4000, academic_year_id: 'y1', term_id: 't1', finance_vote_heads: { name: 'Tuition' } }],
+    debitNotes: [],
+    creditNotes: [],
+    collections: [
+      { created_at: '2026-01-15', amount: 3000, mode: 'cash', receipt_no: 'RCT-1', status: 'active', academic_year_id: 'y1', term_id: 't1' },
+      { created_at: '2026-06-01', amount: 2000, mode: 'bank', receipt_no: 'RCT-2', status: 'active', academic_year_id: 'y1', term_id: 't2' }
+    ]
+  });
+  const groups = groupByTerm(taggedRows, { terms: [t3, t1, t2], academicYears: years });
+  check('groupByTerm orders term boxes chronologically regardless of input order', groups.map((g) => g.termId).join(',') === 't1,t2');
+  check('groupByTerm skips a term with no rows (Term 3 has none)', !groups.some((g) => g.termId === 't3'));
+  check('groupByTerm labels each box TERM:<year>/<n> from the terms/years lists', groups[0].label === 'TERM:2026/1' && groups[1].label === 'TERM:2026/2');
+  check('groupByTerm carries the year-level opening balance into the first term chronologically', groups[0].rows[0].kind === 'opening_balance');
+  check('groupByTerm reports a closing balance per box (Term 1: 500 + 4000 - 3000 = 1500)', groups[0].closingBalance === 1500);
+  check('groupByTerm continues the running balance into the next box (Term 2: 1500 - 2000 = -500)', groups[1].closingBalance === -500);
+
+  const rowsWithNoTermMatch = buildStatement({
+    openingBalance: null, invoiceItems: [], debitNotes: [],
+    creditNotes: [{ created_at: '2025-01-01', amount: 100, academic_year_id: 'y0', term_id: 'gone', finance_vote_heads: { name: 'Old' } }],
+    collections: []
+  });
+  const orphanGroups = groupByTerm(rowsWithNoTermMatch, { terms: [t1], academicYears: years });
+  check('groupByTerm buckets a row whose term no longer matches any known term into a leading Uncategorised box', orphanGroups.length === 1 && orphanGroups[0].label === 'Prior / Uncategorised');
 
   // --- financeXlsx AOA builders ---
   const settings = { school_name: 'Green Hills Academy' };
