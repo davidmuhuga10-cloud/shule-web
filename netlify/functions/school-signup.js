@@ -80,6 +80,14 @@ async function createSchoolAndAdmin(admin, payload) {
   const adminPhone = String(payload.admin_phone || '').trim();
   const password = String(payload.password || '');
   let code = slugifyCode(payload.school_code);
+  // Next Sprint 3 §1.2: "Senior School" or "Pri & Jss" — asked once at
+  // sign-up, decides which class-level list/subjects the account gets (see
+  // schema.sql's seed_school_defaults() and cbcDefaults.mjs's
+  // classLevelsForCategory()). Falls back to the column's own default
+  // ('pri_jss') for a bad/missing value rather than rejecting the signup —
+  // this field didn't exist before this feature, and an old cached
+  // frontend bundle (or a future non-browser caller) simply won't send it.
+  const category = payload.category === 'senior' ? 'senior' : 'pri_jss';
 
   if (!schoolName || schoolName.length < 2) return { ok: false, message: 'Enter your school\'s name.' };
   if (!adminName) return { ok: false, message: 'Enter your (the admin\'s) full name.' };
@@ -93,8 +101,8 @@ async function createSchoolAndAdmin(admin, payload) {
   // Create the school row first (cheap, easy to clean up if the next step fails).
   const { data: school, error: schoolErr } = await admin
     .from('schools')
-    .insert({ name: schoolName, code })
-    .select('id, code, name')
+    .insert({ name: schoolName, code, category })
+    .select('id, code, name, category')
     .single();
   if (schoolErr) {
     if (String(schoolErr.message || '').toLowerCase().includes('duplicate')) {

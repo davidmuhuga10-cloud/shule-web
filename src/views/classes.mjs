@@ -17,10 +17,25 @@
  * gone — creating a brand-new subject now happens inline from the stream's
  * "+ Add subject" picker.
  */
-import { esc, modal, closeModal, toast, confirmAction, options, renderLoading, withBusy } from '../app.js';
+import { esc, modal, closeModal, toast, confirmAction, options, renderLoading, withBusy, state } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
-import { STANDARD_CLASS_LEVELS } from '../lib/api/academics.mjs';
+import { STANDARD_CLASS_LEVELS, classLevelsForCategory, levelBucketForClassName, PATHWAYS } from '../lib/api/academics.mjs';
 import { plainNameError } from '../lib/validators.mjs';
+
+/** Next Sprint 3 §1.2: which class-level list this school's admin should be
+ *  offered when adding a class, based on schools.category — see
+ *  cbcDefaults.mjs's classLevelsForCategory() header comment for why this
+ *  is a UI convenience, not an enforcement boundary. Falls back to
+ *  'pri_jss' the same way the column itself defaults, so a profile loaded
+ *  before this feature shipped (or mid-request, before state.profile is
+ *  populated) behaves exactly as it always has. */
+function schoolCategory() {
+  return (state.profile && state.profile.schools && state.profile.schools.category) || 'pri_jss';
+}
+
+function categoryRangeLabel(category) {
+  return category === 'senior' ? 'Grade 10 through Form 4' : 'Daycare through Grade 9';
+}
 
 export async function viewClasses(root) {
   await renderList(root);
@@ -108,12 +123,22 @@ async function renderList(root) {
  * failures.
  */
 function openBulkAddClassesModal(root, allClasses) {
+  const category = schoolCategory();
   const usedNames = allClasses.map((c) => c.name.toLowerCase());
-  const available = STANDARD_CLASS_LEVELS.filter((n) => usedNames.indexOf(n.toLowerCase()) === -1);
+  // Next Sprint 3 §1.3: a Grade 10-12 arm MUST have a pathway chosen for it
+  // (its default subjects depend on it), and bulk-add's one-arms-textbox-
+  // per-class shape has no room to ask that per arm — so pathway-based
+  // classes are deliberately left out of this picker; add them one at a
+  // time from "+ Add class" instead, where promptAddStream asks for each
+  // arm's pathway individually. Form 3/4 have no pathway concept at all
+  // (brief §1.4) so they stay available here same as any Pri/Jss class.
+  const available = classLevelsForCategory(category)
+    .filter((n) => usedNames.indexOf(n.toLowerCase()) === -1)
+    .filter((n) => levelBucketForClassName(n) !== 'Senior Secondary');
   if (!available.length) {
     modal({
       title: 'Bulk Add Classes',
-      body: '<p class="hint" style="margin-top:0">All standard classes (Daycare through Grade 9) have already been added.</p>',
+      body: `<p class="hint" style="margin-top:0">All standard classes (${esc(categoryRangeLabel(category))}) have already been added.${category === 'senior' ? ' Grade 10-12 classes are added one at a time from "+ Add class" instead, since each arm needs its own pathway chosen.' : ''}</p>`,
       okLabel: 'Close',
       onOk: () => closeModal()
     });
@@ -168,9 +193,19 @@ function openBulkAddClassesModal(root, allClasses) {
 function openClassModal(root, existing, staff, allClasses) {
   staff = staff || [];
   allClasses = allClasses || [];
+  const category = schoolCategory();
   const usedNames = allClasses.map((c) => c.name.toLowerCase());
-  const available = STANDARD_CLASS_LEVELS.filter((n) => usedNames.indexOf(n.toLowerCase()) === -1);
-  let pendingStreams = []; // only used when adding a brand-new class
+  const available = classLevelsForCategory(category).filter((n) => usedNames.indexOf(n.toLowerCase()) === -1);
+  let pendingStreams = []; // only used when adding a brand-new class — [{ name, pathway }]
+  // Bug fix (surfaced by Next Sprint 3's interactive test, but pre-existing
+  // and unrelated to Senior School itself): renderModal() rebuilds this
+  // whole modal's HTML from scratch every time an arm is queued (or
+  // un-queued), including a BRAND-NEW <select id="cl-name">. Without
+  // remembering the previously chosen class name here and re-selecting it
+  // on each render, choosing a class, then adding even one arm, silently
+  // reset the class picker back to blank — "Please choose a class." on
+  // Save, after the admin had already picked one and added its arms.
+  let chosenClassName = '';
 
   renderModal();
 
@@ -178,10 +213,10 @@ function openClassModal(root, existing, staff, allClasses) {
     const nameField = existing
       ? `<input id="cl-name" value="${esc(existing.name)}" disabled>`
       : (available.length
-          ? `<select id="cl-name">${options(available.map((n) => ({ id: n, name: n })), 'id', 'name', '', 'Choose a class')}</select>`
-          : `<input id="cl-name" value="" disabled><p class="hint" style="color:var(--danger,#c0392b)">All standard classes (Daycare through Grade 9) have already been added.</p>`);
+          ? `<select id="cl-name">${options(available.map((n) => ({ id: n, name: n })), 'id', 'name', chosenClassName, 'Choose a class')}</select>`
+          : `<input id="cl-name" value="" disabled><p class="hint" style="color:var(--danger,#c0392b)">All standard classes (${esc(categoryRangeLabel(category))}) have already been added.</p>`);
 
-    const pendingChips = pendingStreams.map((nm, i) => `<span class="chip on" data-pending="${i}">${esc(nm)} &times;</span>`).join('');
+    const pendingChips = pendingStreams.map((s, i) => `<span class="chip on" data-pending="${i}">${esc(s.name)}${s.pathway ? ' · ' + esc(s.pathway) : ''} &times;</span>`).join('');
 
     modal({
       title: existing ? 'Edit class' : 'Add class',
@@ -219,10 +254,24 @@ function openClassModal(root, existing, staff, allClasses) {
     });
 
     if (!existing) {
-      document.getElementById('cl-add-stream').onclick = () => promptAddStream((nm) => {
-        pendingStreams.push(nm);
-        renderModal();
-      });
+      const nameSelect = document.getElementById('cl-name');
+      if (nameSelect) {
+        chosenClassName = nameSelect.value; // in case the browser restored a value on its own
+        nameSelect.onchange = () => { chosenClassName = nameSelect.value; };
+      }
+      document.getElementById('cl-add-stream').onclick = () => {
+        // Next Sprint 3 §1.3: use the remembered chosenClassName, not a
+        // fresh DOM read — see the header comment above on why the select
+        // itself can't be trusted to still hold it after a re-render, and
+        // why this needs to reflect whatever was chosen most recently
+        // regardless (a Grade 10-12 choice needs its arms to ask for a
+        // pathway).
+        const requirePathway = levelBucketForClassName(chosenClassName) === 'Senior Secondary';
+        promptAddStream((nm, pathway) => {
+          pendingStreams.push({ name: nm, pathway: pathway || null });
+          renderModal();
+        }, undefined, { requirePathway });
+      };
       document.querySelectorAll('#pending-chips [data-pending]').forEach((chip) => {
         chip.onclick = () => { pendingStreams.splice(Number(chip.dataset.pending), 1); renderModal(); };
       });
@@ -243,19 +292,41 @@ function openClassModal(root, existing, staff, allClasses) {
  *  same rule academics.mjs's streams.save() enforces server-side (never
  *  trust the client-side check alone), so the person gets an immediate,
  *  specific "no commas or special characters" message instead of a
- *  silently-accepted bad value or, at best, a generic server error. */
-function promptAddStream(onAdd, existingName) {
+ *  silently-accepted bad value or, at best, a generic server error.
+ *
+ *  Next Sprint 3 §1.3: pass `{ requirePathway: true }` for a Grade 10-12
+ *  arm — adds a required Pathway dropdown to the same modal, and `onAdd`
+ *  is then called as `onAdd(name, pathway)` instead of just `onAdd(name)`.
+ *  Never shown for a rename (a stream's pathway isn't editable this way —
+ *  see academics.mjs's streams.save() comment on why). */
+function promptAddStream(onAdd, existingName, opts) {
+  opts = opts || {};
+  const requirePathway = !!opts.requirePathway && existingName === undefined;
   const isRename = existingName !== undefined && existingName !== null;
   modal({
     title: isRename ? 'Rename arm' : 'Add an arm',
-    body: `<div class="field"><label>Arm name</label><input id="stream-name-input" value="${esc(isRename ? existingName : '')}" placeholder="e.g. North, East, Blue"></div>`,
+    body: `
+      <div class="field"><label>Arm name</label><input id="stream-name-input" value="${esc(isRename ? existingName : '')}" placeholder="e.g. North, East, Blue"></div>
+      ${requirePathway ? `
+      <div class="field">
+        <label>Pathway<span style="color:var(--danger)"> *</span></label>
+        <select id="stream-pathway-input">${options(PATHWAYS.map((p) => ({ id: p, name: p })), 'id', 'name', '', 'Choose a pathway')}</select>
+        <p class="hint">Every Grade 10-12 arm needs a pathway — its subjects (core + the pathway's own specialised ones) depend on it.</p>
+      </div>` : ''}
+    `,
     okLabel: isRename ? 'Save' : 'Add',
     onOk: () => {
       const val = document.getElementById('stream-name-input').value.trim();
       const error = plainNameError(val, 'Arm name');
       if (error) { toast(error, 'err'); return; }
+      let pathway = null;
+      if (requirePathway) {
+        const pwEl = document.getElementById('stream-pathway-input');
+        pathway = pwEl ? pwEl.value : '';
+        if (!pathway) { toast('Choose this arm\'s pathway.', 'err'); return; }
+      }
       closeModal();
-      onAdd(val);
+      onAdd(val, pathway);
     }
   });
   const input = document.getElementById('stream-name-input');
@@ -274,7 +345,7 @@ async function renderClassDetail(root, cls, staff) {
       <div class="card" style="margin-bottom:10px">
         <div class="card-b stream-row clickable-row" data-open-stream="${s.id}">
           <div class="stream-info">
-            <div style="font-weight:650">${esc(s.name)}</div>
+            <div style="font-weight:650">${esc(s.name)}${s.pathway ? ` <span class="badge blue" style="font-weight:500">${esc(s.pathway)}</span>` : ''}</div>
             <div class="muted" style="font-size:12.5px">${s.student_count} student(s)</div>
           </div>
           <button class="btn manage-btn">Manage Subjects &amp; Teachers →</button>
@@ -296,12 +367,15 @@ async function renderClassDetail(root, cls, staff) {
   `;
 
   root.querySelector('#back-to-classes').onclick = () => { renderLoading(root, 'Loading classes, please wait…'); renderList(root); };
-  root.querySelector('#add-stream').onclick = () => promptAddStream(async (name) => {
-    const res = await Db.streams.save({ class_id: cls.id, name });
-    if (!res.ok) { toast(res.message, 'err'); return; }
-    toast('Arm added.', 'ok');
-    renderClassDetail(root, cls, staff);
-  });
+  root.querySelector('#add-stream').onclick = () => {
+    const requirePathway = levelBucketForClassName(cls.name) === 'Senior Secondary';
+    promptAddStream(async (name, pathway) => {
+      const res = await Db.streams.save({ class_id: cls.id, name, pathway });
+      if (!res.ok) { toast(res.message, 'err'); return; }
+      toast('Arm added.', 'ok');
+      renderClassDetail(root, cls, staff);
+    }, undefined, { requirePathway });
+  };
   root.querySelectorAll('[data-open-stream]').forEach((el) => el.onclick = (e) => {
     if (e.target.closest('[data-del-stream]') || e.target.closest('[data-rename-stream]')) return;
     renderLoading(root, 'Loading subjects & teachers, please wait…');

@@ -1,5 +1,5 @@
 import { createMockSupabase } from './helpers/mockSupabase.mjs';
-import { createAcademicsApi, CBC_SUBJECTS, STANDARD_CLASS_LEVELS } from '../src/lib/api/academics.mjs';
+import { createAcademicsApi, CBC_SUBJECTS, STANDARD_CLASS_LEVELS, PRI_JSS_CLASS_LEVELS, SENIOR_CLASS_LEVELS, classLevelsForCategory, levelBucketForClassName, PATHWAYS } from '../src/lib/api/academics.mjs';
 
 let passed = 0, failed = 0;
 function check(name, cond) { if (cond) passed++; else { failed++; console.error('FAIL:', name); } }
@@ -223,8 +223,23 @@ async function run() {
 
   // ---- classes: standardized levels (Phase 2b) -----------------------------------
   {
-    check('STANDARD_CLASS_LEVELS spans Daycare through Grade 9 (12 levels)',
-      STANDARD_CLASS_LEVELS.length === 12 && STANDARD_CLASS_LEVELS[0] === 'Daycare' && STANDARD_CLASS_LEVELS[11] === 'Grade 9');
+    // Next Sprint 3 §1: Senior School (Grade 10-12) + Form 3/4 are now
+    // APPENDED to the same list, not a separate 12-entry list — see
+    // cbcDefaults.mjs's header comment on why (level_order for every
+    // existing Daycare-Grade9 school must stay exactly as it was).
+    check('STANDARD_CLASS_LEVELS spans Daycare through Form 4 (17 levels)',
+      STANDARD_CLASS_LEVELS.length === 17 && STANDARD_CLASS_LEVELS[0] === 'Daycare' && STANDARD_CLASS_LEVELS[11] === 'Grade 9' && STANDARD_CLASS_LEVELS[16] === 'Form 4');
+    check('PRI_JSS_CLASS_LEVELS is exactly the original 12 (Daycare..Grade 9)',
+      PRI_JSS_CLASS_LEVELS.length === 12 && PRI_JSS_CLASS_LEVELS[11] === 'Grade 9');
+    check('SENIOR_CLASS_LEVELS is exactly the 5 new ones (Grade 10-12, Form 3-4)',
+      SENIOR_CLASS_LEVELS.length === 5 && SENIOR_CLASS_LEVELS[0] === 'Grade 10' && SENIOR_CLASS_LEVELS[4] === 'Form 4');
+    check('classLevelsForCategory falls back to pri_jss for an unrecognised/missing category',
+      classLevelsForCategory(undefined) === PRI_JSS_CLASS_LEVELS && classLevelsForCategory('bogus') === PRI_JSS_CLASS_LEVELS);
+    check('classLevelsForCategory returns the senior list for category "senior"',
+      classLevelsForCategory('senior') === SENIOR_CLASS_LEVELS);
+    check('levelBucketForClassName resolves Grade 10-12 to Senior Secondary and Form 3/4 to Form 3-4',
+      levelBucketForClassName('Grade 11') === 'Senior Secondary' && levelBucketForClassName('Form 3') === 'Form 3-4');
+    check('PATHWAYS is the fixed 3-pathway list', PATHWAYS.length === 3 && PATHWAYS.indexOf('STEM') !== -1);
 
     const sb = createMockSupabase({});
     const api = createAcademicsApi(sb);
@@ -232,6 +247,8 @@ async function run() {
     check('classes.save auto-derives level_order for a standard class name', g1.data.level_order === 4);
     const daycare = await api.classes.save({ name: 'daycare', streams: ['Main'] });
     check('classes.save matches standard names case-insensitively', daycare.data.level_order === 1);
+    const grade10 = await api.classes.save({ name: 'Grade 10', streams: [{ name: 'STEM A', pathway: 'STEM' }] });
+    check('classes.save auto-derives level_order for Grade 10 (13th standard level)', grade10.data.level_order === 13);
     const g9 = await api.classes.save({ name: 'Grade 9', streams: ['Main'] });
     check('classes.save orders the last standard level correctly', g9.data.level_order === 12);
   }

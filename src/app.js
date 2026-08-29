@@ -596,6 +596,14 @@ function renderSignup() {
           <label>School Code <span class="muted">(used to sign in — letters, numbers, hyphens)</span></label>
           <input id="su-code" placeholder="e.g. greenhill" required>
         </div>
+        <div class="field">
+          <label>School type</label>
+          <select id="su-category" required>
+            <option value="pri_jss">Pri &amp; Jss School (Pre-Primary through Grade 9)</option>
+            <option value="senior">Senior School (Grade 10-12, with optional Form 3/4)</option>
+          </select>
+          <p class="hint">This decides which class levels and subjects your account is set up with — you won't need to change it later.</p>
+        </div>
         <div class="field"><label>Your full name</label><input id="su-admin-name" placeholder="e.g. Jane Wanjiru" required></div>
         <div class="field"><label>Your phone number</label><input id="su-phone" type="tel" placeholder="e.g. 0712345678" required></div>
         <div class="field"><label>Password</label>${passwordFieldHtml('<input id="su-pw" type="password" autocomplete="new-password" required>')}</div>
@@ -626,6 +634,7 @@ async function doSignup(e) {
   const body = {
     school_name: $('#su-name').value,
     school_code: $('#su-code').value,
+    category: $('#su-category').value,
     admin_name: $('#su-admin-name').value,
     admin_phone: $('#su-phone').value,
     password: $('#su-pw').value

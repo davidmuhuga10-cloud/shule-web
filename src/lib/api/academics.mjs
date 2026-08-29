@@ -9,7 +9,7 @@
  * ----------------------------------------------------------------------------
  */
 import { ok, err, fromResult, createMemoCache, clearAllCaches } from './_util.mjs';
-import { CBC_LEVELS, STANDARD_CLASS_LEVELS, CBC_SUBJECTS, levelBucketForClassName } from './cbcDefaults.mjs';
+import { CBC_LEVELS, STANDARD_CLASS_LEVELS, CBC_SUBJECTS, levelBucketForClassName, PRI_JSS_CLASS_LEVELS, SENIOR_CLASS_LEVELS, classLevelsForCategory, PATHWAYS } from './cbcDefaults.mjs';
 import { seedDefaultSubjectsForNewStream } from './assignments.mjs';
 import { plainNameError } from '../validators.mjs';
 
@@ -19,7 +19,7 @@ import { plainNameError } from '../validators.mjs';
 // the reasoning for why this moved out (avoids a circular import with
 // assignments.mjs, which also needs this data to seed a new stream's
 // default subjects — Phase 2g / brief §4.2).
-export { CBC_LEVELS, STANDARD_CLASS_LEVELS, CBC_SUBJECTS };
+export { CBC_LEVELS, STANDARD_CLASS_LEVELS, CBC_SUBJECTS, PRI_JSS_CLASS_LEVELS, SENIOR_CLASS_LEVELS, classLevelsForCategory, PATHWAYS, levelBucketForClassName };
 
 export function createAcademicsApi(supabase) {
   // Same short-window in-memory memoization pattern as finance.mjs/
@@ -206,8 +206,16 @@ export function createAcademicsApi(supabase) {
         // existing class always already has at least one stream once this
         // rule has been in force since its creation (see migration
         // 0016_require_class_stream.sql for classes that predate it).
+        // Next Sprint 3 §1.3: each pending stream can now be either a plain
+        // name string (every existing caller) or `{ name, pathway }` — a
+        // Grade 10-12 stream's chosen pathway, threaded through so its
+        // default subjects seed correctly below. streamPathway() normalizes
+        // either shape back to a plain name for the existing dedupe/require
+        // logic, which doesn't care about pathway at all.
+        const streamName = (s) => String((s && typeof s === 'object' ? s.name : s) || '').trim();
+        const streamPathway = (s) => (s && typeof s === 'object' && s.pathway) || null;
         const pendingStreamNames = Array.isArray(payload.streams)
-          ? [...new Set(payload.streams.map((nm) => String(nm || '').trim()).filter(Boolean).map((nm) => nm))]
+          ? [...new Set(payload.streams.map(streamName).filter(Boolean))]
           : [];
         if (!payload.id && !pendingStreamNames.length) {
           return err('Add at least one arm for this class — e.g. "Main" if it only has one group.');
@@ -231,10 +239,10 @@ export function createAcademicsApi(supabase) {
           const { data: existingStreams } = await supabase.from('streams').select('name').eq('class_id', saved.id);
           const have = (existingStreams || []).map((s) => String(s.name).toLowerCase());
           const toInsert = [];
-          payload.streams.forEach((nm) => {
-            nm = String(nm || '').trim();
+          payload.streams.forEach((s) => {
+            const nm = streamName(s);
             if (nm && have.indexOf(nm.toLowerCase()) === -1) {
-              toInsert.push({ class_id: saved.id, name: nm });
+              toInsert.push({ class_id: saved.id, name: nm, pathway: streamPathway(s) });
               have.push(nm.toLowerCase());
             }
           });
@@ -245,8 +253,11 @@ export function createAcademicsApi(supabase) {
               // Brief §4.2: a brand-new stream starts with the correct default
               // CBC subject set for its grade, instead of every subject in the
               // system — see seedDefaultSubjectsForNewStream in assignments.mjs.
+              // Next Sprint 3 §1.3: pass along that stream's own pathway
+              // (null for every non-Senior-Secondary class) so a Grade
+              // 10-12 stream gets its pathway's specialised subjects too.
               for (const s of insertedStreams || []) {
-                await seedDefaultSubjectsForNewStream(supabase, s.id, saved.id, saved.name);
+                await seedDefaultSubjectsForNewStream(supabase, s.id, saved.id, saved.name, s.pathway);
               }
             } else if (!payload.id) {
               // Round 3 §17: for a brand-new class the required stream(s)
@@ -328,7 +339,23 @@ export function createAcademicsApi(supabase) {
         // this is a brand-new stream or a rename (§4) of an existing one.
         const nameError = plainNameError(name, 'Arm name');
         if (nameError) return err(name ? nameError : 'Arm name is required (e.g. "East", "North", "Blue").');
-        const rec = { class_id: payload.class_id, name, description: payload.description || '' };
+        // Next Sprint 3 §1.3: a Grade 10-12 arm must be told which pathway
+        // it is (its default subjects depend on it — see
+        // seedDefaultSubjectsForNewStream below) — checked server-side too,
+        // never trusting classes.mjs's own required-field check alone.
+        // Every other class level keeps pathway null, same as before this
+        // column existed; PATHWAYS is the same fixed list classes.mjs's
+        // picker offers, so a bad/unrecognised value can't sneak through.
+        const { data: cls } = await supabase.from('classes').select('name').eq('id', payload.class_id).maybeSingle();
+        const level = cls ? levelBucketForClassName(cls.name) : null;
+        let pathway = null;
+        if (level === 'Senior Secondary') {
+          pathway = String(payload.pathway || '').trim() || null;
+          if (!pathway || PATHWAYS.indexOf(pathway) === -1) {
+            return err('Choose this arm\'s pathway (STEM, Social Sciences, or Arts and Sports Science).');
+          }
+        }
+        const rec = { class_id: payload.class_id, name, description: payload.description || '', pathway };
         // Same-name-in-this-class dup check applies to a rename too now
         // (excluding the row being renamed) — previously only checked on
         // create, so renaming stream B to collide with existing stream A
@@ -338,7 +365,12 @@ export function createAcademicsApi(supabase) {
         const { data: dup } = await dupQuery.maybeSingle();
         if (dup) return err('That arm already exists for this class.');
         if (payload.id) {
-          const { data, error } = await supabase.from('streams').update(rec).eq('id', payload.id).select().single();
+          // Renaming an existing arm never touches its pathway (brief only
+          // asks for pathway when the arm is created) — only send `name`/
+          // `description` on update so this can't silently blank out an
+          // already-chosen pathway when promptAddStream's rename flow (no
+          // pathway field at all) calls this.
+          const { data, error } = await supabase.from('streams').update({ class_id: rec.class_id, name: rec.name, description: rec.description }).eq('id', payload.id).select().single();
           if (error) return err(error.message);
           clearCache();
           return ok(data);
@@ -348,9 +380,10 @@ export function createAcademicsApi(supabase) {
         // Brief §4.2: seed the correct default CBC subjects for this stream's
         // grade level right away (best-effort — a lookup/insert hiccup here
         // shouldn't fail the stream creation itself; the admin can still add
-        // subjects manually from the class's subject screen).
-        const { data: cls } = await supabase.from('classes').select('name').eq('id', payload.class_id).maybeSingle();
-        if (cls) await seedDefaultSubjectsForNewStream(supabase, data.id, payload.class_id, cls.name);
+        // subjects manually from the class's subject screen). Next Sprint 3
+        // §1.3: pass the chosen pathway through so a Senior Secondary arm
+        // gets its pathway's specialised subjects too, not just the core 4.
+        if (cls) await seedDefaultSubjectsForNewStream(supabase, data.id, payload.class_id, cls.name, pathway);
         clearCache();
         return ok(data);
       },
@@ -395,7 +428,11 @@ export function createAcademicsApi(supabase) {
         const name = String(payload.name || '').trim();
         if (!name) return err('Subject name is required (e.g. "Mathematics").');
         const level = payload.level || null;
-        const rec = { name, code: payload.code || '', level, description: payload.description || '' };
+        // Next Sprint 3 §1.3: only meaningful at level 'Senior Secondary' —
+        // ignored for every other level so a stray value from the client
+        // can't tag e.g. a Junior Secondary subject with a pathway.
+        const pathway = (level === 'Senior Secondary' && payload.pathway) ? String(payload.pathway).trim() : null;
+        const rec = { name, code: payload.code || '', level, pathway, description: payload.description || '' };
         if (payload.id) {
           const { data, error } = await supabase.from('subjects').update(rec).eq('id', payload.id).select().single();
           if (error) return err(error.message);

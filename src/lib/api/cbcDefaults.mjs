@@ -22,12 +22,51 @@ export const CBC_LEVELS = ['Pre-Primary', 'Lower Primary', 'Upper Primary', 'Jun
 /** The 12 standard class levels this product supports, Daycare through
  *  Grade 9 (CBC pre-primary through junior secondary). A class is chosen
  *  from this fixed list rather than typed freehand, so every school's class
- *  names line up exactly the same way across the whole platform. */
+ *  names line up exactly the same way across the whole platform.
+ *
+ *  Next Sprint 3 §1: Senior School (Grade 10-12) and Form 3/4 (8-4-4
+ *  legacy) are APPENDED here, not inserted or kept as a separate array —
+ *  every existing school's level_order (classes.save() derives it as
+ *  `1 + index in this list`, so Daycare=1 ... Grade 9=12 exactly as
+ *  before) stays untouched, and a 'senior' category school just uses the
+ *  tail end of this same list. This is what brief §1.1 means by "combined
+ *  under the same school account, not treated as two separate products" —
+ *  one list, one level_order scheme, for every school. Which slice of it a
+ *  given school is OFFERED (not restricted to — see classLevelsForCategory
+ *  below) is a UI convenience driven by schools.category. */
 export const STANDARD_CLASS_LEVELS = [
   'Daycare', 'PP1', 'PP2',
   'Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 'Grade 6',
-  'Grade 7', 'Grade 8', 'Grade 9'
+  'Grade 7', 'Grade 8', 'Grade 9',
+  'Grade 10', 'Grade 11', 'Grade 12', 'Form 3', 'Form 4'
 ];
+
+/** The slice of STANDARD_CLASS_LEVELS a 'pri_jss' category school picks a
+ *  new class name from — Daycare through Grade 9, exactly what this product
+ *  supported before Senior School existed. */
+export const PRI_JSS_CLASS_LEVELS = STANDARD_CLASS_LEVELS.slice(0, 12);
+
+/** The slice a 'senior' category school picks from instead — CBC Grade
+ *  10-12 (pathway-based) and the two remaining legacy 8-4-4 cohorts,
+ *  Form 3/4 (brief §1.1: real schools still have Form 3/4 students during
+ *  the gradual transition, so both must be selectable on one account). */
+export const SENIOR_CLASS_LEVELS = STANDARD_CLASS_LEVELS.slice(12);
+
+/** Which class-level list a school's "Add class" / "Bulk Add Classes"
+ *  pickers should offer, based on schools.category (brief §1.2). Not an
+ *  enforcement boundary — see the header comment on STANDARD_CLASS_LEVELS —
+ *  just which of the two slices is the sensible default for that school's
+ *  admin to choose from. Unrecognised/missing category (e.g. a school row
+ *  from before this column existed) falls back to 'pri_jss', matching the
+ *  column's own default. */
+export function classLevelsForCategory(category) {
+  return category === 'senior' ? SENIOR_CLASS_LEVELS : PRI_JSS_CLASS_LEVELS;
+}
+
+/** The three Senior School pathways (brief §1.3) every Grade 10-12 student
+ *  chooses between — never applicable to Form 3/4 (8-4-4 has no pathway
+ *  concept) or to any Pri/Jss class. */
+export const PATHWAYS = ['STEM', 'Social Sciences', 'Arts and Sports Science'];
 
 export const CBC_SUBJECTS = [
   { name: 'Language Activities', level: 'Pre-Primary' },
@@ -76,5 +115,54 @@ export function levelBucketForClassName(name) {
   if (idx <= 2) return 'Pre-Primary';       // Daycare, PP1, PP2
   if (idx <= 5) return 'Lower Primary';     // Grade 1-3
   if (idx <= 8) return 'Upper Primary';     // Grade 4-6
-  return 'Junior Secondary';                // Grade 7-9
+  if (idx <= 11) return 'Junior Secondary'; // Grade 7-9
+  if (idx <= 14) return 'Senior Secondary'; // Grade 10-12 (Next Sprint 3 §1.3)
+  return 'Form 3-4';                        // Form 3, Form 4 (Next Sprint 3 §1.4)
+}
+
+/** Core Senior Secondary subjects EVERY Grade 10-12 student takes,
+ *  regardless of pathway (brief §1.3). */
+export const SENIOR_SECONDARY_CORE_SUBJECTS = [
+  'English', 'Kiswahili (or Kenyan Sign Language)', 'Mathematics', 'Community Service Learning'
+];
+
+/** Each pathway's own specialised subjects, on top of the core list above —
+ *  standard KICD-aligned lists (brief §1.3: "these differ meaningfully from
+ *  Junior School's subject list and need their own setup"). Schools can add
+ *  to or edit this from the Classes screen's "+ Add subject" picker same as
+ *  any other subject — this is only the starting default. */
+export const SENIOR_SECONDARY_PATHWAY_SUBJECTS = {
+  'STEM': ['Physics', 'Chemistry', 'Biology', 'Advanced Mathematics', 'Computer Studies', 'Agriculture', 'Home Science'],
+  'Social Sciences': ['History and Citizenship', 'Geography', 'Christian Religious Education', 'Business Studies', 'Literature in English', 'Fasihi ya Kiswahili'],
+  'Arts and Sports Science': ['Music and Dance', 'Fine Arts', 'Theatre and Film', 'Sports and Recreation', 'Physical Education']
+};
+
+/** Form 3/4 (8-4-4 legacy) subjects — one fixed full list, no pathways
+ *  (brief §1.4: "these follow the traditional 8-4-4 subject list a student
+ *  takes as a full set"). Standard list; also editable per school. */
+export const FORM_3_4_SUBJECTS = [
+  'English', 'Kiswahili', 'Mathematics', 'Biology', 'Chemistry', 'Physics',
+  'History and Government', 'Geography', 'Christian Religious Education',
+  'Agriculture', 'Business Studies', 'Computer Studies', 'Home Science'
+];
+
+/** Returns the default subject set — as `{ name, pathway }` pairs, ready to
+ *  insert straight into `subjects` — for a brand-new stream at the given
+ *  level bucket. Senior Secondary needs BOTH the 4 core subjects (pathway:
+ *  null) AND that stream's own pathway's specialised ones (pathway: the
+ *  pathway name) — brief §1.3: "subjects genuinely differ by pathway...
+ *  need to work correctly per-pathway at Senior School level, not just
+ *  per-class". A Senior Secondary stream with no pathway assigned yet gets
+ *  just the core 4 — see classes.mjs, which requires picking a pathway when
+ *  adding a Grade 10-12 stream, so this is really only reachable
+ *  transiently. Form 3-4 and every Pri/Jss level keep pathway: null
+ *  throughout, same as before this feature existed. */
+export function defaultSubjectsFor(level, pathway) {
+  if (level === 'Senior Secondary') {
+    const core = SENIOR_SECONDARY_CORE_SUBJECTS.map((name) => ({ name, pathway: null }));
+    const specialised = (pathway && SENIOR_SECONDARY_PATHWAY_SUBJECTS[pathway] || []).map((name) => ({ name, pathway }));
+    return [...core, ...specialised];
+  }
+  if (level === 'Form 3-4') return FORM_3_4_SUBJECTS.map((name) => ({ name, pathway: null }));
+  return CBC_SUBJECTS.filter((s) => s.level === level).map((s) => ({ name: s.name, pathway: null }));
 }

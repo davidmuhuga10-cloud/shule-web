@@ -59,6 +59,14 @@ create table public.schools (
   name text not null,
   code text not null unique,
   status text not null default 'active',       -- active | suspended | trial — informational, no fixed enum
+  -- Next Sprint 3 §1.2: asked once at sign-up ("Senior School" or "Pri &
+  -- Jss") and never surfaced for editing afterward — it's not a runtime
+  -- permission check, just which class-level list (see
+  -- cbcDefaults.mjs's classLevelsForCategory()) and which subjects
+  -- seed_school_defaults() below seeds for this school. Defaults to
+  -- 'pri_jss' so every school that existed before this column did is
+  -- unaffected.
+  category text not null default 'pri_jss' check (category in ('pri_jss', 'senior')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint schools_code_format check (code ~ '^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$')
@@ -167,6 +175,14 @@ create table public.streams (
   class_id uuid not null references public.classes(id) on delete cascade,
   name text not null,                          -- e.g. 'North'
   description text,
+  -- Next Sprint 3 §1.3: "each Senior School student selects one of three
+  -- pathways" — modelled here at the ARM/stream level (e.g. "Grade 11
+  -- STEM"), consistent with how this app already assigns subjects per
+  -- stream rather than per student (see assignments.mjs's header comment).
+  -- Null for every non-Grade-10-12 stream (Pri/Jss, Form 3-4 have no
+  -- pathway concept) and for a Grade 10-12 stream that hasn't been
+  -- assigned one yet.
+  pathway text check (pathway is null or pathway in ('STEM', 'Social Sciences', 'Arts and Sports Science')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (class_id, name)
@@ -183,7 +199,13 @@ create table public.subjects (
   school_id uuid not null references public.schools(id) on delete cascade,
   name text not null,
   code text,
-  level text,                                  -- 'Pre-Primary' | 'Lower Primary' | 'Upper Primary' | 'Junior Secondary' | null (custom)
+  level text,                                  -- 'Pre-Primary' | 'Lower Primary' | 'Upper Primary' | 'Junior Secondary' | 'Senior Secondary' | 'Form 3-4' | null (custom)
+  -- Next Sprint 3 §1.3: only meaningful at level = 'Senior Secondary' — a
+  -- specialised subject that belongs to one of the three pathways (e.g.
+  -- Physics under STEM). Null for every core subject (taken by all
+  -- pathways) and for every subject at any other level, including Form 3-4
+  -- (8-4-4 has no pathway concept at all).
+  pathway text check (pathway is null or pathway in ('STEM', 'Social Sciences', 'Arts and Sports Science')),
   description text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -1251,42 +1273,99 @@ as $$
 declare
   v_scale_id uuid;
   v_year_id uuid;
+  -- Next Sprint 3 §1.2: sign-up asks for a category ('pri_jss' — the
+  -- existing default — or 'senior'), which now decides which of the two
+  -- entirely separate subject lists below gets seeded. A 'senior' school
+  -- gets NEITHER the Pre-Primary..Junior Secondary list (it doesn't run
+  -- those grades) nor a runtime toggle between the two later — category is
+  -- a sign-up-time choice only (see schools.category's comment in
+  -- schema.sql), so this reads it once, here.
+  v_category text;
 begin
-  insert into public.subjects (school_id, name, level, code, description) values
-    (p_school_id, 'Language Activities', 'Pre-Primary', '', ''),
-    (p_school_id, 'Mathematical Activities', 'Pre-Primary', '', ''),
-    (p_school_id, 'Environmental Activities', 'Pre-Primary', '', ''),
-    (p_school_id, 'Psychomotor and Creative Activities', 'Pre-Primary', '', ''),
-    (p_school_id, 'Religious Education Activities', 'Pre-Primary', '', ''),
-    (p_school_id, 'Literacy Activities', 'Lower Primary', '', ''),
-    (p_school_id, 'English Language Activities', 'Lower Primary', '', ''),
-    (p_school_id, 'Kiswahili Language Activities', 'Lower Primary', '', ''),
-    (p_school_id, 'Indigenous Language Activities', 'Lower Primary', '', ''),
-    (p_school_id, 'Mathematical Activities', 'Lower Primary', '', ''),
-    (p_school_id, 'Environmental Activities', 'Lower Primary', '', ''),
-    (p_school_id, 'Hygiene and Nutrition Activities', 'Lower Primary', '', ''),
-    (p_school_id, 'Religious Education', 'Lower Primary', '', ''),
-    (p_school_id, 'Movement and Creative Activities', 'Lower Primary', '', ''),
-    (p_school_id, 'English', 'Upper Primary', '', ''),
-    (p_school_id, 'Kiswahili', 'Upper Primary', '', ''),
-    (p_school_id, 'Mathematics', 'Upper Primary', '', ''),
-    (p_school_id, 'Science and Technology', 'Upper Primary', '', ''),
-    (p_school_id, 'Social Studies', 'Upper Primary', '', ''),
-    (p_school_id, 'Religious Education', 'Upper Primary', '', ''),
-    (p_school_id, 'Agriculture', 'Upper Primary', '', ''),
-    (p_school_id, 'Home Science', 'Upper Primary', '', ''),
-    (p_school_id, 'Creative Arts', 'Upper Primary', '', ''),
-    (p_school_id, 'Physical and Health Education', 'Upper Primary', '', ''),
-    (p_school_id, 'English', 'Junior Secondary', '', ''),
-    (p_school_id, 'Kiswahili', 'Junior Secondary', '', ''),
-    (p_school_id, 'Mathematics', 'Junior Secondary', '', ''),
-    (p_school_id, 'Integrated Science', 'Junior Secondary', '', ''),
-    (p_school_id, 'Pre-Technical Studies', 'Junior Secondary', '', ''),
-    (p_school_id, 'Social Studies', 'Junior Secondary', '', ''),
-    (p_school_id, 'Agriculture', 'Junior Secondary', '', ''),
-    (p_school_id, 'Religious Education', 'Junior Secondary', '', ''),
-    (p_school_id, 'Creative Arts and Sports', 'Junior Secondary', '', '')
-  on conflict (school_id, name, level) do nothing;
+  select category into v_category from public.schools where id = p_school_id;
+
+  if coalesce(v_category, 'pri_jss') = 'pri_jss' then
+    insert into public.subjects (school_id, name, level, code, description) values
+      (p_school_id, 'Language Activities', 'Pre-Primary', '', ''),
+      (p_school_id, 'Mathematical Activities', 'Pre-Primary', '', ''),
+      (p_school_id, 'Environmental Activities', 'Pre-Primary', '', ''),
+      (p_school_id, 'Psychomotor and Creative Activities', 'Pre-Primary', '', ''),
+      (p_school_id, 'Religious Education Activities', 'Pre-Primary', '', ''),
+      (p_school_id, 'Literacy Activities', 'Lower Primary', '', ''),
+      (p_school_id, 'English Language Activities', 'Lower Primary', '', ''),
+      (p_school_id, 'Kiswahili Language Activities', 'Lower Primary', '', ''),
+      (p_school_id, 'Indigenous Language Activities', 'Lower Primary', '', ''),
+      (p_school_id, 'Mathematical Activities', 'Lower Primary', '', ''),
+      (p_school_id, 'Environmental Activities', 'Lower Primary', '', ''),
+      (p_school_id, 'Hygiene and Nutrition Activities', 'Lower Primary', '', ''),
+      (p_school_id, 'Religious Education', 'Lower Primary', '', ''),
+      (p_school_id, 'Movement and Creative Activities', 'Lower Primary', '', ''),
+      (p_school_id, 'English', 'Upper Primary', '', ''),
+      (p_school_id, 'Kiswahili', 'Upper Primary', '', ''),
+      (p_school_id, 'Mathematics', 'Upper Primary', '', ''),
+      (p_school_id, 'Science and Technology', 'Upper Primary', '', ''),
+      (p_school_id, 'Social Studies', 'Upper Primary', '', ''),
+      (p_school_id, 'Religious Education', 'Upper Primary', '', ''),
+      (p_school_id, 'Agriculture', 'Upper Primary', '', ''),
+      (p_school_id, 'Home Science', 'Upper Primary', '', ''),
+      (p_school_id, 'Creative Arts', 'Upper Primary', '', ''),
+      (p_school_id, 'Physical and Health Education', 'Upper Primary', '', ''),
+      (p_school_id, 'English', 'Junior Secondary', '', ''),
+      (p_school_id, 'Kiswahili', 'Junior Secondary', '', ''),
+      (p_school_id, 'Mathematics', 'Junior Secondary', '', ''),
+      (p_school_id, 'Integrated Science', 'Junior Secondary', '', ''),
+      (p_school_id, 'Pre-Technical Studies', 'Junior Secondary', '', ''),
+      (p_school_id, 'Social Studies', 'Junior Secondary', '', ''),
+      (p_school_id, 'Agriculture', 'Junior Secondary', '', ''),
+      (p_school_id, 'Religious Education', 'Junior Secondary', '', ''),
+      (p_school_id, 'Creative Arts and Sports', 'Junior Secondary', '', '')
+    on conflict (school_id, name, level) do nothing;
+  else
+    -- Senior School category (Next Sprint 3 §1.3/§1.4): core subjects every
+    -- Grade 10-12 student takes regardless of pathway (pathway = null),
+    -- each pathway's own specialised subjects on top (pathway set — see
+    -- streams.pathway/subjects.pathway comments), and the separate Form 3/4
+    -- (8-4-4 legacy) full subject list with no pathway concept at all.
+    -- Standard KICD-aligned lists — editable per school afterward from the
+    -- Classes screen's "+ Add subject" picker, same as every other subject.
+    insert into public.subjects (school_id, name, level, pathway, code, description) values
+      (p_school_id, 'English', 'Senior Secondary', null, '', ''),
+      (p_school_id, 'Kiswahili (or Kenyan Sign Language)', 'Senior Secondary', null, '', ''),
+      (p_school_id, 'Mathematics', 'Senior Secondary', null, '', ''),
+      (p_school_id, 'Community Service Learning', 'Senior Secondary', null, '', ''),
+      (p_school_id, 'Physics', 'Senior Secondary', 'STEM', '', ''),
+      (p_school_id, 'Chemistry', 'Senior Secondary', 'STEM', '', ''),
+      (p_school_id, 'Biology', 'Senior Secondary', 'STEM', '', ''),
+      (p_school_id, 'Advanced Mathematics', 'Senior Secondary', 'STEM', '', ''),
+      (p_school_id, 'Computer Studies', 'Senior Secondary', 'STEM', '', ''),
+      (p_school_id, 'Agriculture', 'Senior Secondary', 'STEM', '', ''),
+      (p_school_id, 'Home Science', 'Senior Secondary', 'STEM', '', ''),
+      (p_school_id, 'History and Citizenship', 'Senior Secondary', 'Social Sciences', '', ''),
+      (p_school_id, 'Geography', 'Senior Secondary', 'Social Sciences', '', ''),
+      (p_school_id, 'Christian Religious Education', 'Senior Secondary', 'Social Sciences', '', ''),
+      (p_school_id, 'Business Studies', 'Senior Secondary', 'Social Sciences', '', ''),
+      (p_school_id, 'Literature in English', 'Senior Secondary', 'Social Sciences', '', ''),
+      (p_school_id, 'Fasihi ya Kiswahili', 'Senior Secondary', 'Social Sciences', '', ''),
+      (p_school_id, 'Music and Dance', 'Senior Secondary', 'Arts and Sports Science', '', ''),
+      (p_school_id, 'Fine Arts', 'Senior Secondary', 'Arts and Sports Science', '', ''),
+      (p_school_id, 'Theatre and Film', 'Senior Secondary', 'Arts and Sports Science', '', ''),
+      (p_school_id, 'Sports and Recreation', 'Senior Secondary', 'Arts and Sports Science', '', ''),
+      (p_school_id, 'Physical Education', 'Senior Secondary', 'Arts and Sports Science', '', ''),
+      (p_school_id, 'English', 'Form 3-4', null, '', ''),
+      (p_school_id, 'Kiswahili', 'Form 3-4', null, '', ''),
+      (p_school_id, 'Mathematics', 'Form 3-4', null, '', ''),
+      (p_school_id, 'Biology', 'Form 3-4', null, '', ''),
+      (p_school_id, 'Chemistry', 'Form 3-4', null, '', ''),
+      (p_school_id, 'Physics', 'Form 3-4', null, '', ''),
+      (p_school_id, 'History and Government', 'Form 3-4', null, '', ''),
+      (p_school_id, 'Geography', 'Form 3-4', null, '', ''),
+      (p_school_id, 'Christian Religious Education', 'Form 3-4', null, '', ''),
+      (p_school_id, 'Agriculture', 'Form 3-4', null, '', ''),
+      (p_school_id, 'Business Studies', 'Form 3-4', null, '', ''),
+      (p_school_id, 'Computer Studies', 'Form 3-4', null, '', ''),
+      (p_school_id, 'Home Science', 'Form 3-4', null, '', '')
+    on conflict (school_id, name, level) do nothing;
+  end if;
 
   -- Round 3 §8: "Do not auto-set a grading scale for a school... the
   -- default grading scale should be CBC, not the current 8-4-4 default...
