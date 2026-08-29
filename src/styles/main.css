@@ -903,6 +903,21 @@ table.data td.num,table.data th.num{text-align:center}
 .fin-receipt .fr-words{padding:6px 10px;font-style:italic;border-top:1px solid var(--grid-ink)}
 .fin-statement table{width:100%;border-collapse:collapse}
 .fin-statement th,.fin-statement td{border:1px solid var(--grid-ink);padding:5px 8px;font-size:12px}
+/* Next Sprint §Finance "Redesign the Student Statement": one boxed table
+   per term (TERM:YYYY/N), each ending with its own shaded "close of term"
+   balance row — see financeStudent.mjs's renderStatement()/groupByTerm().
+   The box header and the closing row both use background-color (never
+   box-shadow — .card{box-shadow:none} at print time would silently drop
+   it, see the @media print block above) so they're covered by this file's
+   blanket `*{print-color-adjust:exact}` rule and survive printing exactly
+   as they look on screen — verified with a real headless print-to-PDF
+   render, not just visual review (see tests/print_statement.js). */
+.fin-statement-term{margin-bottom:18px;border:1.3px solid var(--grid-ink);border-radius:8px;overflow:hidden;break-inside:avoid;page-break-inside:avoid}
+.fin-statement-term-head{background:var(--brand);color:#fff;font-weight:700;padding:8px 12px;font-size:13px;letter-spacing:.2px}
+.fin-statement-term table{width:100%;border-collapse:collapse}
+.fin-statement-term th,.fin-statement-term td{border:1px solid var(--grid-ink);padding:5px 8px;font-size:12px}
+.fin-statement-term thead th{background:#f0f2f5;color:var(--grid-text);font-weight:700}
+.fin-statement-term-close td{background:#eef1f5;font-weight:700}
 @media print{.fin-receipt{border-color:#000}.fin-receipt .fr-h,.fin-receipt .fr-words{border-color:#000}.fin-receipt table th,.fin-receipt table td{border-color:#000}}
 .search-results{position:relative;z-index:5;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-top:4px;background:var(--card-bg,#fff)}
 .search-results:empty{border:none;margin-top:0}

@@ -8,7 +8,7 @@
  */
 import { esc, options, toast, modal, closeModal, loader, printOptionsHtml, wirePrintOptions, state, confirmAction } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
-import { buildStatement } from '../lib/finance/statement.mjs';
+import { buildStatement, groupByTerm } from '../lib/finance/statement.mjs';
 import { viewFinanceCollections } from './financeCollections.mjs';
 import { renderIssueNoteModal } from './financeInvoicing.mjs';
 
@@ -80,7 +80,7 @@ export async function openStudentProfile(body, access, student) {
     body.querySelectorAll('[data-stab]').forEach((b) => b.classList.toggle('active', b.dataset.stab === key));
     if (key === 'profile') renderProfile(tabBody, access, student, { years, terms, activeYear, activeTerm });
     else if (key === 'collections') viewFinanceCollections(tabBody, access, { studentId: student.id, studentName: student.full_name });
-    else renderStatement(tabBody, student, activeYear, activeTerm);
+    else renderStatement(tabBody, student, years, terms);
   };
   body.querySelectorAll('[data-stab]').forEach((b) => b.onclick = () => showTab(b.dataset.stab));
   showTab(active);
@@ -314,37 +314,107 @@ function openOpeningBalanceModal(root, access, student, ctx, existing) {
   });
 }
 
-async function renderStatement(root, student, activeYear, activeTerm) {
-  root.innerHTML = loader();
-  const [invRes, dnRes, cnRes, colRes, obRes] = await Promise.all([
-    Db.finance.invoices.forStudent(student.id),
-    Db.finance.debitNotes.forStudent(student.id),
-    Db.finance.creditNotes.forStudent(student.id),
-    Db.finance.collections.list({ student_id: student.id, limit: 500 }),
-    activeYear ? Db.finance.students.openingBalance(student.id, activeYear.id) : Promise.resolve({ ok: true, data: null })
-  ]);
-  const invoiceItems = (invRes.ok ? invRes.data : []).flatMap((inv) => inv.finance_invoice_items || []);
-  const rows = buildStatement({
-    openingBalance: obRes.ok ? obRes.data : null,
-    invoiceItems, debitNotes: dnRes.ok ? dnRes.data : [], creditNotes: cnRes.ok ? cnRes.data : [], collections: colRes.ok ? colRes.data : []
-  });
-  const schoolName = (state.settings && state.settings.school_name) || 'Shule';
-  root.innerHTML = `
+/**
+ * Next Sprint §Finance "Redesign the Student Statement": the statement is
+ * now organised into one boxed table per TERM:YYYY/N (matching the
+ * reference in the brief), each box ending with its own "Student Balance
+ * at the close of: <TERM>" line before the next term's box begins — rather
+ * than the old single flat running-balance table. The heavy lifting
+ * (tagging every row with its term, bucketing, computing each box's
+ * closing balance) lives in statement.mjs's buildStatement()/groupByTerm()
+ * so it's unit-tested there; this function is just fetching the raw data
+ * (across ALL years/terms the student has activity in — a statement is a
+ * full history, not just the current term) and turning the resulting
+ * groups into the boxed HTML.
+ */
+/** One boxed <table> per term group — pulled out as its own pure function
+ *  (no DOM, no network) so the boxed-per-term markup itself — the exact
+ *  thing the brief's reference image is about — can be interactively
+ *  rendered and inspected (including under print-media emulation, to
+ *  confirm the shading actually survives printing) without needing to
+ *  stand up the whole Supabase-backed student-search flow just to get
+ *  there. See tests/print_statement.js. */
+export function termGroupHtml(g) {
+  return `
+    <div class="fin-statement-term">
+      <div class="fin-statement-term-head">${esc(g.label)}</div>
+      <table>
+        <thead><tr><th>Date</th><th>Receipt No</th><th>Description</th><th class="num">Bal BF</th><th class="num">Budget</th><th class="num">Paid</th><th class="num">Balance</th></tr></thead>
+        <tbody>
+          ${g.rows.map((r) => `<tr>
+            <td>${r.date ? new Date(r.date).toLocaleDateString() : ''}</td>
+            <td>${esc(r.receipt_no || '')}</td>
+            <td>${esc(r.description)}</td>
+            <td class="num">${Number(r.balBf).toLocaleString()}</td>
+            <td class="num">${r.debit ? Number(r.debit).toLocaleString() : ''}</td>
+            <td class="num">${r.credit ? Number(r.credit).toLocaleString() : ''}</td>
+            <td class="num">${Number(r.balance).toLocaleString()}</td>
+          </tr>`).join('')}
+          <tr class="fin-statement-term-close">
+            <td colspan="6">Student Balance at the close of: ${esc(g.label)}</td>
+            <td class="num">${Number(g.closingBalance).toLocaleString()}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+/** Pure HTML builder for the whole statement sheet, given the already
+ *  grouped-by-term data — factored out from renderStatement() below so the
+ *  view/DOM glue (fetching, wiring print options) stays separate from the
+ *  markup itself, same split as statement.mjs's builder vs this file's
+ *  view functions. */
+export function statementSheetHtml(schoolName, student, groups) {
+  return `
     <div class="page-head no-print"><div></div>${printOptionsHtml('fss', 'portrait')}</div>
     <div class="card print-grid" id="fss-sheet">
       <div class="card-b">
         <h2 style="margin:0">${esc(schoolName)}</h2>
         <p style="margin:2px 0 12px">Statement of Account — ${esc(student.full_name)} (${esc(student.admission_no)})</p>
-        <div class="fin-statement"><table>
-          <thead><tr><th>Date</th><th>Description</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
-          <tbody>${rows.map((r) => `<tr>
-            <td>${r.date ? new Date(r.date).toLocaleDateString() : ''}</td><td>${esc(r.description)}</td>
-            <td class="num">${r.debit ? Number(r.debit).toLocaleString() : ''}</td><td class="num">${r.credit ? Number(r.credit).toLocaleString() : ''}</td>
-            <td class="num">${Number(r.balance).toLocaleString()}</td>
-          </tr>`).join('') || '<tr><td colspan="5" class="muted">No transactions yet.</td></tr>'}</tbody>
-        </table></div>
+        ${groups.length ? groups.map(termGroupHtml).join('') : '<p class="muted">No transactions yet.</p>'}
       </div>
     </div>
   `;
+}
+
+/**
+ * Next Sprint §Finance "Redesign the Student Statement": the statement is
+ * now organised into one boxed table per TERM:YYYY/N (matching the
+ * reference in the brief), each box ending with its own "Student Balance
+ * at the close of: <TERM>" line before the next term's box begins — rather
+ * than the old single flat running-balance table. The heavy lifting
+ * (tagging every row with its term, bucketing, computing each box's
+ * closing balance) lives in statement.mjs's buildStatement()/groupByTerm()
+ * so it's unit-tested there; this function is just fetching the raw data
+ * (across ALL years/terms the student has activity in — a statement is a
+ * full history, not just the current term) and turning the resulting
+ * groups into the boxed HTML via statementSheetHtml() above.
+ */
+async function renderStatement(root, student, years, terms) {
+  root.innerHTML = loader();
+  const [invRes, dnRes, cnRes, colRes, obResList] = await Promise.all([
+    Db.finance.invoices.forStudent(student.id),
+    Db.finance.debitNotes.forStudent(student.id),
+    Db.finance.creditNotes.forStudent(student.id),
+    Db.finance.collections.list({ student_id: student.id, limit: 500 }),
+    Promise.all((years || []).map((y) => Db.finance.students.openingBalance(student.id, y.id)))
+  ]);
+  // finance_invoice_items don't carry academic_year_id/term_id themselves
+  // — they belong to a finance_invoices row that does — so stamp each item
+  // with its parent invoice's term/year before flattening, or the
+  // per-term grouping below would have no idea which box an item belongs in.
+  const invoiceItems = (invRes.ok ? invRes.data : []).flatMap((inv) =>
+    (inv.finance_invoice_items || []).map((it) => ({ ...it, academic_year_id: inv.academic_year_id, term_id: inv.term_id }))
+  );
+  const openingBalances = obResList.filter((r) => r.ok).map((r) => r.data).filter(Boolean);
+  const rows = buildStatement({
+    openingBalance: openingBalances,
+    invoiceItems, debitNotes: dnRes.ok ? dnRes.data : [], creditNotes: cnRes.ok ? cnRes.data : [], collections: colRes.ok ? colRes.data : []
+  });
+  const groups = groupByTerm(rows, { terms: terms || [], academicYears: years || [] });
+  const schoolName = (state.settings && state.settings.school_name) || 'Shule';
+
+  root.innerHTML = statementSheetHtml(schoolName, student, groups);
   wirePrintOptions(root.querySelector('#fss-sheet'), 'fss', `Statement — ${student.full_name}`);
 }
