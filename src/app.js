@@ -12,6 +12,7 @@
 import { loginStaff, loginStaffByUsername, loginParent, logout as authLogout, getCurrentProfile, changePassword, findLoginAccountsByPhone, getAccessToken } from './lib/auth.js';
 import { supabase } from './lib/supabaseClient.js';
 import { Db } from './lib/api/index.mjs';
+import { DENIABLE_MODULES } from './lib/api/capabilities.mjs';
 
 import { renderComingSoon } from './views/_comingSoon.mjs';
 
@@ -378,7 +379,7 @@ const ROLE_LABEL = { admin: 'Administrator', teacher: 'Teacher', parent: 'Parent
 export function renderAuth(errorMsg) {
   const name = (state.settings && state.settings.school_name) || (window.SHULE_CONFIG && window.SHULE_CONFIG.SCHOOL_BRAND_NAME) || 'Shule';
   const features = [
-    ['🎒', 'Students', 'Classes, arms & enrollment'],
+    ['🎒', 'Students', 'Classes, streams & enrollment'],
     ['🧑‍🏫', 'Teachers', 'Subjects & teacher assignment'],
     ['📝', 'Exams', 'Marks with automatic grading'],
     ['🧾', 'Reports', 'Mark lists & report forms']
@@ -605,7 +606,9 @@ function renderSignup() {
           <p class="hint">This decides which class levels and subjects your account is set up with — you won't need to change it later.</p>
         </div>
         <div class="field"><label>Your full name</label><input id="su-admin-name" placeholder="e.g. Jane Wanjiru" required></div>
-        <div class="field"><label>Your phone number</label><input id="su-phone" type="tel" placeholder="e.g. 0712345678" required></div>
+        <div class="field"><label>Your phone number</label><input id="su-phone" type="tel" placeholder="e.g. 0712345678" required>
+          <div id="su-phone-err" class="field-err"></div>
+        </div>
         <div class="field"><label>Password</label>${passwordFieldHtml('<input id="su-pw" type="password" autocomplete="new-password" required>')}</div>
         <button class="btn block" type="submit" id="signup-btn">Create school account</button>
       </form>
@@ -623,6 +626,21 @@ function renderSignup() {
     codeInput.value = nameInput.value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
   };
 
+  // SignUp_Fixes §1 (BUG): the old flow only ever caught a bad phone number
+  // at submit time, and even then the message was just the field's own
+  // description restated ("Enter your (the admin's) phone number") — which
+  // reads like nothing actually happened, not "this is wrong". Validate as
+  // the person types instead: a real, specific "Enter a correct phone
+  // number" appears the moment they leave the field with something
+  // malformed in it, and disappears the instant they start correcting it —
+  // never left lingering once they've begun fixing the problem.
+  const phoneInput = $('#su-phone'), phoneErr = $('#su-phone-err');
+  phoneInput.oninput = () => { phoneErr.textContent = ''; };
+  phoneInput.onblur = () => {
+    const v = phoneInput.value.trim();
+    phoneErr.textContent = (v && !window.ShulePhone.isValidPhone(v)) ? 'Enter a correct phone number, e.g. 0712345678.' : '';
+  };
+
   $('#go-login').onclick = (e) => { e.preventDefault(); renderAuth(); };
   $('#signup-form').onsubmit = doSignup;
   wirePasswordToggle('su-pw');
@@ -630,6 +648,12 @@ function renderSignup() {
 
 async function doSignup(e) {
   e.preventDefault();
+  const phoneVal = $('#su-phone').value.trim();
+  if (!window.ShulePhone.isValidPhone(phoneVal)) {
+    $('#su-phone-err').textContent = 'Enter a correct phone number, e.g. 0712345678.';
+    $('#su-phone').focus();
+    return false;
+  }
   const btn = $('#signup-btn'); btn.disabled = true; btn.textContent = 'Creating…';
   const body = {
     school_name: $('#su-name').value,
@@ -756,7 +780,7 @@ const NAV = {
   admin: [
     { route: 'dashboard', label: 'Dashboard', ico: '🏠' },
     { section: 'Academics' },
-    { route: 'classes', label: 'Classes & Arms', ico: '🏫' },
+    { route: 'classes', label: 'Classes & Streams', ico: '🏫' },
     { section: 'People' },
     { route: 'students', label: 'Students', ico: '🎒' },
     { route: 'staff-teachers', label: 'Teachers and Staff', ico: '👨‍🏫' },
@@ -820,6 +844,13 @@ const HIDDEN_ALLOWED_ROUTES = {
   teacher: ['bulk-upload', 'exam-desk', 'class-list', 'broadsheet', 'reports', 'transcript', 'certificates', 'exam-analysis', 'score-sheet']
 };
 
+// SignUp_Fixes §5: maps a nav route back to its 'deny_<module>' capability
+// key, if that route is deniable at all (most aren't — see DENIABLE_MODULES).
+function routeDenyKey(route) {
+  const m = DENIABLE_MODULES.find((d) => d.route === route);
+  return m ? m.key : null;
+}
+
 function allowedRoutes(role) {
   const set = {};
   (NAV[role] || []).forEach((it) => {
@@ -827,6 +858,13 @@ function allowedRoutes(role) {
     if (it.children) it.children.forEach((c) => { set[c.route] = true; });
   });
   (HIDDEN_ALLOWED_ROUTES[role] || []).forEach((r) => { set[r] = true; });
+  // SignUp_Fixes §5: a per-USER deny (see DENIABLE_MODULES/state.profile.
+  // deniedModules, set at boot) removes a route that role would otherwise
+  // always have — same mechanism as hideUnless above, opposite polarity.
+  const denied = state.profile && state.profile.deniedModules;
+  if (denied && denied.size) {
+    DENIABLE_MODULES.forEach((m) => { if (denied.has(m.key)) delete set[m.route]; });
+  }
   return set;
 }
 
@@ -839,6 +877,10 @@ function buildNav() {
     // once individually granted a capability. See bootApp()'s capability
     // fetch, which sets this flag on state.profile at login.
     if (it.hideUnless && !state.profile[it.hideUnless]) return;
+    // SignUp_Fixes §5: the opposite direction — a module every teacher gets
+    // by default, but THIS ONE has been explicitly blocked from via Access
+    // Control (state.profile.deniedModules, set at boot).
+    if (it.route && state.profile.deniedModules && state.profile.deniedModules.has(routeDenyKey(it.route))) return;
     if (it.section) {
       html += `<div class="group">${esc(it.section)}</div>`;
     } else if (it.parent) {
@@ -951,10 +993,18 @@ async function bootApp() {
   // this check is skipped for them. One cheap query at login, not on every
   // navigation.
   state.profile.financeAccess = state.profile.role === 'admin';
+  // SignUp_Fixes §5: the reverse of financeAccess above — modules a teacher
+  // gets by DEFAULT, but that this specific one has been explicitly blocked
+  // from via Access Control (staff.mjs's staff-edit modal). Always empty for
+  // an admin — the school creator/an admin always has full access, exactly
+  // like financeAccess never being checked for them above.
+  state.profile.deniedModules = new Set();
   if (state.profile.role === 'teacher' && state.profile.staff_id) {
     try {
       const capsRes = await Db.capabilities.listForStaff(state.profile.staff_id);
-      state.profile.financeAccess = capsRes.ok && (capsRes.data.indexOf('finance_manage_fees') !== -1 || capsRes.data.indexOf('finance_record_collections') !== -1);
+      const caps = capsRes.ok ? capsRes.data : [];
+      state.profile.financeAccess = caps.indexOf('finance_manage_fees') !== -1 || caps.indexOf('finance_record_collections') !== -1;
+      state.profile.deniedModules = new Set(caps.filter((c) => c.indexOf('deny_') === 0));
     } catch (e) {
       state.profile.financeAccess = false;
     }

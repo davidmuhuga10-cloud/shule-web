@@ -82,7 +82,7 @@ export function renderReportCard(container, data, extra) {
           <div><span>Name</span><b>${esc(s.full_name)}</b></div>
           <div><span>Admission No.</span><b>${esc(s.admission_no)}</b></div>
           <div><span>Class</span><b>${esc(s.class_name)}</b></div>
-          <div><span>Arm</span><b>${esc(s.stream_name || '—')}</b></div>
+          <div><span>Stream</span><b>${esc(s.stream_name || '—')}</b></div>
           <div><span>Gender</span><b>${esc(s.gender)}</b></div>
           <div><span>Position</span><b>${data.position ? `${data.position} of ${data.class_size}` : '—'}</b></div>
         </div>

@@ -68,7 +68,7 @@ function topTable(title, rows) {
   return `<div style="margin-top:14px">
     <div style="font-weight:700;font-size:12.5px;margin-bottom:6px">${esc(title)}</div>
     <div class="table-wrap"><table class="print-grid"><thead><tr>
-      <th>Admno</th><th>Name</th><th>Arm</th><th class="num">Arm Rank</th><th class="num">Ovrl Rank</th><th class="num">Score</th><th>Performance Level</th><th>Gender</th>
+      <th>Admno</th><th>Name</th><th>Stream</th><th class="num">Stream Rank</th><th class="num">Ovrl Rank</th><th class="num">Score</th><th>Performance Level</th><th>Gender</th>
     </tr></thead><tbody>${rows.map((r) => `<tr>
       <td>${esc(r.admission_no)}</td><td>${esc(r.full_name)}</td><td>${esc(r.stream_name || '—')}</td>
       <td class="num">${r.stream_rank} / ${r.stream_total}</td><td class="num">${r.overall_rank} / ${r.overall_total}</td>

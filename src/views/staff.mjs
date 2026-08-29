@@ -1,5 +1,6 @@
 import { esc, modal, closeModal, toast, confirmAction, options, go } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
+import { DENIABLE_MODULES } from '../lib/api/capabilities.mjs';
 
 export const JOB_TITLES = ['Teacher', 'Head Teacher', 'Deputy Head Teacher', 'Bursar', 'Support Staff'];
 
@@ -110,12 +111,16 @@ export async function openStaffModal(root, existing, onSaved) {
   let canPublish = false;
   let canFinanceCollect = false;
   let canFinanceManage = false;
+  // SignUp_Fixes §5: which modules THIS staff member is currently blocked
+  // from (deny_* rows) — everything not listed here they get by default.
+  let deniedModules = [];
   if (existing) {
     const capsRes = await Db.capabilities.listForStaff(existing.id);
     const caps = capsRes.ok ? capsRes.data : [];
     canPublish = caps.indexOf('publish_results') !== -1;
     canFinanceCollect = caps.indexOf('finance_record_collections') !== -1;
     canFinanceManage = caps.indexOf('finance_manage_fees') !== -1;
+    deniedModules = caps.filter((c) => c.indexOf('deny_') === 0);
   }
   modal({
     title: existing ? 'Edit staff member' : 'Add staff member',
@@ -147,6 +152,14 @@ export async function openStaffModal(root, existing, onSaved) {
       ${existing ? `<div class="field"><label class="chk"><input type="checkbox" id="sf-publish" ${canPublish ? 'checked' : ''}> Can publish exam results (final step of the approval workflow)</label></div>` : ''}
       ${existing ? `<div class="field"><label class="chk"><input type="checkbox" id="sf-finance-collect" ${canFinanceCollect ? 'checked' : ''}> Finance: can record collections &amp; view statements</label></div>` : ''}
       ${existing ? `<div class="field"><label class="chk"><input type="checkbox" id="sf-finance-manage" ${canFinanceManage ? 'checked' : ''}> Finance: can manage fees, invoices &amp; credit/debit notes</label></div>` : ''}
+      ${existing ? `
+      <details style="margin-top:4px">
+        <summary style="cursor:pointer;font-weight:600;font-size:13px">Access Control — block modules (optional)</summary>
+        <div style="margin-top:8px">
+          <p class="muted" style="margin:0 0 8px;font-size:12.5px">This staff member sees every module above by default (unless it's an admin login, which always sees everything). Check a box below to block them from that specific module — e.g. a bursar who should only use Finance.</p>
+          ${DENIABLE_MODULES.map((m) => `<div class="field"><label class="chk"><input type="checkbox" data-deny-module="${m.key}" ${deniedModules.indexOf(m.key) !== -1 ? 'checked' : ''}> Block access to ${esc(m.label)}</label></div>`).join('')}
+        </div>
+      </details>` : ''}
       ${existing ? '' : `<div class="field"><label class="chk"><input type="checkbox" id="sf-admin"> Grant admin (full) access, not just teacher access</label></div>`}
     `,
     okLabel: 'Save',
@@ -199,6 +212,20 @@ export async function openStaffModal(root, existing, onSaved) {
             ? await Db.capabilities.grant(existing.id, 'finance_manage_fees')
             : await Db.capabilities.revoke(existing.id, 'finance_manage_fees');
           if (!capRes.ok) toast(capRes.message, 'err');
+        }
+        // SignUp_Fixes §5: Access Control's module-block checkboxes — each
+        // is its own independent deny_* capability, same grant/revoke calls
+        // as every other checkbox above, just inverted (checked = blocked).
+        for (const m of DENIABLE_MODULES) {
+          const box = document.querySelector(`[data-deny-module="${m.key}"]`);
+          const wantsDenied = !!(box && box.checked);
+          const currentlyDenied = deniedModules.indexOf(m.key) !== -1;
+          if (wantsDenied !== currentlyDenied) {
+            const capRes = wantsDenied
+              ? await Db.capabilities.grant(existing.id, m.key)
+              : await Db.capabilities.revoke(existing.id, m.key);
+            if (!capRes.ok) toast(capRes.message, 'err');
+          }
         }
         toast('Staff saved.', 'ok');
       }

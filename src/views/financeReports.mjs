@@ -250,7 +250,7 @@ const OB_TEMPLATE_COLUMNS = [
   { key: 'admission_no', label: 'Admission No.' },
   { key: 'full_name', label: 'Name' },
   { key: 'class_name', label: 'Class' },
-  { key: 'stream_name', label: 'Arm' },
+  { key: 'stream_name', label: 'Stream' },
   { key: 'amount', label: 'Opening Balance (KES)' }
 ];
 

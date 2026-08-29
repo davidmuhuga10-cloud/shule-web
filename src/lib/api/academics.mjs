@@ -217,8 +217,15 @@ export function createAcademicsApi(supabase) {
         const pendingStreamNames = Array.isArray(payload.streams)
           ? [...new Set(payload.streams.map(streamName).filter(Boolean))]
           : [];
-        if (!payload.id && !pendingStreamNames.length) {
-          return err('Add at least one arm for this class — e.g. "Main" if it only has one group.');
+        // SignUp_Fixes §2: Senior School classes (Grade 10-12) are the one
+        // exception to the "every class needs at least one arm" rule
+        // (Round 3 §17) — a small school may run all pathways as one
+        // single mixed class with no arms at all. Every other class level
+        // keeps the original rule unchanged (a class with zero streams
+        // otherwise has nowhere to point its enrolled students/subjects).
+        const isSeniorSecondary = levelBucketForClassName(name) === 'Senior Secondary';
+        if (!payload.id && !pendingStreamNames.length && !isSeniorSecondary) {
+          return err('Add at least one stream for this class — e.g. "Main" if it only has one group.');
         }
 
         let saved;
@@ -266,7 +273,7 @@ export function createAcademicsApi(supabase) {
               // (the class row itself already succeeded above) — surfaced
               // as a real failure instead of a quiet no-op so the admin
               // knows to retry rather than assuming the class is ready.
-              return err(`Class was created, but its arm(s) could not be added: ${streamErr.message}. Add one from the class page before using it.`);
+              return err(`Class was created, but its stream(s) could not be added: ${streamErr.message}. Add one from the class page before using it.`);
             }
           }
         }
@@ -332,13 +339,13 @@ export function createAcademicsApi(supabase) {
       },
       async save(payload) {
         payload = payload || {};
-        if (!payload.class_id) return err('Please choose the class this arm belongs to.');
+        if (!payload.class_id) return err('Please choose the class this stream belongs to.');
         const name = String(payload.name || '').trim();
         // Round 2 brief §2 (BUG): "Blue,Red" was accepted as one stream
         // name — plain letters/digits/spaces only from here on, whether
         // this is a brand-new stream or a rename (§4) of an existing one.
-        const nameError = plainNameError(name, 'Arm name');
-        if (nameError) return err(name ? nameError : 'Arm name is required (e.g. "East", "North", "Blue").');
+        const nameError = plainNameError(name, 'Stream name');
+        if (nameError) return err(name ? nameError : 'Stream name is required (e.g. "East", "North", "Blue").');
         // Next Sprint 3 §1.3: a Grade 10-12 arm must be told which pathway
         // it is (its default subjects depend on it — see
         // seedDefaultSubjectsForNewStream below) — checked server-side too,
@@ -352,7 +359,7 @@ export function createAcademicsApi(supabase) {
         if (level === 'Senior Secondary') {
           pathway = String(payload.pathway || '').trim() || null;
           if (!pathway || PATHWAYS.indexOf(pathway) === -1) {
-            return err('Choose this arm\'s pathway (STEM, Social Sciences, or Arts and Sports Science).');
+            return err('Choose this stream\'s pathway (STEM, Social Sciences, or Arts and Sports Science).');
           }
         }
         const rec = { class_id: payload.class_id, name, description: payload.description || '', pathway };
@@ -363,7 +370,7 @@ export function createAcademicsApi(supabase) {
         let dupQuery = supabase.from('streams').select('id').eq('class_id', payload.class_id).eq('name', name);
         if (payload.id) dupQuery = dupQuery.neq('id', payload.id);
         const { data: dup } = await dupQuery.maybeSingle();
-        if (dup) return err('That arm already exists for this class.');
+        if (dup) return err('That stream already exists for this class.');
         if (payload.id) {
           // Renaming an existing arm never touches its pathway (brief only
           // asks for pathway when the arm is created) — only send `name`/
@@ -389,16 +396,26 @@ export function createAcademicsApi(supabase) {
       },
       async remove(id) {
         const { count } = await supabase.from('students').select('id', { count: 'exact', head: true }).eq('stream_id', id);
-        if (count > 0) return err('Students are assigned to this arm. Move them first.');
+        if (count > 0) return err('Students are assigned to this stream. Move them first.');
         // Round 3 §17: a class must always have at least one stream (arm) —
         // deleting an individual stream down to zero is refused; deleting
         // the WHOLE class (classes.remove() above) still cascades and
         // removes every one of its streams together, since that's an
         // explicit, different action, not this one.
+        // SignUp_Fixes §2: EXCEPT a Senior School class, which is now
+        // allowed to run with zero arms (see classes.save() above) — so
+        // deleting its last arm is allowed too, converting it back to a
+        // single mixed class. Its subjects/teachers then need re-setting
+        // at the class level (the "Manage Subjects & Teachers" screen
+        // classes.mjs shows once a Senior Secondary class has no arms).
         const { data: thisStream } = await supabase.from('streams').select('class_id').eq('id', id).maybeSingle();
         if (thisStream) {
-          const { count: siblingCount } = await supabase.from('streams').select('id', { count: 'exact', head: true }).eq('class_id', thisStream.class_id).neq('id', id);
-          if (!siblingCount) return err('A class must always have at least one arm — rename this one instead, or delete the whole class if it\'s no longer needed.');
+          const { data: parentClass } = await supabase.from('classes').select('name').eq('id', thisStream.class_id).maybeSingle();
+          const isSeniorSecondary = parentClass && levelBucketForClassName(parentClass.name) === 'Senior Secondary';
+          if (!isSeniorSecondary) {
+            const { count: siblingCount } = await supabase.from('streams').select('id', { count: 'exact', head: true }).eq('class_id', thisStream.class_id).neq('id', id);
+            if (!siblingCount) return err('A class must always have at least one stream — rename this one instead, or delete the whole class if it\'s no longer needed.');
+          }
         }
         const { error } = await supabase.from('streams').delete().eq('id', id);
         if (error) return err(error.message);

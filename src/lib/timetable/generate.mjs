@@ -568,12 +568,12 @@ function diagnoseUnresolved(unit, days, teachable, streamBusy, staffBusy, unavai
       });
     });
     if (!anyStreamAdjacentFree) {
-      return "This class/arm has no two consecutive free periods left anywhere in the week — its timetable is essentially full. Add more periods to the grid, or free up a slot by moving another lesson.";
+      return "This class/stream has no two consecutive free periods left anywhere in the week — its timetable is essentially full. Add more periods to the grid, or free up a slot by moving another lesson.";
     }
     if (unit.staff_id && !anyStreamAndTeacherAdjacentFree) {
-      return "The class/arm still has free double-length slots, but the assigned teacher is already teaching elsewhere (or marked unavailable) in every one of them — assign a different teacher, reduce their other lessons, or clear an availability block.";
+      return "The class/stream still has free double-length slots, but the assigned teacher is already teaching elsewhere (or marked unavailable) in every one of them — assign a different teacher, reduce their other lessons, or clear an availability block.";
     }
-    return "No two consecutive free periods lined up for both the class/arm and its teacher at the same time, even after every other placement preference was relaxed.";
+    return "No two consecutive free periods lined up for both the class/stream and its teacher at the same time, even after every other placement preference was relaxed.";
   }
 
   // Note: the placement loop's last-resort pass (pass 3) drops even the
@@ -591,12 +591,12 @@ function diagnoseUnresolved(unit, days, teachable, streamBusy, staffBusy, unavai
     });
   });
   if (freeStreamCount === 0) {
-    return "This class/arm's timetable is completely full — there is no free period left anywhere in the week. Add more periods to the grid, or free up a slot by moving another lesson.";
+    return "This class/stream's timetable is completely full — there is no free period left anywhere in the week. Add more periods to the grid, or free up a slot by moving another lesson.";
   }
   if (unit.staff_id && freeStreamAndTeacherCount === 0) {
-    return `The class/arm still has ${freeStreamCount} free period${freeStreamCount === 1 ? '' : 's'} left this week, but the assigned teacher is already teaching elsewhere (or marked unavailable) in every one of them — assign a different teacher, reduce their other lessons, or clear an availability block.`;
+    return `The class/stream still has ${freeStreamCount} free period${freeStreamCount === 1 ? '' : 's'} left this week, but the assigned teacher is already teaching elsewhere (or marked unavailable) in every one of them — assign a different teacher, reduce their other lessons, or clear an availability block.`;
   }
-  return "No free period lined up for both the class/arm and its teacher, even after every other placement preference was relaxed.";
+  return "No free period lined up for both the class/stream and its teacher, even after every other placement preference was relaxed.";
 }
 
 /** Round 2 §7: upfront capacity validation — "compare total teachable slots

@@ -129,7 +129,7 @@ export function buildBroadsheetAoa({ settings, exam, cls, streamName, subjects, 
   aoa.push([]);
 
   const columns = buildSubjectColumns(subjects);
-  aoa.push(['Adm. No.', 'Name', 'Arm', ...columns.map((c) => c.header), 'SBJ', 'TT MKS', 'MN MKS', 'PL', 'TT PTS', 'MN PTS', 'DEV', 'ARM POS', 'OVR POS']);
+  aoa.push(['Adm. No.', 'Name', 'Stream', ...columns.map((c) => c.header), 'SBJ', 'TT MKS', 'MN MKS', 'PL', 'TT PTS', 'MN PTS', 'DEV', 'STREAM POS', 'OVR POS']);
 
   // Sprint Review correction (final): only an INDIVIDUAL result — one
   // subject's own score for one student — rounds to a whole number

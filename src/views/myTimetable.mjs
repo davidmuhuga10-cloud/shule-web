@@ -46,7 +46,7 @@ export async function viewMyTimetable(root) {
   function render() {
     const terms = termsByYear[sel.year_id] || [];
     root.innerHTML = `
-      <div class="page-head no-print"><div><h2>My Timetable</h2><p>Your own lessons across every class and arm you teach.</p></div></div>
+      <div class="page-head no-print"><div><h2>My Timetable</h2><p>Your own lessons across every class and stream you teach.</p></div></div>
       <div class="card no-print" style="margin-bottom:16px">
         <div class="card-b grid3">
           <div class="field"><label>Academic Year</label><select id="my-tt-year">${options(years, 'id', 'name', sel.year_id, 'Choose a year')}</select></div>

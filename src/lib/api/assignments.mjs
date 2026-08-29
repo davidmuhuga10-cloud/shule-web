@@ -149,10 +149,17 @@ export function createAssignmentsApi(supabase) {
   // duplicated logic in timetable.mjs.
   async function effectiveSubjectIdsForStream(streamId, classId) {
     const cols = 'id, subject_id, periods_per_week, double_periods_per_week';
-    const { data: streamRows } = await supabase.from('subject_class_assignments').select(cols).eq('stream_id', streamId);
-    if (streamRows && streamRows.length) return { ids: streamRows.map((r) => r.subject_id), rows: streamRows, inherited: false };
+    // SignUp_Fixes §2: streamId can now genuinely be null/undefined — a
+    // Senior School class with no arms at all manages its subjects at the
+    // class level directly (stream_id null IS the authoritative set here,
+    // not a fallback to "inherit" from — there's no stream to inherit
+    // from), so skip straight to the class-wide query in that case.
+    if (streamId) {
+      const { data: streamRows } = await supabase.from('subject_class_assignments').select(cols).eq('stream_id', streamId);
+      if (streamRows && streamRows.length) return { ids: streamRows.map((r) => r.subject_id), rows: streamRows, inherited: false };
+    }
     const { data: classWide } = await supabase.from('subject_class_assignments').select(cols).eq('class_id', classId).is('stream_id', null);
-    return { ids: (classWide || []).map((r) => r.subject_id), rows: classWide || [], inherited: (classWide || []).length > 0 };
+    return { ids: (classWide || []).map((r) => r.subject_id), rows: classWide || [], inherited: streamId ? (classWide || []).length > 0 : false };
   }
 
   return {
@@ -195,20 +202,34 @@ export function createAssignmentsApi(supabase) {
      *  teacher (if any) is assigned to teach it in this stream — the data
      *  the new Classes > Stream > Subjects screen renders directly
      *  (brief §4.2/§4.3). `inherited: true` means this stream hasn't been
-     *  customized yet — it's showing the class-wide default (or nothing). */
-    async getStreamSubjects(streamId) {
-      if (!streamId) return err('Please choose an arm.');
-      return cached('getStreamSubjects', streamId, async () => {
-        const { data: stream } = await supabase.from('streams').select('id, class_id, name').eq('id', streamId).maybeSingle();
-        if (!stream) return err('Arm not found.');
-        const { ids: subjectIds, rows: assignmentRows, inherited } = await effectiveSubjectIdsForStream(streamId, stream.class_id);
+     *  customized yet — it's showing the class-wide default (or nothing).
+     *
+     *  SignUp_Fixes §2: streamId may now be null/undefined — a Senior
+     *  School class allowed to run with no arms at all (see
+     *  classes.save()'s comment on why) manages its subjects directly at
+     *  the class level, the same stream_id-null "class-wide" row this
+     *  table already supported for legacy data (Phase 2g). classId is then
+     *  required (there's no streams row to derive it from). */
+    async getStreamSubjects(streamId, classId) {
+      if (!streamId && !classId) return err('Please choose a stream or class.');
+      return cached('getStreamSubjects', streamId || `class:${classId}`, async () => {
+        let resolvedClassId = classId, streamName = null;
+        if (streamId) {
+          const { data: stream } = await supabase.from('streams').select('id, class_id, name').eq('id', streamId).maybeSingle();
+          if (!stream) return err('Stream not found.');
+          resolvedClassId = stream.class_id;
+          streamName = stream.name;
+        }
+        const { ids: subjectIds, rows: assignmentRows, inherited } = await effectiveSubjectIdsForStream(streamId, resolvedClassId);
         const assignmentBySubject = {}; assignmentRows.forEach((r) => { assignmentBySubject[r.subject_id] = r; });
 
+        let teacherQuery = supabase.from('subject_teacher_assignments').select('subject_id, staff_id');
+        teacherQuery = streamId ? teacherQuery.eq('stream_id', streamId) : teacherQuery.eq('class_id', resolvedClassId).is('stream_id', null);
         const [{ data: subjects }, { data: teacherRows }, { data: staffAll }, { data: cls }] = await Promise.all([
           subjectIds.length ? supabase.from('subjects').select('id, name, code, level').in('id', subjectIds) : Promise.resolve({ data: [] }),
-          subjectIds.length ? supabase.from('subject_teacher_assignments').select('subject_id, staff_id').eq('stream_id', streamId).in('subject_id', subjectIds) : Promise.resolve({ data: [] }),
+          subjectIds.length ? teacherQuery.in('subject_id', subjectIds) : Promise.resolve({ data: [] }),
           supabase.from('staff').select('id, full_name'),
-          supabase.from('classes').select('name').eq('id', stream.class_id).maybeSingle()
+          supabase.from('classes').select('name').eq('id', resolvedClassId).maybeSingle()
         ]);
         const staffMap = {}; (staffAll || []).forEach((s) => { staffMap[s.id] = s.full_name; });
         const teacherBySubject = {}; (teacherRows || []).forEach((t) => { teacherBySubject[t.subject_id] = t.staff_id; });
@@ -228,19 +249,24 @@ export function createAssignmentsApi(supabase) {
           };
         }).sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
-        return ok(rows, { inherited, class_id: stream.class_id, class_name: cls ? cls.name : '', stream_name: stream.name });
+        return ok(rows, { inherited, class_id: resolvedClassId, class_name: cls ? cls.name : '', stream_name: streamName || (cls ? cls.name : '') });
       });
     },
 
     /** Replace the full set of subjects for ONE stream in one call — this is
      *  what "add subject" (tick from the full list, then Save) writes.
      *  Removing a subject here also clears any teacher assigned to it in
-     *  this stream, so a stale assignment can't linger unassigned-but-set. */
+     *  this stream, so a stale assignment can't linger unassigned-but-set.
+     *
+     *  SignUp_Fixes §2: streamId null means "this class has no arms at
+     *  all — manage its subjects class-wide" (see getStreamSubjects'
+     *  comment above); classId is required either way. */
     async setStreamSubjects(streamId, classId, subjectIds) {
-      if (!streamId) return err('Please choose an arm.');
       if (!classId) return err('Missing class.');
       subjectIds = (subjectIds || []).map(String);
-      const { data: existing } = await supabase.from('subject_class_assignments').select('id, subject_id').eq('stream_id', streamId);
+      let existingQuery = supabase.from('subject_class_assignments').select('id, subject_id');
+      existingQuery = streamId ? existingQuery.eq('stream_id', streamId) : existingQuery.eq('class_id', classId).is('stream_id', null);
+      const { data: existing } = await existingQuery;
       const existingIds = (existing || []).map((a) => String(a.subject_id));
 
       const toAdd = subjectIds.filter((sid) => existingIds.indexOf(sid) === -1);
@@ -248,43 +274,51 @@ export function createAssignmentsApi(supabase) {
 
       if (toAdd.length) {
         const { error } = await supabase.from('subject_class_assignments').insert(
-          toAdd.map((subject_id) => ({ subject_id, class_id: classId, stream_id: streamId }))
+          toAdd.map((subject_id) => ({ subject_id, class_id: classId, stream_id: streamId || null }))
         );
         if (error) return err(error.message);
       }
       for (const a of toRemove) {
         await supabase.from('subject_class_assignments').delete().eq('id', a.id);
-        await supabase.from('subject_teacher_assignments').delete().eq('stream_id', streamId).eq('subject_id', a.subject_id);
+        let teacherDel = supabase.from('subject_teacher_assignments').delete().eq('subject_id', a.subject_id);
+        teacherDel = streamId ? teacherDel.eq('stream_id', streamId) : teacherDel.eq('class_id', classId).is('stream_id', null);
+        await teacherDel;
       }
       clearCache();
       return ok(null, { count: subjectIds.length });
     },
 
     /** Remove a single subject from a stream (the inline "✕ remove" action —
-     *  no need to reopen the full tick-list for a mistake). */
-    async removeStreamSubject(streamId, subjectId) {
-      if (!streamId || !subjectId) return err('Missing arm or subject.');
-      const { data: existing } = await supabase.from('subject_class_assignments').select('id').eq('stream_id', streamId).eq('subject_id', subjectId);
+     *  no need to reopen the full tick-list for a mistake). streamId null +
+     *  classId set means the class-wide (no-arms) case, same as above. */
+    async removeStreamSubject(streamId, subjectId, classId) {
+      if (!subjectId || (!streamId && !classId)) return err('Missing stream/class or subject.');
+      let existingQuery = supabase.from('subject_class_assignments').select('id').eq('subject_id', subjectId);
+      existingQuery = streamId ? existingQuery.eq('stream_id', streamId) : existingQuery.eq('class_id', classId).is('stream_id', null);
+      const { data: existing } = await existingQuery;
       for (const a of existing || []) await supabase.from('subject_class_assignments').delete().eq('id', a.id);
-      await supabase.from('subject_teacher_assignments').delete().eq('stream_id', streamId).eq('subject_id', subjectId);
+      let teacherDel = supabase.from('subject_teacher_assignments').delete().eq('subject_id', subjectId);
+      teacherDel = streamId ? teacherDel.eq('stream_id', streamId) : teacherDel.eq('class_id', classId).is('stream_id', null);
+      await teacherDel;
       clearCache();
       return ok(true);
     },
 
     /** Set (or clear, if staff_id is falsy) which teacher teaches a subject
      *  in a specific stream — replaces any prior assignment for that exact
-     *  stream+subject pair rather than allowing duplicates. */
+     *  stream+subject pair rather than allowing duplicates. stream_id null
+     *  + class_id set is the class-wide (no-arms) case, same as above. */
     async setStreamSubjectTeacher(payload) {
       payload = payload || {};
-      if (!payload.stream_id) return err('Missing arm.');
       if (!payload.subject_id) return err('Missing subject.');
       if (!payload.class_id) return err('Missing class.');
-      const { data: existing } = await supabase.from('subject_teacher_assignments').select('id')
-        .eq('stream_id', payload.stream_id).eq('subject_id', payload.subject_id);
+      let existingQuery = supabase.from('subject_teacher_assignments').select('id').eq('subject_id', payload.subject_id);
+      existingQuery = payload.stream_id ? existingQuery.eq('stream_id', payload.stream_id) : existingQuery.eq('class_id', payload.class_id).is('stream_id', null);
+      const { data: existing } = await existingQuery;
       for (const e of existing || []) await supabase.from('subject_teacher_assignments').delete().eq('id', e.id);
       if (!payload.staff_id) { clearCache(); return ok(null); }
       const { error } = await supabase.from('subject_teacher_assignments').insert({
-        subject_id: payload.subject_id, staff_id: payload.staff_id, class_id: payload.class_id, stream_id: payload.stream_id
+        subject_id: payload.subject_id, staff_id: payload.staff_id, class_id: payload.class_id, stream_id: payload.stream_id || null
       });
       if (error) return err(error.message);
       clearCache();
@@ -337,7 +371,7 @@ export function createAssignmentsApi(supabase) {
       const { data: existing } = await supabase.from('subject_teacher_assignments').select('*')
         .eq('subject_id', payload.subject_id).eq('class_id', payload.class_id).eq('staff_id', payload.staff_id);
       const dup = (existing || []).find((a) => String(a.stream_id || '') === String(payload.stream_id || ''));
-      if (dup) return err('That teacher is already assigned to this subject and arm.');
+      if (dup) return err('That teacher is already assigned to this subject and stream.');
 
       const { data, error } = await supabase.from('subject_teacher_assignments').insert({
         subject_id: payload.subject_id,

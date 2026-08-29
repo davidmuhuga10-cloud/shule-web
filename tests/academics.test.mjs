@@ -155,7 +155,7 @@ async function run() {
     const sb = createMockSupabase({});
     const api = createAcademicsApi(sb);
     const noStreams = await api.classes.save({ name: 'Grade 7' });
-    check('classes.save rejects a brand-new class with no streams at all', noStreams.ok === false && /at least one arm/i.test(noStreams.message));
+    check('classes.save rejects a brand-new class with no streams at all', noStreams.ok === false && /at least one stream/i.test(noStreams.message));
     const blankOnly = await api.classes.save({ name: 'Grade 7', streams: ['   ', ''] });
     check('classes.save treats blank/whitespace-only stream names as none given', blankOnly.ok === false);
     const withOne = await api.classes.save({ name: 'Grade 7', streams: ['Main'] });
@@ -179,7 +179,7 @@ async function run() {
     });
     const api = createAcademicsApi(sb);
     const blocked = await api.streams.remove('st1');
-    check('streams.remove refuses to delete a class\'s LAST remaining stream', blocked.ok === false && /at least one arm/i.test(blocked.message));
+    check('streams.remove refuses to delete a class\'s LAST remaining stream', blocked.ok === false && /at least one stream/i.test(blocked.message));
   }
   {
     // With a sibling stream present, deleting one is fine — the class still

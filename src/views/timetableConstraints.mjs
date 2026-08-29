@@ -40,7 +40,7 @@ const GROUPS = [
       {
         type: 'avoid_consecutive_intensive',
         title: 'No Back-to-Back Mentally Intensive Subjects',
-        desc: 'Prevents scheduling two mentally demanding subjects one after another for the same class/arm.',
+        desc: 'Prevents scheduling two mentally demanding subjects one after another for the same class/stream.',
         needsSubjects: true, minSubjects: 2, subjectsLabel: 'Which subjects count as mentally intensive?'
       },
       {
@@ -52,7 +52,7 @@ const GROUPS = [
       {
         type: 'distribute_doubles',
         title: 'Spread Out Double Lessons',
-        desc: "Avoids stacking double lessons directly back-to-back, so a class/arm's day isn't wall-to-wall doubles. On by default for every school."
+        desc: "Avoids stacking double lessons directly back-to-back, so a class/stream's day isn't wall-to-wall doubles. On by default for every school."
       }
     ]
   },
@@ -75,12 +75,12 @@ const GROUPS = [
   },
   {
     title: 'Class constraints',
-    desc: 'Manage the constraints that affect the class/arm schedule.',
+    desc: 'Manage the constraints that affect the class/stream schedule.',
     types: [
       {
         type: 'max_consecutive_periods_class',
         title: 'Max Consecutive Periods for Class',
-        desc: 'Limits how many periods in a row a class/arm can sit without a break.',
+        desc: 'Limits how many periods in a row a class/stream can sit without a break.',
         needsMax: true, maxLabel: 'Maximum consecutive periods (class)', maxHint: 'A commonly used guideline is around 4.'
       }
     ]
@@ -231,7 +231,7 @@ export async function renderTimetableConstraints(root) {
   function subjectPairsCardHtml() {
     const pairs = constraints.filter((c) => c.type === 'subject_pair_not_consecutive');
     return `<div class="card tt-constraint-group">
-      <div class="card-h"><div><h3>Subject Pairs Kept Apart</h3><p class="hint" style="margin:2px 0 0">Prevents specific subject pairs from being scheduled back-to-back for the same class/arm.</p></div></div>
+      <div class="card-h"><div><h3>Subject Pairs Kept Apart</h3><p class="hint" style="margin:2px 0 0">Prevents specific subject pairs from being scheduled back-to-back for the same class/stream.</p></div></div>
       <div class="card-b">
         ${subjects.length < 2 ? '<p class="hint" style="margin:0">Add at least 2 subjects to the school before configuring this.</p>' : `
         <div class="grid3">

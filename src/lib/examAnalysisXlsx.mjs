@@ -13,7 +13,7 @@
 // overall and per-subject tables so the download never disagrees with the
 // screen).
 function topTableRows(title, rows) {
-  const out = [[title], ['Admno', 'Name', 'Arm', 'Arm Rank', 'Ovrl Rank', 'Score', 'Performance Level', 'Gender']];
+  const out = [[title], ['Admno', 'Name', 'Stream', 'Stream Rank', 'Ovrl Rank', 'Score', 'Performance Level', 'Gender']];
   rows.forEach((r) => {
     out.push([
       r.admission_no, r.full_name, r.stream_name,

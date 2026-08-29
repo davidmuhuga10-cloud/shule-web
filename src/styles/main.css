@@ -519,6 +519,13 @@ table.data td.num,table.data th.num{text-align:center}
 .tabs button.active{background:#fff;color:var(--ink);box-shadow:var(--shadow)}
 .auth-err{background:var(--danger-bg);color:var(--danger);padding:10px 13px;border-radius:8px;font-size:13px;
   margin-bottom:16px;font-weight:550}
+/* SignUp_Fixes §1: a real, specific inline error right under the field it's
+   about (e.g. "Enter a correct phone number") — separate from .auth-err's
+   form-level banner, and from a field's own .hint text (which stays visible
+   at the same time explaining the expected format). Empty by default so it
+   takes up no space until there's actually something wrong to say. */
+.field-err{color:var(--danger);font-size:12.5px;font-weight:600;margin-top:4px}
+.field-err:empty{display:none}
 
 /* ---------- Checklist ---------- */
 .checklist{list-style:none;padding:0;margin:0}

@@ -97,8 +97,8 @@ export function createDashboardApi(supabase) {
         { key: 'academic_year', label: 'Create an academic year', done: (yearCount || 0) > 0, route: '#/settings' },
         { key: 'term', label: 'Add terms to the academic year', done: (termCount || 0) > 0, route: '#/settings' },
         { key: 'classes', label: 'Set up classes', done: classCount > 0, route: '#/classes' },
-        { key: 'streams', label: 'Add arms to classes', done: (streamCount || 0) > 0, route: '#/classes' },
-        { key: 'subjects', label: 'Assign subjects to an arm', done: (subjectCount || 0) > 0, route: '#/classes' },
+        { key: 'streams', label: 'Add streams to classes', done: (streamCount || 0) > 0, route: '#/classes' },
+        { key: 'subjects', label: 'Assign subjects to a stream', done: (subjectCount || 0) > 0, route: '#/classes' },
         { key: 'students', label: 'Enroll students', done: studentCount > 0, route: '#/students' },
         { key: 'staff', label: 'Add teachers / staff', done: staffActive > 0, route: '#/staff-teachers' }
       ];

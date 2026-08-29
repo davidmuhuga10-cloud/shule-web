@@ -28,7 +28,7 @@ export async function viewScoreSheet(root) {
   const classes = classesRes.data;
   const subjects = subjectsRes.data;
   if (!classes.length) { renderPrereq(root, 'No classes found', 'Please create a class first.', 'classes', 'Go to Classes'); return; }
-  if (!subjects.length) { renderPrereq(root, 'No learning areas found', 'Please add a subject first.', 'classes', 'Go to Classes & Arms'); return; }
+  if (!subjects.length) { renderPrereq(root, 'No learning areas found', 'Please add a subject first.', 'classes', 'Go to Classes & Streams'); return; }
   render(root, classes, subjects, {});
 }
 
@@ -38,7 +38,7 @@ function render(root, classes, subjects, sel) {
     <div class="card no-print" style="margin-bottom:16px">
       <div class="card-b grid3">
         <div class="field"><label>Grade</label><select id="ss-class">${options(classes, 'id', 'name', sel.class_id, 'Choose a grade')}</select></div>
-        <div class="field"><label>Arm (optional)</label><select id="ss-stream" ${sel.class_id ? '' : 'disabled'}><option value="">Select Arm (optional)</option></select></div>
+        <div class="field"><label>Stream (optional)</label><select id="ss-stream" ${sel.class_id ? '' : 'disabled'}><option value="">Select Stream (optional)</option></select></div>
         <div class="field"><label>Learning Area</label><select id="ss-subject">${options(subjects, 'id', 'name', sel.subject_id, 'Choose a learning area')}</select></div>
       </div>
       <div class="card-b grid3" style="padding-top:0">
@@ -53,10 +53,10 @@ function render(root, classes, subjects, sel) {
 
   const classSel = root.querySelector('#ss-class'), streamSel = root.querySelector('#ss-stream');
   async function refreshStreams(cid, preselect) {
-    if (!cid) { streamSel.disabled = true; streamSel.innerHTML = '<option value="">Select Arm (optional)</option>'; return; }
+    if (!cid) { streamSel.disabled = true; streamSel.innerHTML = '<option value="">Select Stream (optional)</option>'; return; }
     const sres = await Db.streams.list(cid);
     streamSel.disabled = false;
-    streamSel.innerHTML = '<option value="">Select Arm (optional)</option>' + options(sres.ok ? sres.data : [], 'id', 'name', preselect || '');
+    streamSel.innerHTML = '<option value="">Select Stream (optional)</option>' + options(sres.ok ? sres.data : [], 'id', 'name', preselect || '');
   }
   if (sel.class_id) refreshStreams(sel.class_id, sel.stream_id);
   classSel.onchange = (e) => refreshStreams(e.target.value);
@@ -93,13 +93,13 @@ async function load(root, classes, subjects, sel) {
   if (!isContactInfoComplete(settings)) { renderMissingContactInfo(sheetEl, () => go('settings')); return; }
 
   if (!students.length) {
-    sheetEl.innerHTML = `<div class="card"><div class="card-b"><div class="empty"><div class="e-ico">🎒</div><h3>No students found</h3><p>No active students match this class/arm yet.</p></div></div></div>`;
+    sheetEl.innerHTML = `<div class="card"><div class="card-b"><div class="empty"><div class="e-ico">🎒</div><h3>No students found</h3><p>No active students match this class/stream yet.</p></div></div></div>`;
     return;
   }
 
   const titleBand = `${esc((cls ? cls.name : '').toUpperCase())} - ${esc((subject ? subject.name : '').toUpperCase())} - SCORE SHEET`;
   const detailBits = [];
-  if (streamName) detailBits.push(`Arm: ${esc(streamName)}`);
+  if (streamName) detailBits.push(`Stream: ${esc(streamName)}`);
   if (sel.strand) detailBits.push(`Strand: ${esc(sel.strand)}`);
   if (sel.sub_strand) detailBits.push(`Sub Strand: ${esc(sel.sub_strand)}`);
   if (sel.indicator) detailBits.push(`Indicator: ${esc(sel.indicator)}`);
@@ -124,7 +124,7 @@ async function load(root, classes, subjects, sel) {
         ${detailBits.length ? `<div style="font-size:12px;color:var(--muted);padding:8px 10px;border:1px solid var(--line);border-top:none">${detailBits.join(' &nbsp;·&nbsp; ')}</div>` : ''}
         <div style="font-size:12.5px;padding:10px 2px 14px">Exam name: <span style="display:inline-block;min-width:320px;border-bottom:1px dotted var(--muted)">&nbsp;</span></div>
         <table class="print-grid">
-          <thead><tr><th>Adm No.</th><th>Name</th><th>Arm</th><th class="num" style="width:90px">Score</th></tr></thead>
+          <thead><tr><th>Adm No.</th><th>Name</th><th>Stream</th><th class="num" style="width:90px">Score</th></tr></thead>
           <tbody>${students.map((s) => `<tr>
             <td>${esc(s.admission_no)}</td><td>${esc(s.full_name)}</td><td>${esc(s.stream_name || '—')}</td><td class="num">&nbsp;</td>
           </tr>`).join('')}</tbody>

@@ -1,5 +1,5 @@
 import { createMockSupabase } from './helpers/mockSupabase.mjs';
-import { createCapabilitiesApi, CAPABILITIES } from '../src/lib/api/capabilities.mjs';
+import { createCapabilitiesApi, CAPABILITIES, DENIABLE_MODULES } from '../src/lib/api/capabilities.mjs';
 
 let passed = 0, failed = 0;
 function check(name, cond) { if (cond) passed++; else { failed++; console.error('FAIL:', name); } }
@@ -39,8 +39,27 @@ async function run() {
     check('CAPABILITIES includes publish_results plus the Finance module\'s two capabilities',
       CAPABILITIES.indexOf('publish_results') !== -1 &&
       CAPABILITIES.indexOf('finance_manage_fees') !== -1 &&
-      CAPABILITIES.indexOf('finance_record_collections') !== -1 &&
-      CAPABILITIES.length === 3);
+      CAPABILITIES.indexOf('finance_record_collections') !== -1);
+    check('CAPABILITIES also includes one deny_* key per deniable module, and nothing else',
+      DENIABLE_MODULES.every((m) => CAPABILITIES.indexOf(m.key) !== -1) &&
+      CAPABILITIES.length === 3 + DENIABLE_MODULES.length);
+  }
+
+  {
+    // SignUp_Fixes §5: a deny_<module> capability grants/revokes exactly
+    // like any other — same mechanism, just an opposite-polarity meaning
+    // that app.js's buildNav()/allowedRoutes() interpret.
+    const sb = createMockSupabase({ staff: [{ id: 'st2', full_name: 'Ms. Wanjiru' }] });
+    const api = createCapabilitiesApi(sb);
+    const denyKey = DENIABLE_MODULES[0].key;
+    const granted = await api.grant('st2', denyKey);
+    check('a deny_* key is a known capability, not rejected', granted.ok === true);
+    const listed = await api.listForStaff('st2');
+    check('listForStaff reflects the deny grant', listed.data.indexOf(denyKey) !== -1);
+    const revoked = await api.revoke('st2', denyKey);
+    check('revoke removes the deny grant (module access restored)', revoked.ok === true);
+    const listedAfter = await api.listForStaff('st2');
+    check('listForStaff no longer includes the revoked deny grant', listedAfter.data.indexOf(denyKey) === -1);
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);
