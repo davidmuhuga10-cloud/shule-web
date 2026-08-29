@@ -112,7 +112,7 @@ function openTransferOverpaymentModal(student, bal, ctx, onDone) {
     title: 'Transfer Overpayment',
     body: `
       <p class="hint" style="margin-top:0">${esc(student.full_name)} currently has an overpayment of <strong>KES ${overpayment.toLocaleString()}</strong>. Move some or all of it to another student's balance (e.g. a sibling).</p>
-      <div class="field"><label>Transfer to</label>
+      <div class="field" style="position:relative"><label>Transfer to</label>
         <input id="tovp-q" placeholder="🔍 Search by admission no. or name…" autocomplete="off">
         <div id="tovp-results" class="search-results"></div>
         <div id="tovp-selected" class="muted" style="margin-top:6px"></div>

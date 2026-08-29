@@ -129,7 +129,7 @@ function openRecordModal(root, access, opts) {
     body: `
       ${opts.studentId
         ? `<p class="hint" style="margin-top:0">Recording for <b>${esc(opts.studentName || '')}</b>.</p><input type="hidden" id="rc-student-id" value="${esc(opts.studentId)}">`
-        : `<div class="field"><label>Student</label><input id="rc-student-q" placeholder="Type name or admission no. to search…" autocomplete="off">
+        : `<div class="field" style="position:relative"><label>Student</label><input id="rc-student-q" placeholder="Type name or admission no. to search…" autocomplete="off">
            <div id="rc-student-results" class="search-results"></div>
            <input type="hidden" id="rc-student-id"></div>`}
       <div class="grid2">
