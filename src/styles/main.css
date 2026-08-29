@@ -919,8 +919,18 @@ table.data td.num,table.data th.num{text-align:center}
 .fin-statement-term thead th{background:#f0f2f5;color:var(--grid-text);font-weight:700}
 .fin-statement-term-close td{background:#eef1f5;font-weight:700}
 @media print{.fin-receipt{border-color:#000}.fin-receipt .fr-h,.fin-receipt .fr-words{border-color:#000}.fin-receipt table th,.fin-receipt table td{border-color:#000}}
-.search-results{position:relative;z-index:5;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-top:4px;background:var(--card-bg,#fff)}
-.search-results:empty{border:none;margin-top:0}
+/* BUG FIX: this used to be position:relative, which means it took up real
+   space in the page's normal flow — as results loaded in, the dropdown
+   grew taller and physically shoved the Finance tabs (Dashboard/Invoicing/
+   Collections/.../Transport) and everything below them further down the
+   page, then back up again when the box was cleared. It should float
+   ON TOP of whatever's below it, not resize the layout around itself —
+   every element with this class already sits inside (or a fix below
+   makes it sit inside) a position:relative container, so absolute here
+   positions it right under its own input without disturbing anything
+   else on the page. */
+.search-results{position:absolute;top:100%;left:0;right:0;z-index:20;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-top:4px;background:var(--card-bg,#fff);box-shadow:var(--shadow,0 4px 16px rgba(16,32,45,.12))}
+.search-results:empty{border:none;margin-top:0;box-shadow:none}
 .search-hit{padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--line)}
 .search-hit:last-child{border-bottom:none}
 .search-hit:hover{background:var(--hover-bg,#f4f6fa)}

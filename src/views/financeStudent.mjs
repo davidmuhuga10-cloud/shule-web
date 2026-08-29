@@ -28,10 +28,16 @@ export async function viewFinanceStudent(root, access) {
     clearTimeout(t);
     t = setTimeout(async () => {
       const q = qEl.value.trim();
-      if (q.length < 2) { resultsEl.innerHTML = ''; return; }
+      // BUG FIX: this used to require 2+ characters before searching at
+      // all, so typing a single digit (e.g. an admission no. starting with
+      // "1") showed nothing — not even a "no matches" message, just a
+      // blank dropdown, which reads as broken rather than "keep typing".
+      // Search from the first character instead, same as the student
+      // search elsewhere in the app; only an empty box clears the dropdown.
+      if (!q.length) { resultsEl.innerHTML = ''; return; }
       const r = await Db.finance.students.search(q);
       const list = r.ok ? r.data : [];
-      resultsEl.innerHTML = list.map((s) => `<div class="search-hit" data-id="${s.id}">${esc(s.full_name)} <span class="muted">${esc(s.admission_no)} · ${esc(s.classes ? s.classes.name : '')}</span></div>`).join('') || '<div class="muted" style="padding:6px">No matches.</div>';
+      resultsEl.innerHTML = list.map((s) => `<div class="search-hit" data-id="${s.id}">${esc(s.full_name)} <span class="muted">${esc(s.admission_no)} · ${esc(s.classes ? s.classes.name : '')}</span></div>`).join('') || `<div class="muted" style="padding:6px">No student found matching "${esc(q)}".</div>`;
       resultsEl.querySelectorAll('[data-id]').forEach((h) => h.onclick = () => {
         const student = list.find((s) => s.id === h.dataset.id);
         resultsEl.innerHTML = '';
@@ -106,7 +112,7 @@ function openTransferOverpaymentModal(student, bal, ctx, onDone) {
     title: 'Transfer Overpayment',
     body: `
       <p class="hint" style="margin-top:0">${esc(student.full_name)} currently has an overpayment of <strong>KES ${overpayment.toLocaleString()}</strong>. Move some or all of it to another student's balance (e.g. a sibling).</p>
-      <div class="field"><label>Transfer to</label>
+      <div class="field" style="position:relative"><label>Transfer to</label>
         <input id="tovp-q" placeholder="🔍 Search by admission no. or name…" autocomplete="off">
         <div id="tovp-results" class="search-results"></div>
         <div id="tovp-selected" class="muted" style="margin-top:6px"></div>
@@ -416,5 +422,14 @@ async function renderStatement(root, student, years, terms) {
   const schoolName = (state.settings && state.settings.school_name) || 'Shule';
 
   root.innerHTML = statementSheetHtml(schoolName, student, groups);
-  wirePrintOptions(root.querySelector('#fss-sheet'), 'fss', `Statement — ${student.full_name}`);
+  // BUG FIX: this used to pass root.querySelector('#fss-sheet') here, but
+  // the print button (id="fss-print-btn", from printOptionsHtml()) lives in
+  // the SIBLING .page-head div, not inside #fss-sheet — so
+  // wirePrintOptions()'s own `root.querySelector('#fss-print-btn')` always
+  // came back null and silently no-opped (see its `if (!btn) return;`
+  // guard). The Print button on this screen has never actually fired
+  // print. Every other screen calling wirePrintOptions() passes the whole
+  // container (see classList.mjs/financeInvoicing.mjs), which is what
+  // finds the button correctly — do the same here.
+  wirePrintOptions(root, 'fss', `Statement — ${student.full_name}`);
 }
