@@ -290,10 +290,10 @@ async function loadNotes(root, kind, ctx, sel) {
       clearTimeout(t);
       t = setTimeout(async () => {
         const q = qEl.value.trim();
-        if (q.length < 2) { resultsEl.innerHTML = ''; return; }
+        if (!q.length) { resultsEl.innerHTML = ''; return; }
         const r = await Db.finance.students.search(q);
         const list = r.ok ? r.data : [];
-        resultsEl.innerHTML = list.map((s) => `<div class="search-hit" data-id="${s.id}">${esc(s.full_name)} <span class="muted">${esc(s.admission_no)} · ${esc(s.classes ? s.classes.name : '')}</span></div>`).join('') || '<div class="muted" style="padding:6px">No matches.</div>';
+        resultsEl.innerHTML = list.map((s) => `<div class="search-hit" data-id="${s.id}">${esc(s.full_name)} <span class="muted">${esc(s.admission_no)} · ${esc(s.classes ? s.classes.name : '')}</span></div>`).join('') || `<div class="muted" style="padding:6px">No student found matching "${esc(q)}".</div>`;
         resultsEl.querySelectorAll('[data-id]').forEach((h) => h.onclick = async () => {
           const student = list.find((s) => s.id === h.dataset.id);
           resultsEl.innerHTML = '';

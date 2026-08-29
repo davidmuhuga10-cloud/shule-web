@@ -105,10 +105,18 @@ export async function viewFinanceHub(root) {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(async () => {
       const q = qEl.value.trim();
-      if (q.length < 2) { resultsEl.innerHTML = ''; return; }
+      // BUG FIX: this is THE search box shown on the main Finance screen
+      // (Finance > search > Dashboard/Invoicing/Collections/Reports/
+      // Transport tabs) — a separate, duplicated copy of the same search
+      // logic that used to live in financeStudent.mjs's own search screen.
+      // That copy was already fixed to search from the first character and
+      // show a clear "no student found" message, but this one — the one
+      // actually shown here — still required 2+ characters and went
+      // silently blank instead. Same fix, applied here too.
+      if (!q.length) { resultsEl.innerHTML = ''; return; }
       const r = await Db.finance.students.search(q);
       const list = r.ok ? r.data : [];
-      resultsEl.innerHTML = list.map((s) => `<div class="search-hit" data-id="${s.id}">${esc(s.full_name)} <span class="muted">${esc(s.admission_no)} · ${esc(s.classes ? s.classes.name : '')}</span></div>`).join('') || '<div class="muted" style="padding:6px">No matches.</div>';
+      resultsEl.innerHTML = list.map((s) => `<div class="search-hit" data-id="${s.id}">${esc(s.full_name)} <span class="muted">${esc(s.admission_no)} · ${esc(s.classes ? s.classes.name : '')}</span></div>`).join('') || `<div class="muted" style="padding:6px">No student found matching "${esc(q)}".</div>`;
       resultsEl.querySelectorAll('[data-id]').forEach((h) => h.onclick = () => {
         const student = list.find((s) => s.id === h.dataset.id);
         resultsEl.innerHTML = '';
