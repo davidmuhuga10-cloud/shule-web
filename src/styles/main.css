@@ -1144,12 +1144,10 @@ table.data td.num,table.data th.num{text-align:center}
 :root{--fin-nav-bg:#15343a}
 .fin-side-toggle{display:none}
 /* On mobile this sits directly under the global sidebar's own ☰ toggle in
-   the topbar (both left-aligned at the same x) — with identical plain-grey
-   styling the two read as one duplicated button stacked vertically. Giving
-   the Finance-scoped one a filled colour badge makes clear it's a separate,
-   module-local control. */
-.fin-side-toggle{background:var(--primary);color:#fff;border-radius:8px;padding:6px 9px}
-.fin-side-toggle:hover{background:var(--primary-d);color:#fff}
+   the topbar (both left-aligned at the same x) — reading as one duplicated
+   button stacked vertically. Nudging it right offsets it from that column
+   without changing its plain icon-btn styling. */
+.fin-side-toggle{margin-left:8px}
 .fin-shell{display:flex;align-items:flex-start;gap:10px}
 .fin-side-nav a{display:block;padding:10px 14px;border-radius:8px;color:#cfe3e2;font-weight:600;
   font-size:13px;cursor:pointer;margin:2px 6px;transition:background .12s;white-space:nowrap}
