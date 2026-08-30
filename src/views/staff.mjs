@@ -125,9 +125,13 @@ export async function openStaffModal(root, existing, onSaved) {
   modal({
     title: existing ? 'Edit staff member' : 'Add staff member',
     body: `
-      <div class="field"><label>Full name</label><input id="sf-name" value="${esc(existing ? existing.full_name : '')}"></div>
+      ${existing ? `<div class="field"><label>Full name</label><input id="sf-name" value="${esc(existing.full_name)}"></div>` : `
       <div class="grid2">
-        <div class="field"><label>Phone${existing ? '' : ' (used to sign in, along with a username)'}</label><input id="sf-phone" value="${esc(existing ? existing.phone || '' : '')}"></div>
+        <div class="field"><label>First name</label><input id="sf-fname" placeholder="e.g. Jane"></div>
+        <div class="field"><label>Last name</label><input id="sf-lname" placeholder="e.g. Wanjiru"></div>
+      </div>`}
+      <div class="grid2">
+        <div class="field"><label>Phone${existing ? '' : ' (required — used to sign in)'}</label><input id="sf-phone" value="${esc(existing ? existing.phone || '' : '')}"></div>
         <div class="field"><label>Email (optional, contact only)</label><input id="sf-email" type="email" value="${esc(existing ? existing.email : '')}"></div>
       </div>
       <div class="grid2">
@@ -164,9 +168,21 @@ export async function openStaffModal(root, existing, onSaved) {
     `,
     okLabel: 'Save',
     onOk: async () => {
+      // New teachers/staff only (existing logins/records are untouched):
+      // First/Last Name are separate inputs for a cleaner add-form, but the
+      // `full_name` column is unchanged — they're just concatenated here.
+      // Phone is required for a new record since it's now how they sign in
+      // (see the "First time here?" phone-verified password-set flow).
+      if (!existing) {
+        const fname = document.getElementById('sf-fname').value.trim();
+        const lname = document.getElementById('sf-lname').value.trim();
+        if (!fname || !lname) { toast('Please enter both first and last name.', 'err'); return; }
+        if (!document.getElementById('sf-phone').value.trim()) { toast('Phone number is required — it\'s how this person will sign in.', 'err'); return; }
+      }
       const payload = {
         id: existing ? existing.id : undefined,
-        full_name: document.getElementById('sf-name').value,
+        full_name: existing ? document.getElementById('sf-name').value
+          : `${document.getElementById('sf-fname').value.trim()} ${document.getElementById('sf-lname').value.trim()}`.trim(),
         email: document.getElementById('sf-email').value,
         phone: document.getElementById('sf-phone').value,
         role: document.getElementById('sf-role').value,
@@ -187,7 +203,12 @@ export async function openStaffModal(root, existing, onSaved) {
           staff_id: res.data.id, full_name: res.data.full_name, role: isAdmin ? 'admin' : 'teacher', phone: res.data.phone
         });
         if (prov && prov.ok && prov.username) {
-          toast(`Staff saved. Login created — username: ${prov.username}, default password: ${prov.defaultPassword}`, 'ok');
+          // Round 2 (Item 2): no more sharing a single static default
+          // password out loud — the teacher sets their own via "First time
+          // here?" on the login screen (phone-verified, same flow as
+          // Forgot Password), so nothing sensitive needs to be read out or
+          // written down here.
+          toast('Staff saved. Ask them to sign in and tap "First time here?" using their phone number to set a password.', 'ok');
         } else {
           toast('Staff saved. (Login provisioning will be available once the Netlify function is deployed.)', 'warn');
         }

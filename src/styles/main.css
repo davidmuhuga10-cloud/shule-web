@@ -122,12 +122,26 @@ h1,h2,h3,h4{margin:0;font-weight:650;color:var(--ink)}
    below 960px (see the max-width:960px media query further down) so it
    doesn't get uncomfortably narrow on small screens. */
 .hub-grid.stack{grid-template-columns:1fr;width:75%}
-.hub-tile{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:18px;cursor:pointer;
+.hub-tile{background:#fff;border:1px solid var(--line);border-left:4px solid transparent;border-right:4px solid transparent;
+  border-radius:var(--radius);padding:18px 15px;cursor:pointer;
   transition:.12s;display:flex;flex-direction:column;gap:6px;text-align:left}
-.hub-tile:hover{border-color:var(--primary);box-shadow:var(--shadow)}
+/* Only the top/bottom hairline responds to hover — a tile carrying one of
+   the .tile-* accent classes below (currently just Reports) keeps its own
+   left/right border color always, hover included. */
+.hub-tile:hover{border-top-color:var(--primary);border-bottom-color:var(--primary);box-shadow:var(--shadow)}
 .hub-tile .h-ico{font-size:26px}
 .hub-tile .h-title{font-weight:700;font-size:14.5px;color:var(--ink)}
 .hub-tile .h-desc{color:var(--muted);font-size:12.5px}
+/* UI colour refresh — Reports tile colour (brief item 7, round 2): a light
+   accent border on both sides, one hue per tile, same mechanism and same
+   hex values as the Dashboard's .stat-* accents above for visual
+   consistency. Scoped to individual tiles via these classes rather than
+   changing .hub-tile itself, so Exams/Finance/Settings' hub tiles (which
+   reuse the same component) are unaffected unless asked for separately. */
+.tile-blue{border-color:#2563eb}.tile-green{border-color:var(--ok)}
+.tile-amber{border-color:var(--warn)}.tile-purple{border-color:#7c3aed}
+.tile-teal{border-color:var(--primary)}.tile-rose{border-color:#db2777}
+.tile-indigo{border-color:#4f46e5}
 /* Settings' top tab bar reuses the app's existing .tabs segmented control
    (same one Students/Attendance/Messaging already use) rather than a new
    green bar — see the hub-grid comment above re: theme consistency. */
@@ -243,8 +257,8 @@ html,body{max-width:100%;overflow-x:hidden}
 
 /* ---------- Stat tiles ---------- */
 .stats{display:flex;flex-wrap:wrap;justify-content:center;gap:16px;margin-bottom:22px}
-.stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;
-  box-shadow:var(--shadow);display:flex;align-items:center;gap:15px;flex:1 1 210px;max-width:240px}
+.stat{background:var(--surface);border:1px solid var(--line);border-left:4px solid transparent;border-right:4px solid transparent;
+  border-radius:var(--radius);padding:18px 17px;box-shadow:var(--shadow);display:flex;align-items:center;gap:15px;flex:1 1 210px;max-width:240px}
 .stat .s-ico{width:48px;height:48px;border-radius:12px;display:grid;place-items:center;font-size:22px;flex-shrink:0}
 .stat .s-val{font-size:26px;font-weight:750;line-height:1}
 .stat .s-lab{color:var(--muted);font-size:12.5px;margin-top:4px}
@@ -253,6 +267,26 @@ html,body{max-width:100%;overflow-x:hidden}
 .t-blue{background:#e7f0fe;color:#2563eb}.t-green{background:var(--ok-bg);color:var(--ok)}
 .t-amber{background:var(--warn-bg);color:var(--warn)}.t-purple{background:#f0e9fd;color:#7c3aed}
 .t-teal{background:#e2f5f2;color:var(--primary)}.t-rose{background:#fde8ee;color:#db2777}
+/* UI colour refresh (brief item 4, round 2 — approved direction: a light
+   accent border on both sides, tile otherwise unchanged) — a second,
+   border-only class distinct from .t-* above so it can go on the OUTER
+   .stat card without also flooding its background/text color the way
+   .t-* does for the icon badge (.s-ico). Same hex values as .t-* so a
+   tile's border always matches its own icon's color. */
+.stat-blue{border-color:#2563eb}.stat-green{border-color:var(--ok)}
+.stat-amber{border-color:var(--warn)}.stat-purple{border-color:#7c3aed}
+.stat-teal{border-color:var(--primary)}.stat-rose{border-color:#db2777}
+
+/* Dashboard "Last Exam Analyzed" — horizontal bars, sorted highest-first
+   (brief item 5, approved option B). One hue (brand primary) since every
+   bar is the same series (subject mean score) — no legend needed. */
+.dash-eg-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.dash-eg-row:last-child{margin-bottom:0}
+.dash-eg-lab{width:110px;flex-shrink:0;font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dash-eg-track{flex:1;background:var(--line);border-radius:5px;height:16px;overflow:hidden}
+.dash-eg-fill{height:100%;background:var(--primary);border-radius:5px;transition:width .2s}
+.dash-eg-val{width:36px;flex-shrink:0;text-align:right;font-size:12.5px;font-weight:700;color:var(--ink)}
+@media screen and (max-width:480px){.dash-eg-lab{width:78px;font-size:11.5px}}
 
 /* ---------- Dashboard tile groups (Phase 2f: separate mobile/desktop layouts,
    toggled purely by the existing 960px breakpoint — no JS matchMedia needed) ---------- */
@@ -535,6 +569,15 @@ table.data td.num,table.data th.num{text-align:center}
 @media screen and (max-width:960px){
   .tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
   .tabs button{flex:0 0 auto;min-width:104px;white-space:normal;line-height:1.2}
+  /* BUG FIX: the scroll-strip treatment above is for bars with several long
+     labels (Settings' 4 tabs) — it was wrongly also catching 2-item bars
+     (Teachers/Staff, Students Active/Left), which just sat left-aligned with
+     dead space filling the rest of the row. `:first-child:nth-last-child(2)`
+     picks out "exactly 2 children" in pure CSS — a 2-item bar always splits
+     evenly, full width, exactly like it already does on desktop. */
+  .tabs > button:first-child:nth-last-child(2),
+  .tabs > button:first-child:nth-last-child(2) ~ button{flex:1;min-width:0;white-space:nowrap}
+  .tabs:has(> button:first-child:nth-last-child(2)){overflow-x:visible}
 }
 @media screen and (max-width:400px){.tabs button{min-width:88px;font-size:12px;padding:8px 6px}}
 .tabs button.active{background:#fff;color:var(--ink);box-shadow:var(--shadow)}
@@ -910,18 +953,40 @@ table.data td.num,table.data th.num{text-align:center}
   .page-head h2{font-size:19px}
   .card .card-b,.card.pad{padding:16px}
   .card .card-h{padding:14px 16px}
-}
-@media screen and (max-width:400px){
-  .content{padding:12px}
-  .page-head h2{font-size:17px}
-  .card .card-b,.card.pad{padding:13px}
-}
-@media screen and (max-width:340px){
-  .content{padding:10px}
-}
-  .auth{grid-template-columns:1fr}.auth .promo{display:none}
-  .auth .formside{min-height:100vh}
-  .auth .formcard{border-radius:0;box-shadow:none;border:none;max-width:none;padding:0}
+  /* BUG FIX: these rules used to sit AFTER the max-width:400px/340px blocks
+     below, outside of any @media query at all (an orphaned stray closing
+     brace here made everything from .auth down through .dash-gender-
+     desktop apply globally, at every screen width, not just mobile — e.g.
+     .stats-desktop{display:none} and .dash-top-row{display:block} were
+     silently breaking the DESKTOP dashboard layout too). Moved back inside
+     this 960px block, which is what they were always meant to belong to. */
+  /* Mobile sign-in redesign ("Aurora" — approved option 1 of 5): the promo
+     panel used to just vanish on mobile (display:none), leaving a single
+     small form centered in an otherwise-empty screen — a lot of dead
+     whitespace, and the brand/feature tiles were nowhere to be seen. Now
+     the whole screen keeps one continuous dark aurora background (soft
+     blurred colour blobs, no flat gradient), the promo content becomes a
+     compact header instead of a full-height panel, the 4 feature tiles
+     become small icon badges in a row, and the form becomes a frosted
+     glass card sitting on that same background — using the full screen
+     instead of leaving most of it blank. */
+  .auth{grid-template-columns:1fr;background:radial-gradient(circle at 20% 0%,#1f8f7e 0%,transparent 55%),
+    radial-gradient(circle at 90% 15%,#f5a623 0%,transparent 40%),
+    radial-gradient(circle at 45% 60%,#1a9c8a 0%,transparent 45%),#0c2e2f}
+  .auth .promo{display:flex;min-height:0;padding:30px 20px 10px;background:none;flex-direction:column;align-items:center;text-align:center}
+  .auth .promo::after,.auth .promo::before{display:none}
+  .auth .promo-inner{background:none;border:none;box-shadow:none;backdrop-filter:none;padding:0;max-width:none;width:100%}
+  .auth .promo .logo{margin:0 auto 10px;width:48px;height:48px;font-size:22px}
+  .auth .promo h1{font-size:19px;margin-bottom:4px}
+  .auth .promo p{font-size:12.5px;margin:0 auto 18px;max-width:280px}
+  .feat-grid{grid-template-columns:repeat(4,1fr);gap:8px}
+  .feat-tile{flex-direction:column;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);
+    border-radius:50%;width:46px;height:46px;padding:0;display:grid;place-items:center;margin:0 auto}
+  .feat-tile .ft-ico{font-size:16px}
+  .feat-tile .ft-title,.feat-tile .ft-sub{display:none}
+  .auth .formside{min-height:0;padding:20px 16px 34px;background:none}
+  .auth .formcard{border-radius:20px;box-shadow:0 20px 50px rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.4);
+    max-width:none;padding:24px 20px;background:rgba(255,255,255,.95);backdrop-filter:blur(8px)}
   .grid2,.grid3,.grid4{grid-template-columns:1fr}
   .report .r-summary{grid-template-columns:1fr 1fr}
   .report .r-student-row{flex-wrap:wrap}
@@ -935,6 +1000,14 @@ table.data td.num,table.data th.num{text-align:center}
      also show the desktop gender panel (it would duplicate that number). */
   .dash-top-row{display:block;margin-bottom:0}
   .dash-gender-desktop{display:none}
+}
+@media screen and (max-width:400px){
+  .content{padding:12px}
+  .page-head h2{font-size:17px}
+  .card .card-b,.card.pad{padding:13px}
+}
+@media screen and (max-width:340px){
+  .content{padding:10px}
 }
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:35;display:none}
 .scrim.show{display:block}
@@ -1005,8 +1078,38 @@ table.data td.num,table.data th.num{text-align:center}
 @media screen and (max-width:960px){
   .fin-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
   .fin-tabs button{flex:0 0 auto;min-width:110px;white-space:normal;line-height:1.2}
+  /* Same 2-item exception as .tabs above — Teachers/Staff and Students
+     (Active / Left) both reuse .fin-tabs and must always split evenly. */
+  .fin-tabs > button:first-child:nth-last-child(2),
+  .fin-tabs > button:first-child:nth-last-child(2) ~ button{flex:1;min-width:0;white-space:nowrap}
+  .fin-tabs:has(> button:first-child:nth-last-child(2)){overflow-x:visible}
 }
 @media screen and (max-width:400px){.fin-tabs button{min-width:92px;font-size:12px;padding:9px 8px}}
+
+/* ---------- Finance Nav B: dedicated left side-nav ----------
+   Brief item 8 (approved option B): Finance gets its own side-nav instead
+   of the top .fin-tabs strip, shown only while inside the Finance module
+   (never on the main app shell before Finance is opened). On desktop it's
+   a simple sticky column; on mobile it collapses into a slide-in drawer,
+   mirroring the main .sidebar's own open/scrim pattern exactly so the
+   interaction is already familiar. .fin-tabs itself is left in place
+   above (still used by Timetable Setup's sub-tabs, unrelated to this). */
+.fin-side-toggle{display:none}
+.fin-shell{display:flex;align-items:flex-start;gap:20px}
+.fin-side-nav{width:172px;flex:0 0 172px;background:var(--surface);border:1px solid var(--line);
+  border-radius:12px;padding:8px;position:sticky;top:78px}
+.fin-side-nav a{display:block;padding:10px 13px;border-radius:8px;color:var(--ink);font-weight:600;
+  font-size:13.5px;cursor:pointer;margin-bottom:2px;transition:background .12s}
+.fin-side-nav a:hover{background:#eef1f5}
+.fin-side-nav a.active{background:var(--primary);color:#fff}
+.fin-side-body{flex:1;min-width:0}
+@media screen and (max-width:960px){
+  .fin-side-toggle{display:inline-flex}
+  .fin-shell{gap:0}
+  .fin-side-nav{position:fixed;top:0;bottom:0;left:0;width:230px;flex:0 0 230px;border-radius:0;
+    z-index:40;overflow-y:auto;transform:translateX(-100%);transition:transform .25s;box-shadow:var(--shadow)}
+  .fin-side-nav.open{transform:none}
+}
 .fin-toolbar{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:18px}
 .fin-toolbar .fin-search{flex:1 1 420px;max-width:560px;margin:0}
 .fin-toolbar .fin-search input{width:100%}

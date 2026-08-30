@@ -60,7 +60,7 @@ async function renderBoardScreen(root, years, terms) {
   const classes = classesRes.ok ? classesRes.data : [];
 
   root.innerHTML = `
-    <div class="page-head"><div><h2>Exam Desk</h2><p>Create an exam, choose which classes are sitting it, then enter marks and publish — everything happens right here.</p></div>
+    <div class="page-head"><div><h2>Exam Desk</h2></div>
       <div class="spacer"></div><button class="btn" id="add-exam">+ Add exam</button></div>
     <div id="exam-board">${exams.length ? '' : `<div class="card"><div class="card-b"><div class="empty">
       <div class="e-ico">📝</div><h3>No exams yet</h3><p>Add your first exam (e.g. "Midterm Exam" or "End of Term 1 Exam").</p>

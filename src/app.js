@@ -389,7 +389,7 @@ export function renderAuth(errorMsg) {
   $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
-      <h1>${esc(name)}</h1>
+      <h1>Shule</h1>
       <p>A clean, modern way to run your school — from enrollment to report forms.</p>
       <div class="feat-grid">${features}</div>
     </div></div>
@@ -411,7 +411,7 @@ export function renderAuth(errorMsg) {
         <button class="btn block" type="submit" id="login-btn">Sign in</button>
       </form>
       <p class="hint"><a href="#" id="go-forgot">Forgot password?</a></p>
-      <p class="hint">First time here? Ask your admin to set up your account.</p>
+      <p class="hint">First time here? <a href="#" id="go-first-time">Set your password</a></p>
       <p class="hint">New school? <a href="#" id="go-signup">Create your school's account</a></p>
     </div></div>
   </div></div>`;
@@ -421,7 +421,13 @@ export function renderAuth(errorMsg) {
   $('#login-phone').oninput = (e) => { lastPhone = e.target.value; };
   $('#login-form').onsubmit = doLogin;
   $('#go-signup').onclick = (e) => { e.preventDefault(); renderSignup(); };
-  $('#go-forgot').onclick = (e) => { e.preventDefault(); renderForgotPassword(); };
+  $('#go-forgot').onclick = (e) => { e.preventDefault(); renderForgotPassword(undefined, false); };
+  // Round 2 (Item 2): reuses the same phone-verified reset flow as "Forgot
+  // password?" — a brand-new teacher's account already exists (their admin
+  // added it), it just has no password set yet, so "set a password" and
+  // "reset a password" are the same operation under the hood. Only the
+  // copy differs (isFirstTime), so this avoids any new backend/migration.
+  $('#go-first-time').onclick = (e) => { e.preventDefault(); renderForgotPassword(undefined, true); };
   wirePasswordToggle('login-pw');
 }
 
@@ -471,7 +477,7 @@ function renderAccountPicker(accounts, phone, pw, opts) {
   $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
-      <h1>${esc((state.settings && state.settings.school_name) || 'Shule')}</h1>
+      <h1>Shule</h1>
       <p>A clean, modern way to run your school — from enrollment to report forms.</p>
     </div></div>
     <div class="formside"><div class="formcard">
@@ -502,24 +508,28 @@ function renderAccountPicker(accounts, phone, pw, opts) {
  * password for it. That's a real, acknowledged tradeoff, not an oversight —
  * flagged again in the delivery notes, not just here.
  * -------------------------------------------------------------------- */
-function renderForgotPassword(errorMsg) {
+function renderForgotPassword(errorMsg, isFirstTime) {
+  const heading = isFirstTime ? 'Set your password' : 'Reset your password';
+  const sub = isFirstTime
+    ? 'Enter the phone number your admin added, and choose a password to finish setting up your account.'
+    : 'Enter your phone number and choose a new password.';
   $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
-      <h1>${esc((state.settings && state.settings.school_name) || 'Shule')}</h1>
+      <h1>Shule</h1>
       <p>A clean, modern way to run your school — from enrollment to report forms.</p>
     </div></div>
     <div class="formside"><div class="formcard">
-      <h2 class="auth-center">Reset your password</h2>
-      <div class="sub auth-center">Enter your phone number and choose a new password.</div>
+      <h2 class="auth-center">${heading}</h2>
+      <div class="sub auth-center">${sub}</div>
       ${errorMsg ? `<div class="auth-err">${esc(errorMsg)}</div>` : ''}
       <form id="forgot-form">
         <div class="field"><label>Phone number</label><input id="fp-phone" type="tel" placeholder="e.g. 0712345678" value="${esc(lastPhone)}" required></div>
-        <div class="field"><label>New password</label>${passwordFieldHtml('<input id="fp-pw" type="password" autocomplete="new-password" required>')}</div>
-        <div class="field"><label>Confirm new password</label>${passwordFieldHtml('<input id="fp-pw2" type="password" autocomplete="new-password" required>')}</div>
-        <button class="btn block" type="submit" id="forgot-btn">Reset password</button>
+        <div class="field"><label>${isFirstTime ? 'Choose a password' : 'New password'}</label>${passwordFieldHtml('<input id="fp-pw" type="password" autocomplete="new-password" required>')}</div>
+        <div class="field"><label>Confirm password</label>${passwordFieldHtml('<input id="fp-pw2" type="password" autocomplete="new-password" required>')}</div>
+        <button class="btn block" type="submit" id="forgot-btn">${isFirstTime ? 'Set password' : 'Reset password'}</button>
       </form>
-      <p class="hint">⚠️ This doesn't verify it's really you yet — anyone who knows this phone number could reset this password. A verified (OTP) reset is planned for a later update.</p>
+      <p class="hint">⚠️ This doesn't verify it's really you yet — anyone who knows this phone number could set this password. A verified (OTP) reset is planned for a later update.</p>
       <p class="hint"><a href="#" id="forgot-back">Back to sign in</a></p>
     </div></div>
   </div></div>`;
@@ -527,48 +537,48 @@ function renderForgotPassword(errorMsg) {
   $('#app').classList.add('hidden');
 
   $('#forgot-back').onclick = (e) => { e.preventDefault(); renderAuth(); };
-  $('#forgot-form').onsubmit = doForgotPassword;
+  $('#forgot-form').onsubmit = (e) => doForgotPassword(e, isFirstTime);
   wirePasswordToggle('fp-pw');
   wirePasswordToggle('fp-pw2');
 }
 
-async function doForgotPassword(e) {
+async function doForgotPassword(e, isFirstTime) {
   e.preventDefault();
   const btn = $('#forgot-btn'); btn.disabled = true; btn.textContent = 'Checking…';
   const phone = $('#fp-phone').value;
   const pw = $('#fp-pw').value, pw2 = $('#fp-pw2').value;
   lastPhone = phone;
 
-  if (pw.length < 6) { renderForgotPassword('New password must be at least 6 characters.'); return false; }
-  if (pw !== pw2) { renderForgotPassword('Passwords do not match.'); return false; }
+  if (pw.length < 6) { renderForgotPassword('New password must be at least 6 characters.', isFirstTime); return false; }
+  if (pw !== pw2) { renderForgotPassword('Passwords do not match.', isFirstTime); return false; }
 
   const lookup = await findLoginAccountsByPhone(phone);
   if (!lookup.ok || !lookup.accounts.length) {
-    renderForgotPassword('We could not find an account with that phone number.');
+    renderForgotPassword('We could not find an account with that phone number.', isFirstTime);
     return false;
   }
   if (lookup.accounts.length === 1) {
-    await submitPasswordReset(lookup.accounts[0], phone, pw);
+    await submitPasswordReset(lookup.accounts[0], phone, pw, isFirstTime);
   } else {
     renderAccountPicker(lookup.accounts, phone, pw, {
-      onBack: () => renderForgotPassword(),
-      onChoose: (account, ph, newPw) => submitPasswordReset(account, ph, newPw)
+      onBack: () => renderForgotPassword(undefined, isFirstTime),
+      onChoose: (account, ph, newPw) => submitPasswordReset(account, ph, newPw, isFirstTime)
     });
   }
   return false;
 }
 
-async function submitPasswordReset(account, phone, newPassword) {
+async function submitPasswordReset(account, phone, newPassword, isFirstTime) {
   try {
     const res = await fetch('/.netlify/functions/forgot-password', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ phone, school_code: account.school_code, role: account.role, new_password: newPassword })
     });
     const result = await res.json();
-    if (!result.ok) { renderForgotPassword(result.message || 'Could not reset that password.'); return; }
-    renderAuth('Password reset — sign in with your new password.');
+    if (!result.ok) { renderForgotPassword(result.message || 'Could not reset that password.', isFirstTime); return; }
+    renderAuth(isFirstTime ? 'Password set — sign in with your new password.' : 'Password reset — sign in with your new password.');
   } catch (err) {
-    renderForgotPassword('Something went wrong: ' + (err.message || err));
+    renderForgotPassword('Something went wrong: ' + (err.message || err), isFirstTime);
   }
 }
 
@@ -1150,6 +1160,14 @@ async function exitImpersonation() {
 /* ------------------------------- INIT ----------------------------------- */
 (async function init() {
   state.settings = {}; // no school context yet — the auth screen shows generic platform branding until sign-in
+
+  // Mobile UI fix: tapping the dimmed area behind an open nav drawer used to
+  // do nothing — closing it required tapping a nav link (or the same module
+  // again), an extra step when the person just wanted to dismiss the drawer
+  // and keep doing whatever they were doing. #scrim already existed and
+  // already gets shown/hidden in lockstep with the drawer (see
+  // App.toggleSidebar) — it just had no click handler wired to it.
+  $('#scrim').onclick = () => App.toggleSidebar(false);
 
   await consumePendingImpersonation();
 
