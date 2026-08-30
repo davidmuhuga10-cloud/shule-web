@@ -389,7 +389,7 @@ export function renderAuth(errorMsg) {
   $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
-      <h1>${esc(name)}</h1>
+      <h1>Shule</h1>
       <p>A clean, modern way to run your school — from enrollment to report forms.</p>
       <div class="feat-grid">${features}</div>
     </div></div>
@@ -477,7 +477,7 @@ function renderAccountPicker(accounts, phone, pw, opts) {
   $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
-      <h1>${esc((state.settings && state.settings.school_name) || 'Shule')}</h1>
+      <h1>Shule</h1>
       <p>A clean, modern way to run your school — from enrollment to report forms.</p>
     </div></div>
     <div class="formside"><div class="formcard">
@@ -516,7 +516,7 @@ function renderForgotPassword(errorMsg, isFirstTime) {
   $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
-      <h1>${esc((state.settings && state.settings.school_name) || 'Shule')}</h1>
+      <h1>Shule</h1>
       <p>A clean, modern way to run your school — from enrollment to report forms.</p>
     </div></div>
     <div class="formside"><div class="formcard">

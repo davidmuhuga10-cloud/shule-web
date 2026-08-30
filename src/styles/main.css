@@ -960,9 +960,33 @@ table.data td.num,table.data th.num{text-align:center}
      .stats-desktop{display:none} and .dash-top-row{display:block} were
      silently breaking the DESKTOP dashboard layout too). Moved back inside
      this 960px block, which is what they were always meant to belong to. */
-  .auth{grid-template-columns:1fr}.auth .promo{display:none}
-  .auth .formside{min-height:100vh}
-  .auth .formcard{border-radius:0;box-shadow:none;border:none;max-width:none;padding:0}
+  /* Mobile sign-in redesign ("Aurora" — approved option 1 of 5): the promo
+     panel used to just vanish on mobile (display:none), leaving a single
+     small form centered in an otherwise-empty screen — a lot of dead
+     whitespace, and the brand/feature tiles were nowhere to be seen. Now
+     the whole screen keeps one continuous dark aurora background (soft
+     blurred colour blobs, no flat gradient), the promo content becomes a
+     compact header instead of a full-height panel, the 4 feature tiles
+     become small icon badges in a row, and the form becomes a frosted
+     glass card sitting on that same background — using the full screen
+     instead of leaving most of it blank. */
+  .auth{grid-template-columns:1fr;background:radial-gradient(circle at 20% 0%,#1f8f7e 0%,transparent 55%),
+    radial-gradient(circle at 90% 15%,#f5a623 0%,transparent 40%),
+    radial-gradient(circle at 45% 60%,#1a9c8a 0%,transparent 45%),#0c2e2f}
+  .auth .promo{display:flex;min-height:0;padding:30px 20px 10px;background:none;flex-direction:column;align-items:center;text-align:center}
+  .auth .promo::after,.auth .promo::before{display:none}
+  .auth .promo-inner{background:none;border:none;box-shadow:none;backdrop-filter:none;padding:0;max-width:none;width:100%}
+  .auth .promo .logo{margin:0 auto 10px;width:48px;height:48px;font-size:22px}
+  .auth .promo h1{font-size:19px;margin-bottom:4px}
+  .auth .promo p{font-size:12.5px;margin:0 auto 18px;max-width:280px}
+  .feat-grid{grid-template-columns:repeat(4,1fr);gap:8px}
+  .feat-tile{flex-direction:column;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);
+    border-radius:50%;width:46px;height:46px;padding:0;display:grid;place-items:center;margin:0 auto}
+  .feat-tile .ft-ico{font-size:16px}
+  .feat-tile .ft-title,.feat-tile .ft-sub{display:none}
+  .auth .formside{min-height:0;padding:20px 16px 34px;background:none}
+  .auth .formcard{border-radius:20px;box-shadow:0 20px 50px rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.4);
+    max-width:none;padding:24px 20px;background:rgba(255,255,255,.95);backdrop-filter:blur(8px)}
   .grid2,.grid3,.grid4{grid-template-columns:1fr}
   .report .r-summary{grid-template-columns:1fr 1fr}
   .report .r-student-row{flex-wrap:wrap}
