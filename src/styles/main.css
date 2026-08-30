@@ -220,6 +220,14 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .dropdown a{display:block;padding:9px 12px;border-radius:7px;color:var(--ink);cursor:pointer;font-size:13.5px}
 .dropdown a:hover{background:#f2f5f8}
 .content{padding:24px;max-width:1200px;width:100%}
+/* Global safety net: no single element should ever be able to push the
+   whole page into horizontal scroll (the root cause behind every "some
+   pages scroll sideways" report). Everything that legitimately needs to
+   scroll horizontally (e.g. .fin-tabs, .tabs, wide tables) opts in with
+   its own overflow-x:auto below — this just stops stray overflow from
+   width-locked children (long labels, fixed-width blocks) from widening
+   <body> itself. */
+html,body{max-width:100%;overflow-x:hidden}
 
 /* ---------- Page header ---------- */
 .page-head{display:flex;align-items:flex-start;gap:16px;margin-bottom:20px;flex-wrap:wrap}
@@ -228,7 +236,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 
 /* ---------- Cards ---------- */
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
-.card .card-h{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
+.card .card-h{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .card .card-h h3{font-size:15.5px}
 .card .card-b{padding:20px}
 .card.pad{padding:20px}
@@ -383,12 +391,12 @@ table.data td.num,table.data th.num{text-align:center}
 .print-grid th{background:#f7f9fb;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--grid-text);text-align:left;white-space:normal;word-break:break-all}
 .print-grid td.num,.print-grid th.num{text-align:center}
 .grid-title-band{text-align:center;font-weight:800;font-size:12px;background:#f0f2f5;color:var(--grid-text);border:1.3px solid var(--grid-ink);border-bottom:none;padding:8px;letter-spacing:.3px}
-.print-opts{display:flex;gap:8px;align-items:center}
+.print-opts{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .print-opts select{padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;background:#fff}
 /* Toolbar for Download/Print/paper-size controls, sat ABOVE the printable
    report card (not mixed into the print header itself) so the card below
    it is a true preview of exactly what prints. */
-.report-toolbar{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-bottom:12px}
+.report-toolbar{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
 
 /* ---------- Badges ---------- */
 .badge{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:11.5px;font-weight:650}
@@ -437,6 +445,7 @@ table.data td.num,table.data th.num{text-align:center}
    instead of centered as its own block. */
 .fin-search-prominent{width:100%;min-width:280px;padding:14px 18px;font-size:15.5px;border-radius:12px;
   box-shadow:var(--shadow-sm,0 1px 3px rgba(16,32,45,.08))}
+@media(max-width:360px){.fin-search-prominent{min-width:0;padding:12px 14px;font-size:14.5px}}
 
 /* ---------- Modal ---------- */
 .modal-back{position:fixed;inset:0;background:rgba(16,32,45,.45);display:grid;place-items:center;z-index:100;padding:20px}
@@ -516,6 +525,18 @@ table.data td.num,table.data th.num{text-align:center}
 .tabs{display:flex;gap:6px;background:#eef1f5;padding:5px;border-radius:10px;margin-bottom:22px}
 .tabs button{flex:1;padding:9px;border:none;background:none;border-radius:7px;font-weight:600;cursor:pointer;
   color:var(--muted);font-family:inherit;font-size:13px}
+/* Mobile: with several long labels ("Academic Years & Terms", "Permissions")
+   flex:1 can't shrink buttons below their own min-content width, so the row
+   as a whole exceeds the viewport and — since nothing upstream clips it —
+   drags the entire page into horizontal scroll. Below 960px, stop trying to
+   evenly divide the row and instead let it scroll horizontally as its own
+   contained pill strip; each button keeps its natural width and wraps its
+   own label onto at most 2 lines instead of stretching/squashing. */
+@media screen and (max-width:960px){
+  .tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
+  .tabs button{flex:0 0 auto;min-width:104px;white-space:normal;line-height:1.2}
+}
+@media screen and (max-width:400px){.tabs button{min-width:88px;font-size:12px;padding:8px 6px}}
 .tabs button.active{background:#fff;color:var(--ink);box-shadow:var(--shadow)}
 .auth-err{background:var(--danger-bg);color:var(--danger);padding:10px 13px;border-radius:8px;font-size:13px;
   margin-bottom:16px;font-weight:550}
@@ -764,7 +785,7 @@ table.data td.num,table.data th.num{text-align:center}
 .tt-constraint-group .card-h{align-items:flex-start}
 .tt-crow-list{display:flex;flex-direction:column}
 .tt-crow{padding:14px 20px;border-top:1px solid var(--line)}
-.tt-crow-main{display:flex;align-items:center;gap:16px}
+.tt-crow-main{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .tt-crow-text{flex:1;min-width:0}
 .tt-crow-title{font-weight:700;font-size:13.5px;color:var(--ink)}
 .tt-crow-desc{font-size:12px;color:var(--muted);margin-top:2px;line-height:1.4}
@@ -878,6 +899,26 @@ table.data td.num,table.data th.num{text-align:center}
   .sidebar.open{transform:none}
   .main{margin-left:0}
   .topbar .menu-toggle{display:inline-flex}
+  /* Tailor the same breakpoint to different phone widths rather than one
+     flat mobile treatment — a 6.7" phone (~430px) has real room to spare,
+     a compact one (~360px) doesn't, and anything at/under ~320px (the
+     narrowest phones still in use) needs every extra pixel of padding
+     clawed back so content never has to compete with the chrome for
+     space. */
+  .content{padding:16px}
+  .page-head{gap:10px;margin-bottom:16px}
+  .page-head h2{font-size:19px}
+  .card .card-b,.card.pad{padding:16px}
+  .card .card-h{padding:14px 16px}
+}
+@media screen and (max-width:400px){
+  .content{padding:12px}
+  .page-head h2{font-size:17px}
+  .card .card-b,.card.pad{padding:13px}
+}
+@media screen and (max-width:340px){
+  .content{padding:10px}
+}
   .auth{grid-template-columns:1fr}.auth .promo{display:none}
   .auth .formside{min-height:100vh}
   .auth .formcard{border-radius:0;box-shadow:none;border:none;max-width:none;padding:0}
@@ -902,7 +943,7 @@ table.data td.num,table.data th.num{text-align:center}
 /* ---------- Finance module ---------- */
 .fin-progress{display:inline-block;width:100px;height:8px;border-radius:5px;background:var(--line);overflow:hidden;vertical-align:middle;margin-right:6px}
 .fin-progress-fill{height:100%;background:var(--primary);border-radius:5px}
-.fin-receipt{width:390px;margin:0 auto;font-size:12.5px;border:1px solid var(--grid-ink)}
+.fin-receipt{width:390px;max-width:100%;margin:0 auto;font-size:12.5px;border:1px solid var(--grid-ink)}
 .fin-receipt .fr-h{text-align:center;padding:10px;border-bottom:1px solid var(--grid-ink)}
 .fin-receipt .fr-row{display:flex;justify-content:space-between;padding:3px 10px}
 .fin-receipt table{width:100%;border-collapse:collapse;margin:8px 0}
@@ -956,9 +997,35 @@ table.data td.num,table.data th.num{text-align:center}
   color:var(--ink);font-family:inherit;font-size:13.5px;font-weight:600;text-align:center;transition:background .15s}
 .fin-tabs button.active{background:#fff;font-weight:700;box-shadow:var(--shadow)}
 .fin-tabs button:not(.active):hover{background:rgba(255,255,255,.5)}
+/* Same min-content-width overflow as .tabs above (this bar has up to 6
+   labels — Dashboard/Invoicing/Collections/Reports/Transport — plus long
+   sub-tab labels like "Subject Periods & Double Lessons" on Timetable
+   Setup, which also reuses .fin-tabs): scroll the strip instead of
+   squeezing every button to fit. */
+@media screen and (max-width:960px){
+  .fin-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
+  .fin-tabs button{flex:0 0 auto;min-width:110px;white-space:normal;line-height:1.2}
+}
+@media screen and (max-width:400px){.fin-tabs button{min-width:92px;font-size:12px;padding:9px 8px}}
 .fin-toolbar{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:18px}
 .fin-toolbar .fin-search{flex:1 1 420px;max-width:560px;margin:0}
 .fin-toolbar .fin-search input{width:100%}
 .fin-toolbar .fin-filters{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;flex:1 1 420px}
 .fin-toolbar .fin-filters .field{margin:0;min-width:170px;flex:1 1 170px;max-width:260px}
-@media(max-width:720px){.fin-toolbar{flex-direction:column;align-items:stretch}.fin-toolbar .spacer{display:none}}
+@media(max-width:720px){
+  .fin-toolbar{flex-direction:column;align-items:stretch}
+  .fin-toolbar .spacer{display:none}
+  /* THE gap bug: .fin-search/.fin-filters keep their row-layout
+     flex:1 1 420px here. In column mode a flex child's basis is read as a
+     target HEIGHT, not width — the child still renders at its real
+     (small) content height, but because .fin-toolbar's own height is
+     auto, the browser's intrinsic-size calc reserves the full 420px for
+     it anyway, leaving a large empty gap before whatever comes next
+     (e.g. "+ Add New Teacher", or the Academic Year/Term filters on
+     Finance Dashboard). Resetting the basis to auto makes each child's
+     footprint match what's actually rendered. */
+  .fin-toolbar .fin-search,
+  .fin-toolbar .fin-filters{flex:1 1 auto;max-width:none}
+  .fin-toolbar .fin-filters .field{flex:1 1 140px}
+}
+@media(max-width:400px){.fin-toolbar{gap:10px}.fin-toolbar .fin-filters{gap:8px}}
