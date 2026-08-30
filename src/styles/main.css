@@ -291,6 +291,10 @@ html,body{max-width:100%;overflow-x:hidden}
 .stat-blue{border-color:#2563eb}.stat-green{border-color:var(--ok)}
 .stat-amber{border-color:var(--warn)}.stat-purple{border-color:#7c3aed}
 .stat-teal{border-color:var(--primary)}.stat-rose{border-color:#db2777}
+/* Finance dashboard tiles (approved mobile redesign): short caps labels,
+   scoped to #fd-body only so the rest of the app's .s-lab tiles (which use
+   longer, sentence-case labels) are untouched. */
+#fd-body .s-lab{text-transform:uppercase;letter-spacing:.3px}
 
 /* Dashboard "Last Exam Analyzed" — horizontal bars, sorted highest-first
    (brief item 5, approved option B). One hue (brand primary) since every

@@ -20,8 +20,13 @@
 import { esc, options } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 
-function tile(label, value, sub, marker) {
-  return `<div class="stat"${marker ? ` data-tile="${marker}"` : ''}><div class="s-ico">💰</div><div><div class="s-val">${esc(value)}</div><div class="s-lab">${esc(label)}${sub ? ` · ${esc(sub)}` : ''}</div></div></div>`;
+// Mobile dashboard redesign (approved): reuses the same colour-accented
+// tile pattern already standard elsewhere in the app (.stat-*/.t-* — see
+// dashboard.mjs) instead of every tile sharing one generic 💰 icon. `title`
+// carries any extra detail (e.g. "of KES X expected") as a hover tooltip
+// rather than cluttering the tile with a second line of text.
+function tile(label, value, emoji, colorKey, marker, title) {
+  return `<div class="stat stat-${colorKey}"${marker ? ` data-tile="${marker}"` : ''}${title ? ` title="${esc(title)}"` : ''}><div class="s-ico t-${colorKey}">${emoji}</div><div><div class="s-val">${esc(value)}</div><div class="s-lab">${esc(label)}</div></div></div>`;
 }
 
 export async function viewFinanceDashboard(root, access) {
@@ -53,10 +58,10 @@ async function load(root, years, terms, sel, access) {
   if (!res.ok) { body.innerHTML = `<div class="card pad">⚠️ ${esc(res.message)}</div>`; return; }
   const d = res.data || {};
   const tilesHtml = [
-    tile('Total Collected', `KES ${Number(d.total_collected || 0).toLocaleString()}`),
-    tile('Total Balances', `KES ${Number(d.total_balance || 0).toLocaleString()}`, 'click to view Balances report', 'fd-tile-balances'),
-    tile('Total Students', d.total_students || 0),
-    tile('% of Expected Collected', `${d.pct_collected || 0}%`, `of KES ${Number(d.total_expected || 0).toLocaleString()} expected`)
+    tile('Total Collected', `KES ${Number(d.total_collected || 0).toLocaleString()}`, '💰', 'green'),
+    tile('Balances', `KES ${Number(d.total_balance || 0).toLocaleString()}`, '⚠️', 'rose', 'fd-tile-balances'),
+    tile('Students', d.total_students || 0, '🎒', 'blue'),
+    tile('Of Expected', `${d.pct_collected || 0}%`, '🎯', 'teal', null, `of KES ${Number(d.total_expected || 0).toLocaleString()} expected`)
   ].join('');
   // Mirrors dashboard.mjs's pattern: the app's mobile breakpoint (<960px,
   // see main.css) hides .stats-desktop and shows .stats-mobile instead —
@@ -83,7 +88,6 @@ async function load(root, years, terms, sel, access) {
 
   body.querySelectorAll('[data-tile="fd-tile-balances"]').forEach((balancesTile) => {
     balancesTile.style.cursor = 'pointer';
-    balancesTile.title = 'View the Balances report';
     balancesTile.onclick = () => {
       const reportsTab = document.querySelector('[data-tab="reports"]');
       if (reportsTab) reportsTab.click();
