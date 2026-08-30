@@ -53,6 +53,16 @@ function statTileSkeleton(ico, lab, cls, route) {
   </div>`;
 }
 
+// Boys/Girls visual upgrade (design standard brief item 8, approved option
+// A — reference: a horizontal proportional split-bar, blue for boys, pink
+// for girls). Purely a visual addition in the space already there below
+// the two counts — the counts/markup around it are otherwise unchanged.
+function genderBarHtml(m, f) {
+  const total = (m || 0) + (f || 0);
+  const bPct = total ? (m / total * 100) : 50;
+  const gPct = total ? (f / total * 100) : 50;
+  return `<div class="gender-bar"><div class="gb-b" style="width:${bPct}%"></div><div class="gb-g" style="width:${gPct}%"></div></div>`;
+}
 function genderTile(gender) {
   return `<div class="stat stat-blue gender-tile">
     <div class="s-ico t-blue">🚻</div>
@@ -60,6 +70,7 @@ function genderTile(gender) {
       <div class="g-side"><div class="g-num" style="color:#2563eb">${gender.M || 0}</div><div class="g-lab">Boys</div></div>
       <div class="g-side"><div class="g-num" style="color:#db2777">${gender.F || 0}</div><div class="g-lab">Girls</div></div>
     </div>
+    ${genderBarHtml(gender.M, gender.F)}
   </div>`;
 }
 
@@ -127,9 +138,12 @@ export async function viewDashboard(root) {
   const totalStudents = (gender.M || 0) + (gender.F || 0);
   const genderBlock = totalStudents
     ? `<div class="card-b gender-panel">
-        <div class="g-side"><div class="g-num" style="color:#2563eb">${gender.M}</div><div class="g-lab">Boys</div></div>
-        <div class="g-div"></div>
-        <div class="g-side"><div class="g-num" style="color:#db2777">${gender.F}</div><div class="g-lab">Girls</div></div>
+        <div class="g-row">
+          <div class="g-side"><div class="g-num" style="color:#2563eb">${gender.M}</div><div class="g-lab">Boys</div></div>
+          <div class="g-div"></div>
+          <div class="g-side"><div class="g-num" style="color:#db2777">${gender.F}</div><div class="g-lab">Girls</div></div>
+        </div>
+        ${genderBarHtml(gender.M, gender.F)}
       </div>`
     : `<div class="card-b"><p class="muted" style="margin:0">No active students yet.</p></div>`;
 

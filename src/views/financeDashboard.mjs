@@ -20,8 +20,24 @@
 import { esc, options } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 
-function tile(label, value, sub, marker) {
-  return `<div class="stat"${marker ? ` data-tile="${marker}"` : ''}><div class="s-ico">💰</div><div><div class="s-val">${esc(value)}</div><div class="s-lab">${esc(label)}${sub ? ` · ${esc(sub)}` : ''}</div></div></div>`;
+// Mobile dashboard redesign (approved, revised — no icons/emoji): each tile
+// is just the value on its own first line with its label directly below,
+// still colour-accented via .stat-* (site-wide pattern, see dashboard.mjs).
+// `title` carries any extra detail (e.g. "of KES X expected") as a hover
+// tooltip rather than cluttering the tile with a second line of text.
+function tile(label, value, colorKey, marker, title) {
+  return `<div class="stat stat-${colorKey} no-ico"${marker ? ` data-tile="${marker}"` : ''}${title ? ` title="${esc(title)}"` : ''}><div><div class="s-val">${esc(value)}</div><div class="s-lab">${esc(label)}</div></div></div>`;
+}
+
+// Short money form for tile headline values, e.g. 1200000 -> "1.2M",
+// 240000 -> "240K" — approved as the first line on each money tile
+// instead of the full "KES 1,200,000".
+function fmtMoney(n) {
+  n = Number(n) || 0;
+  const abs = Math.abs(n);
+  if (abs >= 1000000) { const v = n / 1000000; return `${Number.isInteger(v) ? v : v.toFixed(1)}M`; }
+  if (abs >= 1000) { const v = n / 1000; return `${Number.isInteger(v) ? v : v.toFixed(1)}K`; }
+  return String(Math.round(n));
 }
 
 export async function viewFinanceDashboard(root, access) {
@@ -53,10 +69,10 @@ async function load(root, years, terms, sel, access) {
   if (!res.ok) { body.innerHTML = `<div class="card pad">⚠️ ${esc(res.message)}</div>`; return; }
   const d = res.data || {};
   const tilesHtml = [
-    tile('Total Collected', `KES ${Number(d.total_collected || 0).toLocaleString()}`),
-    tile('Total Balances', `KES ${Number(d.total_balance || 0).toLocaleString()}`, 'click to view Balances report', 'fd-tile-balances'),
-    tile('Total Students', d.total_students || 0),
-    tile('% of Expected Collected', `${d.pct_collected || 0}%`, `of KES ${Number(d.total_expected || 0).toLocaleString()} expected`)
+    tile('Total Collected', fmtMoney(d.total_collected || 0), 'green', null, `KES ${Number(d.total_collected || 0).toLocaleString()}`),
+    tile('Balances', fmtMoney(d.total_balance || 0), 'rose', 'fd-tile-balances', `KES ${Number(d.total_balance || 0).toLocaleString()}`),
+    tile('Students', d.total_students || 0, 'blue'),
+    tile('Of Expected', `${d.pct_collected || 0}%`, 'teal', null, `of KES ${Number(d.total_expected || 0).toLocaleString()} expected`)
   ].join('');
   // Mirrors dashboard.mjs's pattern: the app's mobile breakpoint (<960px,
   // see main.css) hides .stats-desktop and shows .stats-mobile instead —
@@ -83,7 +99,6 @@ async function load(root, years, terms, sel, access) {
 
   body.querySelectorAll('[data-tile="fd-tile-balances"]').forEach((balancesTile) => {
     balancesTile.style.cursor = 'pointer';
-    balancesTile.title = 'View the Balances report';
     balancesTile.onclick = () => {
       const reportsTab = document.querySelector('[data-tab="reports"]');
       if (reportsTab) reportsTab.click();

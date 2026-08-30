@@ -50,10 +50,10 @@ async function load(root, access, opts) {
         <td>${esc(modeLabel(c.mode))}</td>
         <td class="num">${Number(c.amount || 0).toLocaleString()}</td>
         <td>${statusBadge(c.status)}</td>
-        <td>
-          <button class="btn secondary sm" data-print="${c.id}">Print</button>
-          ${access.canCollect && c.status === 'active' ? `<button class="btn secondary sm" data-reverse="${c.id}">Reverse</button>
-          <button class="btn secondary sm" data-transfer="${c.id}">Transfer</button>` : ''}
+        <td class="row-actions">
+          <button class="icon-btn" data-print="${c.id}" title="Print receipt">🖨️</button>
+          ${access.canCollect && c.status === 'active' ? `<button class="icon-btn warn" data-reverse="${c.id}" title="Reverse collection">↩️</button>
+          <button class="icon-btn info" data-transfer="${c.id}" title="Transfer to another student">🔀</button>` : ''}
         </td>
       </tr>`).join('') || `<tr><td colspan="${opts.studentId ? 5 : 7}" class="muted">No collections match.</td></tr>`}</tbody>
     </table></div></div>`;

@@ -30,8 +30,11 @@ async function render(root, query) {
   // line, and the three actions are compact icon buttons instead of three
   // full-width text buttons stacked under the contact details — same fields,
   // just not "getting out of hand" the way three stretched rows did.
-  const cards = filtered.map((t) => `
-    <div class="card teacher-card">
+  // Design standard brief item 2: cycle through the same accent hues the
+  // Reports/Exams tiles use, one per card, purely decorative.
+  const ACCENTS = ['tile-blue', 'tile-green', 'tile-purple', 'tile-amber', 'tile-teal', 'tile-rose', 'tile-indigo'];
+  const cards = filtered.map((t, i) => `
+    <div class="card teacher-card ${ACCENTS[i % ACCENTS.length]}">
       <div class="card-b">
         <div class="teacher-card-head">
           <div class="avatar-circle">${esc(initials(t.full_name))}</div>

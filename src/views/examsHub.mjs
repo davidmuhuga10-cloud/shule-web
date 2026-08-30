@@ -28,21 +28,24 @@ import { go, state } from '../app.js';
 
 export async function viewExamsHub(root) {
   const isAdmin = state.profile && state.profile.role === 'admin';
+  // Design standard brief item 2: Exams tiles now carry the same coloured
+  // accent border as the Reports hub tiles (reportsHub.mjs), the new
+  // site-wide reference look.
   const tiles = [
-    { ico: '🗂️', title: 'Exam Desk', desc: 'Create an exam, choose classes, enter marks, and publish results — everything in one place.', route: 'exam-desk' },
+    { ico: '🗂️', title: 'Exam Desk', desc: 'Create an exam, choose classes, enter marks, and publish results — everything in one place.', route: 'exam-desk', accent: 'tile-blue' },
     ...(isAdmin ? [
-      { ico: '🎯', title: 'Grading Scales', desc: 'The grade bands and points used to grade every score.', route: 'grading' }
+      { ico: '🎯', title: 'Grading Scales', desc: 'The grade bands and points used to grade every score.', route: 'grading', accent: 'tile-purple' }
     ] : []),
     // Deleted Exams ALWAYS stays last, no matter what's added above.
     ...(isAdmin ? [
-      { ico: '🗑️', title: 'Deleted Exams', desc: 'Exams deleted in the last 30 days — restore one before it\'s permanently removed.', route: 'deleted-exams' }
+      { ico: '🗑️', title: 'Deleted Exams', desc: 'Exams deleted in the last 30 days — restore one before it\'s permanently removed.', route: 'deleted-exams', accent: 'tile-rose' }
     ] : [])
   ];
 
   root.innerHTML = `
     <div class="page-head"><div><h2>Exams</h2><p>Everything to do with exams, in one place.</p></div></div>
     <div class="hub-grid stack">
-      ${tiles.map((t) => `<button class="hub-tile" data-route="${t.route}">
+      ${tiles.map((t) => `<button class="hub-tile ${t.accent}" data-route="${t.route}">
         <div class="h-ico">${t.ico}</div>
         <div class="h-title">${t.title}</div>
         <div class="h-desc">${t.desc}</div>
