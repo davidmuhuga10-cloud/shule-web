@@ -30,11 +30,15 @@ function wireVoteHeadSelect(selectEl, voteHeads, onCreated) {
   };
 }
 
+// Design standard brief item 3: "Reports" is gone from here — reporting
+// belongs in the dedicated Reports module, not duplicated under Invoicing
+// too. renderInvoicingReports() itself is left defined below (unused for
+// now) rather than deleted outright, in case any of its report logic is
+// worth folding into the real Reports module later.
 const SUB_TABS = [
   { key: 'structures', label: 'Fee Structures' },
   { key: 'debit', label: 'Debit Notes' },
-  { key: 'credit', label: 'Credit Notes' },
-  { key: 'reports', label: 'Reports' }
+  { key: 'credit', label: 'Credit Notes' }
 ];
 
 export async function viewFinanceInvoicing(root, access) {
@@ -50,7 +54,6 @@ export async function viewFinanceInvoicing(root, access) {
     active = key;
     root.querySelectorAll('[data-subtab]').forEach((b) => b.classList.toggle('active', b.dataset.subtab === key));
     if (key === 'structures') renderStructures(body, access);
-    else if (key === 'reports') renderInvoicingReports(body, access);
     else renderNotes(body, access, key);
   };
   root.querySelectorAll('[data-subtab]').forEach((b) => b.onclick = () => show(b.dataset.subtab));
@@ -73,12 +76,13 @@ async function renderStructures(root, access) {
   const termNameById = {}; terms.forEach((t) => { termNameById[t.id] = t.name; });
 
   root.innerHTML = `
-    <div class="fin-toolbar"><p class="hint" style="margin:0">A fee structure carries a flat amount per vote head, applied uniformly to every class it's tagged to.</p>
+    <div class="fin-toolbar no-print"><p class="hint" style="margin:0">A fee structure carries a flat amount per vote head, applied uniformly to every class it's tagged to.</p>
       <div class="spacer"></div>
+      <div class="fin-report-actions">${printOptionsHtml('fis', 'landscape')}</div>
       ${access.canManage ? '<button class="btn" id="fi-add-structure">+ Add Fee Structure</button>' : ''}
     </div>
     <div class="card"><div class="card-b table-wrap"><table class="data">
-      <thead><tr><th>Name</th><th>Year / Term</th><th>Classes</th><th class="num">Total / Class</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>Year / Term</th><th>Classes</th><th class="num">Total / Class</th><th class="no-print"></th></tr></thead>
       <tbody>${structures.map((s) => {
         const total = (s.finance_fee_structure_items || []).reduce((a, it) => a + Number(it.amount || 0), 0);
         const classNames = (s.finance_fee_structure_classes || []).map((c) => classNameById[c.class_id] || '').join(', ');
@@ -87,7 +91,7 @@ async function renderStructures(root, access) {
           <td>${esc(yearNameById[s.academic_year_id] || '')} / ${esc(termNameById[s.term_id] || '')}</td>
           <td>${esc(classNames)}</td>
           <td class="num">${total.toLocaleString()}</td>
-          <td>
+          <td class="no-print">
             ${access.canManage ? `<button class="btn secondary sm" data-edit="${s.id}">Edit</button>
             <button class="btn secondary sm" data-generate="${s.id}">Invoice Now</button>
             <button class="btn secondary sm" data-uninvoice="${s.id}">Un-invoice</button>` : ''}
@@ -96,6 +100,7 @@ async function renderStructures(root, access) {
       }).join('') || '<tr><td colspan="5" class="muted">No fee structures yet.</td></tr>'}</tbody>
     </table></div></div>
   `;
+  wirePrintOptions(root, 'fis', 'Fee Structures');
 
   if (access.canManage) {
     root.querySelector('#fi-add-structure').onclick = () => openStructureModal(root, access, { years, terms, classes, voteHeads });

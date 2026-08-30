@@ -64,36 +64,52 @@ export async function viewFinanceReports(root, access) {
 async function renderBalances(root, settings) {
   const classesRes = await Db.classes.list();
   const classes = classesRes.ok ? classesRes.data : [];
-  await loadBalances(root, settings, classes, { class_id: '', min_balance: '' });
+  await loadBalances(root, settings, classes, { class_id: '', min_balance: '', stream_name: '' });
 }
 
+// BUG FIX (design standard brief item 6): Class and Min. Balance used to
+// require clicking "Apply" before filtering — removed the button entirely,
+// every filter now re-renders live on change/input, same as this screen's
+// own Vote Head Balances tab already does with no Apply button at all.
+// Stream is a NEW filter (brief: "add more filter options — e.g. by
+// Stream") — added as a client-side filter over the same rows the RPC
+// already returns (each row already carries stream_name for display), so
+// no backend/migration change was needed for it.
 async function loadBalances(root, settings, classes, sel) {
   root.innerHTML = `
     <div class="fin-toolbar no-print">
       <div class="fin-filters">
         <div class="field"><label>Class</label><select id="fb-class">${options(classes, 'id', 'name', sel.class_id, 'All classes')}</select></div>
+        <div class="field"><label>Stream</label><select id="fb-stream"><option value="">All streams</option></select></div>
         <div class="field"><label>Min. Balance (KES)</label><input id="fb-min" type="number" placeholder="e.g. 400" value="${esc(sel.min_balance)}"></div>
-        <div class="field" style="align-self:flex-end"><button class="btn secondary" id="fb-apply">Apply</button></div>
       </div>
       <div class="spacer"></div>
-      <button class="btn secondary" id="fb-xlsx">⬇️ Excel</button>
-      ${printOptionsHtml('fb', 'landscape')}
+      <div class="fin-report-actions">
+        <button class="btn secondary" id="fb-xlsx">⬇️ Excel</button>
+        ${printOptionsHtml('fb', 'landscape')}
+      </div>
     </div>
     <div id="fb-table" style="margin-top:14px">${loader()}</div>
   `;
-  root.querySelector('#fb-apply').onclick = () => loadBalances(root, settings, classes, {
-    class_id: root.querySelector('#fb-class').value, min_balance: root.querySelector('#fb-min').value
-  });
+  const refilter = (patch) => loadBalances(root, settings, classes, { ...sel, ...patch });
+  root.querySelector('#fb-class').onchange = (e) => refilter({ class_id: e.target.value, stream_name: '' });
+  root.querySelector('#fb-min').oninput = (e) => refilter({ min_balance: e.target.value });
   root.querySelector('#fb-xlsx').onclick = async () => {
     const res = await Db.finance.reports.classBalances(sel.class_id || null, sel.min_balance || null);
-    downloadXlsxAOA('Balances.xlsx', buildBalancesAoa({ settings, rows: res.ok ? res.data : [], title: 'Balances' }), 'Balances');
+    const rows = (res.ok ? res.data : []).filter((r) => !sel.stream_name || r.stream_name === sel.stream_name);
+    downloadXlsxAOA('Balances.xlsx', buildBalancesAoa({ settings, rows, title: 'Balances' }), 'Balances');
   };
 
   const tableEl = root.querySelector('#fb-table');
   if (!isContactInfoComplete(settings)) { tableEl.innerHTML = missingContactInfoHtml(); wireGotoSettings(tableEl); return; }
 
   const res = await Db.finance.reports.classBalances(sel.class_id || null, sel.min_balance || null);
-  const rows = res.ok ? res.data : [];
+  const allRows = res.ok ? res.data : [];
+  const streamNames = [...new Set(allRows.map((r) => r.stream_name).filter(Boolean))].sort();
+  const streamSel = root.querySelector('#fb-stream');
+  streamSel.innerHTML = `<option value="">All streams</option>${streamNames.map((n) => `<option value="${esc(n)}" ${n === sel.stream_name ? 'selected' : ''}>${esc(n)}</option>`).join('')}`;
+  streamSel.onchange = (e) => refilter({ stream_name: e.target.value });
+  const rows = allRows.filter((r) => !sel.stream_name || r.stream_name === sel.stream_name);
   tableEl.innerHTML = reportSheetHtml('fb-sheet', settings, 'Balances', `<table class="print-grid">
       <thead><tr><th>Adm. No.</th><th>Name</th><th>Class</th><th class="num">Expected</th><th class="num">Paid</th><th class="num">Credit Note</th><th class="num">Balance</th></tr></thead>
       <tbody>${rows.map((r) => `<tr>
@@ -122,8 +138,10 @@ async function loadVoteHead(root, settings, years, terms, sel) {
         <div class="field"><label>Term</label><select id="fv-term">${options(terms.filter((t) => !sel.academic_year_id || t.academic_year_id === sel.academic_year_id), 'id', 'name', sel.term_id, 'All terms')}</select></div>
       </div>
       <div class="spacer"></div>
-      <button class="btn secondary" id="fv-xlsx">⬇️ Excel</button>
-      ${printOptionsHtml('fv', 'portrait')}
+      <div class="fin-report-actions">
+        <button class="btn secondary" id="fv-xlsx">⬇️ Excel</button>
+        ${printOptionsHtml('fv', 'portrait')}
+      </div>
     </div>
     <div id="fv-table" style="margin-top:14px">${loader()}</div>
   `;
@@ -162,8 +180,10 @@ async function loadCashbook(root, settings, sel) {
         <div class="field" style="align-self:flex-end"><button class="btn secondary" id="fcb-apply">Apply</button></div>
       </div>
       <div class="spacer"></div>
-      <button class="btn secondary" id="fcb-xlsx">⬇️ Excel</button>
-      ${printOptionsHtml('fcb', 'portrait')}
+      <div class="fin-report-actions">
+        <button class="btn secondary" id="fcb-xlsx">⬇️ Excel</button>
+        ${printOptionsHtml('fcb', 'portrait')}
+      </div>
     </div>
     <div id="fcb-table" style="margin-top:14px">${loader()}</div>
   `;
@@ -206,8 +226,10 @@ async function loadTrial(root, settings, years, terms, sel) {
         <div class="field"><label>Term</label><select id="ft-term">${options(terms.filter((t) => !sel.academic_year_id || t.academic_year_id === sel.academic_year_id), 'id', 'name', sel.term_id, 'All terms')}</select></div>
       </div>
       <div class="spacer"></div>
-      <button class="btn secondary" id="ft-xlsx">⬇️ Excel</button>
-      ${printOptionsHtml('ft', 'portrait')}
+      <div class="fin-report-actions">
+        <button class="btn secondary" id="ft-xlsx">⬇️ Excel</button>
+        ${printOptionsHtml('ft', 'portrait')}
+      </div>
     </div>
     <div id="ft-table" style="margin-top:14px">${loader()}</div>
   `;

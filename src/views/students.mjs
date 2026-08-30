@@ -69,6 +69,7 @@ async function renderHome(root, classes, view) {
   root.innerHTML = `
     <div class="page-head"><div><h2>Students</h2></div>
       <div class="spacer"></div>
+      <button class="icon-btn" id="students-msg" title="Messages">💬</button>
       ${!isArchived ? `<button class="btn secondary" id="move-students">🔀 Move students</button>` : ''}
       <button class="btn" id="add-student">+ Add student</button></div>
     <div class="fin-tabs">
@@ -85,6 +86,7 @@ async function renderHome(root, classes, view) {
   `;
 
   root.querySelectorAll('[data-view]').forEach((b) => b.onclick = () => renderHome(root, classes, b.dataset.view));
+  root.querySelector('#students-msg').onclick = () => go('messaging');
   root.querySelector('#add-student').onclick = () => openAddChoiceModal(root, classes, () => renderHome(root, classes, view));
   const moveBtn = root.querySelector('#move-students');
   if (moveBtn) moveBtn.onclick = () => openMoveStudentsModal(root, classes, () => renderHome(root, classes, view));

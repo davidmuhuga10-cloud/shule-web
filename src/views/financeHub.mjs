@@ -16,7 +16,7 @@
  * 0031_finance_module.sql), this is just so the UI doesn't invite a click
  * that's just going to be rejected.
  */
-import { renderLoading, renderPrereq, esc, state } from '../app.js';
+import { renderLoading, renderPrereq, esc, state, go } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { viewFinanceDashboard } from './financeDashboard.mjs';
 import { viewFinanceInvoicing } from './financeInvoicing.mjs';
@@ -30,10 +30,12 @@ import { viewFinanceTransport } from './financeTransport.mjs';
 // "Finance" title), large and prominent, and stays visible no matter which
 // tab below is open. See the header markup + wiring at the bottom of
 // viewFinanceHub() below.
+// Design standard brief item 4: Collections now comes right after
+// Dashboard in the nav order (was 3rd).
 const TABS = [
   { key: 'dashboard', label: 'Dashboard' },
-  { key: 'invoicing', label: 'Invoicing' },
   { key: 'collections', label: 'Collections' },
+  { key: 'invoicing', label: 'Invoicing' },
   { key: 'reports', label: 'Reports' },
   { key: 'transport', label: 'Transport' }
 ];
@@ -65,12 +67,12 @@ export async function viewFinanceHub(root) {
 
   let active = TABS[0].key;
   root.innerHTML = `
-    <div class="page-head no-print" style="justify-content:space-between;align-items:flex-start;gap:20px">
+    <div class="page-head fin-page-head no-print" style="align-items:flex-start;gap:20px">
       <div style="display:flex;align-items:center;gap:8px">
         <button class="icon-btn fin-side-toggle" id="fin-menu-toggle" title="Menu">☰</button>
         <h2 style="margin:0">Finance</h2>
       </div>
-      <div style="position:relative;flex:1 1 480px;min-width:280px;max-width:640px">
+      <div style="position:relative;flex:1;max-width:640px">
         <input id="fin-search-q" class="fin-search-prominent" placeholder="🔍 Search student — admission no. or name…" autocomplete="off">
         <div id="fin-search-results" class="search-results"></div>
       </div>
@@ -78,7 +80,9 @@ export async function viewFinanceHub(root) {
     <div class="fin-shell">
       <div class="scrim no-print" id="fin-scrim"></div>
       <nav class="fin-side-nav no-print" id="fin-side-nav">
+        <div class="fin-rail-arrow">▸</div>
         ${TABS.map((t) => `<a data-tab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</a>`).join('')}
+        <a class="fin-nav-msg" data-msg="1">💬 Messages</a>
       </nav>
       <div class="fin-side-body">
         <div id="fin-hub-body"></div>
@@ -91,14 +95,36 @@ export async function viewFinanceHub(root) {
 
   // Same open/close/scrim pattern as the main app sidebar (App.toggleSidebar
   // in app.js), scoped to this module's own side-nav — Finance's nav is only
-  // ever shown while inside Finance, never on the main shell.
+  // ever shown while inside Finance, never on the main shell. On mobile this
+  // toggles the slide-in drawer (.open); on desktop the same function
+  // toggles the fixed rail's expanded/collapsed state (.expanded) instead —
+  // "fixed, floats over content, collapses to a slim arrow-only rail" per
+  // the design standard brief item 1.
+  const isDesktop = () => window.innerWidth > 960;
   const toggleFinNav = (force) => {
-    const open = typeof force === 'boolean' ? force : !sideNav.classList.contains('open');
-    sideNav.classList.toggle('open', open);
-    finScrim.classList.toggle('show', open);
+    const cls = isDesktop() ? 'expanded' : 'open';
+    const open = typeof force === 'boolean' ? force : !sideNav.classList.contains(cls);
+    sideNav.classList.toggle(cls, open);
+    if (!isDesktop()) finScrim.classList.toggle('show', open);
   };
   root.querySelector('#fin-menu-toggle').onclick = () => toggleFinNav();
   finScrim.onclick = () => toggleFinNav(false);
+  // Desktop: clicking the collapsed rail itself expands it (no separate
+  // hamburger button on desktop — the rail IS the toggle); clicking
+  // anywhere outside it while expanded collapses it again.
+  sideNav.onclick = (e) => {
+    if (isDesktop() && !sideNav.classList.contains('expanded')) toggleFinNav(true);
+  };
+  // BUG FIX: this view re-runs its whole render every time Finance is
+  // opened, so a plain `document.addEventListener` here would pile up a new
+  // listener (referencing an already-discarded sideNav) on every visit —
+  // remove the previous instance's listener first, same one-listener
+  // discipline the rest of the app already follows for cross-render leaks.
+  if (window.__finNavOutsideClick) document.removeEventListener('click', window.__finNavOutsideClick);
+  window.__finNavOutsideClick = (e) => {
+    if (isDesktop() && sideNav.classList.contains('expanded') && !sideNav.contains(e.target)) toggleFinNav(false);
+  };
+  document.addEventListener('click', window.__finNavOutsideClick);
 
   const showTab = (key) => {
     active = key;
@@ -111,7 +137,8 @@ export async function viewFinanceHub(root) {
     else if (key === 'reports') viewFinanceReports(body, access);
     else viewFinanceTransport(body, access);
   };
-  root.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => showTab(b.dataset.tab));
+  root.querySelectorAll('[data-tab]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); showTab(b.dataset.tab); });
+  root.querySelector('[data-msg]').onclick = (e) => { e.stopPropagation(); go('messaging'); };
   showTab(active);
 
   // Next Sprint 2 §14: picking a search result opens that student's profile
