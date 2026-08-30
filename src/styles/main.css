@@ -953,15 +953,13 @@ table.data td.num,table.data th.num{text-align:center}
   .page-head h2{font-size:19px}
   .card .card-b,.card.pad{padding:16px}
   .card .card-h{padding:14px 16px}
-}
-@media screen and (max-width:400px){
-  .content{padding:12px}
-  .page-head h2{font-size:17px}
-  .card .card-b,.card.pad{padding:13px}
-}
-@media screen and (max-width:340px){
-  .content{padding:10px}
-}
+  /* BUG FIX: these rules used to sit AFTER the max-width:400px/340px blocks
+     below, outside of any @media query at all (an orphaned stray closing
+     brace here made everything from .auth down through .dash-gender-
+     desktop apply globally, at every screen width, not just mobile — e.g.
+     .stats-desktop{display:none} and .dash-top-row{display:block} were
+     silently breaking the DESKTOP dashboard layout too). Moved back inside
+     this 960px block, which is what they were always meant to belong to. */
   .auth{grid-template-columns:1fr}.auth .promo{display:none}
   .auth .formside{min-height:100vh}
   .auth .formcard{border-radius:0;box-shadow:none;border:none;max-width:none;padding:0}
@@ -978,6 +976,14 @@ table.data td.num,table.data th.num{text-align:center}
      also show the desktop gender panel (it would duplicate that number). */
   .dash-top-row{display:block;margin-bottom:0}
   .dash-gender-desktop{display:none}
+}
+@media screen and (max-width:400px){
+  .content{padding:12px}
+  .page-head h2{font-size:17px}
+  .card .card-b,.card.pad{padding:13px}
+}
+@media screen and (max-width:340px){
+  .content{padding:10px}
 }
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:35;display:none}
 .scrim.show{display:block}
