@@ -61,7 +61,7 @@ function render(root, state) {
       </div>
     </div>
     <div class="tabs" style="margin-bottom:16px">
-      <button data-mode="stream" class="${sel.mode === 'stream' ? 'active' : ''}">By Class / Arm</button>
+      <button data-mode="stream" class="${sel.mode === 'stream' ? 'active' : ''}">By Class / Stream</button>
       <button data-mode="teacher" class="${sel.mode === 'teacher' ? 'active' : ''}">By Teacher</button>
     </div>
     <div class="card no-print" style="margin-bottom:16px" id="tt-picker"></div>
@@ -97,7 +97,7 @@ function render(root, state) {
     body.className = 'card no-print';
     body.style.marginBottom = '16px';
     body.innerHTML = `<div class="card-h"><h3>⚠️ Couldn't be scheduled (${unresolved.length})</h3></div>
-      <div class="card-b table-wrap"><table class="data"><thead><tr><th>Class/Arm</th><th>Subject</th><th>Type</th><th>Why</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="card-b table-wrap"><table class="data"><thead><tr><th>Class/Stream</th><th>Subject</th><th>Type</th><th>Why</th></tr></thead><tbody>${rows}</tbody></table></div>
       <div class="card-b"><p class="hint" style="margin:0">Usually means a teacher is stretched across more lessons than the week has room for, or the period grid is too tight for everything configured. Free up a slot (fewer periods/week for that subject, another teacher, or a bigger period grid in Setup) and generate again.</p></div>`;
     root.querySelector('#tt-view').prepend(body);
   }
@@ -110,7 +110,7 @@ function render(root, state) {
     if (sel.mode === 'stream') {
       picker.innerHTML = `<div class="card-b grid3">
         <div class="field"><label>Class</label><select id="tt-class">${options(classes, 'id', 'name', sel.class_id, 'Choose a class')}</select></div>
-        <div class="field"><label>Arm</label><select id="tt-stream" ${sel.class_id ? '' : 'disabled'}><option value="">Choose an arm</option></select></div>
+        <div class="field"><label>Stream</label><select id="tt-stream" ${sel.class_id ? '' : 'disabled'}><option value="">Choose a stream</option></select></div>
         <div class="field"><label>&nbsp;</label>${printOptionsHtml('tt', 'landscape')}</div>
       </div>`;
       const classSel = picker.querySelector('#tt-class'), streamSel = picker.querySelector('#tt-stream');
@@ -118,7 +118,7 @@ function render(root, state) {
         if (!cid) { streamSel.disabled = true; streamSel.innerHTML = '<option value="">Choose a class first</option>'; return; }
         const r = await Db.streams.list(cid);
         streamSel.disabled = false;
-        streamSel.innerHTML = options(r.ok ? r.data : [], 'id', 'name', preselect || '', 'Choose an arm');
+        streamSel.innerHTML = options(r.ok ? r.data : [], 'id', 'name', preselect || '', 'Choose a stream');
       };
       classSel.onchange = async () => { sel.class_id = classSel.value; sel.stream_id = ''; await refreshStreams(sel.class_id); loadView(); };
       streamSel.onchange = () => { sel.stream_id = streamSel.value; loadView(); };
@@ -138,7 +138,7 @@ function render(root, state) {
   async function loadView() {
     const viewEl = root.querySelector('#tt-view');
     if (!sel.year_id || !sel.term_id) { viewEl.innerHTML = '<div class="card pad">Choose an academic year and term.</div>'; return; }
-    if (sel.mode === 'stream' && !sel.stream_id) { viewEl.innerHTML = '<div class="card pad">Choose a class and arm to view its timetable.</div>'; return; }
+    if (sel.mode === 'stream' && !sel.stream_id) { viewEl.innerHTML = '<div class="card pad">Choose a class and stream to view its timetable.</div>'; return; }
     if (sel.mode === 'teacher' && !sel.staff_id) { viewEl.innerHTML = '<div class="card pad">Choose a teacher to view their timetable.</div>'; return; }
 
     viewEl.innerHTML = loader();

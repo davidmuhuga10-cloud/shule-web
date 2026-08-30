@@ -63,7 +63,7 @@ async function buildGenerateInput(supabase, periodsApi, daysApi, constraintsApi)
   if (!periodsRes.ok) return { ok: false, message: periodsRes.message };
   if (!daysRes.ok) return { ok: false, message: daysRes.message };
   if (!periodsRes.data.length) return { ok: false, message: 'Set up your period grid first (Setup tab) before generating a timetable.' };
-  if (!(streams || []).length) return { ok: false, message: 'No classes/arms found — add classes and arms first.' };
+  if (!(streams || []).length) return { ok: false, message: 'No classes/streams found — add classes and streams first.' };
 
   // Effective subjects (with periods/week, doubles/week, teacher) per
   // stream — same stream-row-wins-else-class-wide precedence
@@ -513,7 +513,7 @@ export function createTimetableApi(supabase, settingsApi) {
       const capacity = checkCapacity(generateInput);
       if (!capacity.ok) {
         const detail = capacity.overloaded.map((o) => {
-          const label = `${classNameById[o.class_id] || ''} ${streamNameById[o.stream_id] || ''}`.trim() || 'A class/arm';
+          const label = `${classNameById[o.class_id] || ''} ${streamNameById[o.stream_id] || ''}`.trim() || 'A class/stream';
           return `${label} needs ${o.required} periods/week but the week only has ${o.available}`;
         }).join('; ');
         return err(`Not enough room in the week for what's configured: ${detail}. Reduce periods/week for the affected subject(s) or add more periods to the daily grid (Setup tab), then try again.`);

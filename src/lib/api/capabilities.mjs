@@ -17,11 +17,39 @@ import { ok, err, createMemoCache, clearAllCaches } from './_util.mjs';
 // rather than what's been paid). Brief scenario #20's "grant a bursar
 // collections + statements only, not fee structures/notes" is exactly one
 // of these two grants, not both.
-export const CAPABILITIES = ['publish_results', 'finance_record_collections', 'finance_manage_fees'];
+//
+// SignUp_Fixes §5 (REDO — "Module Access Should Use Existing Access
+// Control, With Sensible Defaults"): Finance's own "hidden unless granted"
+// behaviour above already IS the sensible default this brief asks for — it
+// was never a separate toggle, it's these same capability rows. What was
+// missing is the OTHER direction: a way to explicitly BLOCK a staff member
+// from a module they'd otherwise see by default (e.g. a bursar who should
+// see Finance but nothing else). DENIABLE_MODULES below adds exactly that,
+// through this SAME grant/revoke mechanism — a 'deny_<module>' capability
+// row means "this staff member does NOT see <module>", checked in app.js's
+// buildNav()/allowedRoutes() and rendered as its own checkbox group in the
+// staff-edit modal's Access Control section (staff.mjs). Every module a
+// teacher gets by default (everything except Finance, which is opt-in) is
+// deniable; Dashboard and My Profile are not — a teacher always needs
+// somewhere to land and a way to manage their own account.
+export const DENIABLE_MODULES = [
+  { key: 'deny_students', route: 'students', label: 'Students' },
+  { key: 'deny_attendance', route: 'attendance', label: 'Attendance' },
+  { key: 'deny_messaging', route: 'messaging', label: 'Messaging' },
+  { key: 'deny_exams', route: 'exams-hub', label: 'Exams' },
+  { key: 'deny_reports', route: 'reports-hub', label: 'Reports' },
+  { key: 'deny_timetable', route: 'my-timetable', label: 'My Timetable' }
+];
+
+export const CAPABILITIES = [
+  'publish_results', 'finance_record_collections', 'finance_manage_fees',
+  ...DENIABLE_MODULES.map((m) => m.key)
+];
 export const CAPABILITY_LABELS = {
   publish_results: 'Publish exam results',
   finance_record_collections: 'Finance: record collections & view statements',
-  finance_manage_fees: 'Finance: manage fees, invoices & credit/debit notes'
+  finance_manage_fees: 'Finance: manage fees, invoices & credit/debit notes',
+  ...Object.fromEntries(DENIABLE_MODULES.map((m) => [m.key, `Block access to ${m.label}`]))
 };
 
 export function createCapabilitiesApi(supabase) {

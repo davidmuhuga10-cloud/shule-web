@@ -20,7 +20,7 @@ function run() {
   check('buildScoreSheetAoa\'s title band includes class and learning area', ssAoa.some((r) => r[0] === 'GRADE 8 - MATHEMATICS - SCORE SHEET'));
   check('buildScoreSheetAoa includes an exam-name fill-in line', ssAoa.some((r) => typeof r[0] === 'string' && r[0].startsWith('Exam name:')));
   const header = ssAoa.find((r) => r[0] === 'Adm No.');
-  check('buildScoreSheetAoa\'s table header has admno/name/arm/score columns (no row-number column)', header && header.join(',') === 'Adm No.,Name,Arm,Score');
+  check('buildScoreSheetAoa\'s table header has admno/name/stream/score columns (no row-number column)', header && header.join(',') === 'Adm No.,Name,Stream,Score');
   const headerIdx = ssAoa.indexOf(header);
   check('buildScoreSheetAoa\'s first data column is the admission number', ssAoa[headerIdx + 1][0] === '184');
   check('buildScoreSheetAoa leaves the Score column BLANK — this is a printable blank sheet, not recorded marks', ssAoa[headerIdx + 1][3] === '');

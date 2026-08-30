@@ -64,16 +64,16 @@ async function renderList(root) {
     : '';
 
   root.innerHTML = `
-    <div class="page-head"><div><h2>Classes &amp; Arms</h2><p>Click a class to manage its arms, subjects and teachers.</p></div>
+    <div class="page-head"><div><h2>Classes &amp; Streams</h2><p>Click a class to manage its streams, subjects and teachers.</p></div>
       <div class="spacer"></div>
       <button class="btn secondary" id="bulk-add-classes">+ Bulk Add Classes</button>
       <button class="btn" id="add-class">+ Add class</button></div>
     <div class="card">
       ${classes.length ? `<div class="table-wrap"><table class="data">
-        <thead><tr><th>Class</th><th class="num">Arms</th><th class="num">Students</th><th>Class Teacher</th><th></th></tr></thead>
+        <thead><tr><th>Class</th><th class="num">Streams</th><th class="num">Students</th><th>Class Teacher</th><th></th></tr></thead>
         <tbody>${rows}</tbody></table></div>` : `<div class="card-b"><div class="empty">
           <div class="e-ico">🏫</div><h3>No classes yet</h3>
-          <p>Add your first class from the standard list (e.g. "Grade 7") — you can add its arms next.</p>
+          <p>Add your first class from the standard list (e.g. "Grade 7") — you can add its streams next.</p>
           <button class="btn" id="empty-add-class">+ Add class</button>
         </div></div>`}
     </div>`;
@@ -87,7 +87,7 @@ async function renderList(root) {
   if (emptyBtn) emptyBtn.onclick = () => openClassModal(root, undefined, staff, classes);
   root.querySelectorAll('[data-open]').forEach((tr) => tr.onclick = (e) => {
     if (e.target.closest('[data-edit],[data-del],[data-manage]')) return;
-    renderLoading(root, 'Loading arms, please wait…');
+    renderLoading(root, 'Loading streams, please wait…');
     renderClassDetail(root, classes.find((c) => c.id === tr.dataset.open), staff);
   });
   // Next Sprint 2 §1: the row itself was already clickable to drill into a
@@ -95,7 +95,7 @@ async function renderList(root) {
   // this button makes the same action explicit, sitting before Edit.
   root.querySelectorAll('[data-manage]').forEach((b) => b.onclick = (e) => {
     e.stopPropagation();
-    renderLoading(root, 'Loading arms, please wait…');
+    renderLoading(root, 'Loading streams, please wait…');
     renderClassDetail(root, classes.find((c) => c.id === b.dataset.manage), staff);
   });
   root.querySelectorAll('[data-edit]').forEach((b) => b.onclick = (e) => {
@@ -104,7 +104,7 @@ async function renderList(root) {
   });
   root.querySelectorAll('[data-del]').forEach((b) => b.onclick = (e) => {
     e.stopPropagation();
-    confirmAction('Delete this class? This also removes its arms.', async () => {
+    confirmAction('Delete this class? This also removes its streams.', async () => {
       const r = await Db.classes.remove(b.dataset.del);
       if (r.ok) { toast('Class deleted.', 'ok'); renderList(root); } else toast(r.message, 'err');
     }, true);
@@ -138,7 +138,7 @@ function openBulkAddClassesModal(root, allClasses) {
   if (!available.length) {
     modal({
       title: 'Bulk Add Classes',
-      body: `<p class="hint" style="margin-top:0">All standard classes (${esc(categoryRangeLabel(category))}) have already been added.${category === 'senior' ? ' Grade 10-12 classes are added one at a time from "+ Add class" instead, since each arm needs its own pathway chosen.' : ''}</p>`,
+      body: `<p class="hint" style="margin-top:0">All standard classes (${esc(categoryRangeLabel(category))}) have already been added.${category === 'senior' ? ' Grade 10-12 classes are added one at a time from "+ Add class" instead, since each stream needs its own pathway chosen.' : ''}</p>`,
       okLabel: 'Close',
       onOk: () => closeModal()
     });
@@ -149,8 +149,8 @@ function openBulkAddClassesModal(root, allClasses) {
     title: 'Bulk Add Classes',
     wide: true,
     body: `
-      <p class="hint" style="margin-top:0">Tick every class you want to add, then type its arm names (comma-separated — e.g. "Blue, Red") before saving.</p>
-      <table class="data"><thead><tr><th style="width:36px"></th><th>Class</th><th>Arms</th></tr></thead>
+      <p class="hint" style="margin-top:0">Tick every class you want to add, then type its stream names (comma-separated — e.g. "Blue, Red") before saving.</p>
+      <table class="data"><thead><tr><th style="width:36px"></th><th>Class</th><th>Streams</th></tr></thead>
       <tbody>${available.map((n) => `<tr>
         <td><input type="checkbox" data-bulk-pick="${esc(n)}"></td>
         <td>${esc(n)}</td>
@@ -167,7 +167,7 @@ function openBulkAddClassesModal(root, allClasses) {
       });
       if (!items.length) { toast('Tick at least one class.', 'err'); return; }
       const missingStreams = items.find((it) => !it.streams.length);
-      if (missingStreams) { toast(`Add at least one arm for ${missingStreams.name}.`, 'err'); return; }
+      if (missingStreams) { toast(`Add at least one stream for ${missingStreams.name}.`, 'err'); return; }
       const res = await Db.classes.bulkSave(items);
       if (!res.ok) { toast(res.message, 'err'); return; }
       const { created, total, failed } = res.data;
@@ -217,6 +217,13 @@ function openClassModal(root, existing, staff, allClasses) {
           : `<input id="cl-name" value="" disabled><p class="hint" style="color:var(--danger,#c0392b)">All standard classes (${esc(categoryRangeLabel(category))}) have already been added.</p>`);
 
     const pendingChips = pendingStreams.map((s, i) => `<span class="chip on" data-pending="${i}">${esc(s.name)}${s.pathway ? ' · ' + esc(s.pathway) : ''} &times;</span>`).join('');
+    // SignUp_Fixes §2: Senior School classes (Grade 10-12) don't require an
+    // arm — a small school may run every pathway together as one single
+    // mixed class. Only known once a class is actually chosen from the
+    // dropdown, so the select's onchange (below) re-renders this whole
+    // modal to reflect it immediately, same pattern the pathway-required
+    // "+ Add an arm" flow already uses.
+    const isSeniorSecondary = levelBucketForClassName(chosenClassName) === 'Senior Secondary';
 
     modal({
       title: existing ? 'Edit class' : 'Add class',
@@ -229,11 +236,15 @@ function openClassModal(root, existing, staff, allClasses) {
         </div>
         ${!existing ? `
         <div class="field">
-          <label>Arms<span style="color:var(--danger)"> *</span></label>
-          <div class="chips" id="pending-chips" style="margin-bottom:10px">${pendingChips || '<span class="muted" style="font-size:13px">No arms added yet — add at least one to continue.</span>'}</div>
-          <button type="button" class="btn ghost sm" id="cl-add-stream">+ Add an arm</button>
-          <p class="hint">Every class needs at least one arm — if this class only has one group, add a single arm for it (e.g. "Main"). You can add more later from the class page.</p>
-        </div>` : `<p class="hint">Manage this class's arms, subjects and teachers from its page after saving.</p>`}
+          <label>Streams${isSeniorSecondary ? ' <span class="muted" style="font-weight:400">(optional)</span>' : '<span style="color:var(--danger)"> *</span>'}</label>
+          <div class="chips" id="pending-chips" style="margin-bottom:10px">${pendingChips || (isSeniorSecondary
+            ? '<span class="muted" style="font-size:13px">No streams added — this class will run as one single mixed group covering every pathway together.</span>'
+            : '<span class="muted" style="font-size:13px">No streams added yet — add at least one to continue.</span>')}</div>
+          <button type="button" class="btn ghost sm" id="cl-add-stream">+ Add a stream</button>
+          <p class="hint">${isSeniorSecondary
+            ? 'Optional for Senior School classes — skip this if all pathways (STEM, Social Sciences, Arts and Sports Science) share one mixed class. You can still add streams later from the class page if you want to split students by pathway.'
+            : 'Every class needs at least one stream — if this class only has one group, add a single stream for it (e.g. "Main"). You can add more later from the class page.'}</p>
+        </div>` : `<p class="hint">Manage this class's streams, subjects and teachers from its page after saving.</p>`}
       `,
       okLabel: 'Save',
       busyLabel: existing ? 'Saving changes, please wait…' : 'Adding class, please wait…',
@@ -243,10 +254,14 @@ function openClassModal(root, existing, staff, allClasses) {
         // Round 3 §17: caught here for immediate feedback (no round trip) —
         // academics.mjs's classes.save() enforces the same rule server-side
         // regardless, since the client-side check alone is never trusted.
-        if (!existing && !pendingStreams.length) { toast('Add at least one arm before saving — e.g. "Main" if this class only has one group.', 'err'); return; }
+        // SignUp_Fixes §2: Senior School is exempt from this check, same as
+        // the server-side rule.
+        if (!existing && !pendingStreams.length && levelBucketForClassName(name) !== 'Senior Secondary') {
+          toast('Add at least one stream before saving — e.g. "Main" if this class only has one group.', 'err'); return;
+        }
         const res = await Db.classes.save({ id: existing ? existing.id : undefined, name, class_teacher_staff_id, streams: pendingStreams });
         if (!res.ok) { toast(res.message, 'err'); return; }
-        if (res.streamsAdded) toast(`Class saved — ${res.streamsAdded} arm(s) added.`, 'ok');
+        if (res.streamsAdded) toast(`Class saved — ${res.streamsAdded} stream(s) added.`, 'ok');
         else toast('Class saved.', 'ok');
         closeModal();
         renderList(root);
@@ -257,7 +272,11 @@ function openClassModal(root, existing, staff, allClasses) {
       const nameSelect = document.getElementById('cl-name');
       if (nameSelect) {
         chosenClassName = nameSelect.value; // in case the browser restored a value on its own
-        nameSelect.onchange = () => { chosenClassName = nameSelect.value; };
+        // SignUp_Fixes §2: re-render on change (not just remember the
+        // value) so the Arms field's optional-for-Senior-School wording/
+        // requirement updates immediately when the admin picks a Grade
+        // 10-12 class, rather than only taking effect silently at Save.
+        nameSelect.onchange = () => { chosenClassName = nameSelect.value; renderModal(); };
       }
       document.getElementById('cl-add-stream').onclick = () => {
         // Next Sprint 3 §1.3: use the remembered chosenClassName, not a
@@ -304,26 +323,26 @@ function promptAddStream(onAdd, existingName, opts) {
   const requirePathway = !!opts.requirePathway && existingName === undefined;
   const isRename = existingName !== undefined && existingName !== null;
   modal({
-    title: isRename ? 'Rename arm' : 'Add an arm',
+    title: isRename ? 'Rename stream' : 'Add a stream',
     body: `
-      <div class="field"><label>Arm name</label><input id="stream-name-input" value="${esc(isRename ? existingName : '')}" placeholder="e.g. North, East, Blue"></div>
+      <div class="field"><label>Stream name</label><input id="stream-name-input" value="${esc(isRename ? existingName : '')}" placeholder="e.g. North, East, Blue"></div>
       ${requirePathway ? `
       <div class="field">
         <label>Pathway<span style="color:var(--danger)"> *</span></label>
         <select id="stream-pathway-input">${options(PATHWAYS.map((p) => ({ id: p, name: p })), 'id', 'name', '', 'Choose a pathway')}</select>
-        <p class="hint">Every Grade 10-12 arm needs a pathway — its subjects (core + the pathway's own specialised ones) depend on it.</p>
+        <p class="hint">Every Grade 10-12 stream needs a pathway — its subjects (core + the pathway's own specialised ones) depend on it.</p>
       </div>` : ''}
     `,
     okLabel: isRename ? 'Save' : 'Add',
     onOk: () => {
       const val = document.getElementById('stream-name-input').value.trim();
-      const error = plainNameError(val, 'Arm name');
+      const error = plainNameError(val, 'Stream name');
       if (error) { toast(error, 'err'); return; }
       let pathway = null;
       if (requirePathway) {
         const pwEl = document.getElementById('stream-pathway-input');
         pathway = pwEl ? pwEl.value : '';
-        if (!pathway) { toast('Choose this arm\'s pathway.', 'err'); return; }
+        if (!pathway) { toast('Choose this stream\'s pathway.', 'err'); return; }
       }
       closeModal();
       onAdd(val, pathway);
@@ -353,15 +372,26 @@ async function renderClassDetail(root, cls, staff) {
           <button class="btn sm danger stream-del" data-del-stream="${s.id}">Delete</button>
         </div>
       </div>`).join('')
-    : `<div class="card"><div class="card-b"><div class="empty">
-        <div class="e-ico">🔀</div><h3>No arms yet</h3>
-        <p>Add this class's first arm to start assigning subjects and teachers.</p>
-      </div></div></div>`;
+    // SignUp_Fixes §2: a Senior School class with zero arms isn't a dead
+    // end — it's the "one mixed class" the fix exists to support — so it
+    // gets a real action (manage its subjects/teachers directly at the
+    // class level) instead of the plain "add your first arm" empty state
+    // every other class level still shows when it (unusually) has none.
+    : (levelBucketForClassName(cls.name) === 'Senior Secondary'
+        ? `<div class="card"><div class="card-b"><div class="empty">
+            <div class="e-ico">🔀</div><h3>Running as one mixed class</h3>
+            <p>No streams yet — every pathway (STEM, Social Sciences, Arts and Sports Science) shares this one class. Manage its subjects and teachers directly, or add a stream above if you'd rather split students by pathway.</p>
+            <button class="btn" id="manage-class-wide">Manage Subjects &amp; Teachers →</button>
+          </div></div></div>`
+        : `<div class="card"><div class="card-b"><div class="empty">
+            <div class="e-ico">🔀</div><h3>No streams yet</h3>
+            <p>Add this class's first stream to start assigning subjects and teachers.</p>
+          </div></div></div>`);
 
   root.innerHTML = `
     <div class="page-head">
-      <div><a class="back-link" id="back-to-classes">← All classes</a><h2>${esc(cls.name)}</h2><p>Arms for this class — click one to manage its subjects and teachers.</p></div>
-      <div class="spacer"></div><button class="btn" id="add-stream">+ Add an arm</button>
+      <div><a class="back-link" id="back-to-classes">← All classes</a><h2>${esc(cls.name)}</h2><p>Streams for this class — click one to manage its subjects and teachers.</p></div>
+      <div class="spacer"></div><button class="btn" id="add-stream">+ Add a stream</button>
     </div>
     ${rows}
   `;
@@ -372,9 +402,17 @@ async function renderClassDetail(root, cls, staff) {
     promptAddStream(async (name, pathway) => {
       const res = await Db.streams.save({ class_id: cls.id, name, pathway });
       if (!res.ok) { toast(res.message, 'err'); return; }
-      toast('Arm added.', 'ok');
+      toast('Stream added.', 'ok');
       renderClassDetail(root, cls, staff);
     }, undefined, { requirePathway });
+  };
+  const manageClassWideBtn = root.querySelector('#manage-class-wide');
+  if (manageClassWideBtn) manageClassWideBtn.onclick = () => {
+    renderLoading(root, 'Loading subjects & teachers, please wait…');
+    // stream: null signals "class-wide" mode throughout renderStreamSubjects/
+    // openAddSubjectModal below — see their comments for why this is safe
+    // (subject_class_assignments.stream_id null already meant exactly this).
+    renderStreamSubjects(root, cls, null, staff);
   };
   root.querySelectorAll('[data-open-stream]').forEach((el) => el.onclick = (e) => {
     if (e.target.closest('[data-del-stream]') || e.target.closest('[data-rename-stream]')) return;
@@ -388,16 +426,16 @@ async function renderClassDetail(root, cls, staff) {
     promptAddStream(async (name) => {
       const res = await Db.streams.save({ id: stream.id, class_id: cls.id, name });
       if (!res.ok) { toast(res.message, 'err'); return; }
-      toast('Arm renamed.', 'ok');
+      toast('Stream renamed.', 'ok');
       renderClassDetail(root, cls, staff);
     }, stream.name);
   });
   root.querySelectorAll('[data-del-stream]').forEach((b) => b.onclick = (e) => {
     e.stopPropagation();
-    confirmAction('Delete this arm?', async () => {
+    confirmAction('Delete this stream?', async () => {
       const r = await Db.streams.remove(b.dataset.delStream);
       if (!r.ok) { toast(r.message, 'err'); return; }
-      toast('Arm deleted.', 'ok');
+      toast('Stream deleted.', 'ok');
       renderClassDetail(root, cls, staff);
     }, true);
   });
@@ -406,11 +444,20 @@ async function renderClassDetail(root, cls, staff) {
 /* ============================================================================
  * Screen 3 — one stream's subjects + teachers
  * ==========================================================================*/
+/** SignUp_Fixes §2: `stream` is null for a Senior School class running with
+ *  no arms at all — this whole screen then manages subjects/teachers at
+ *  the CLASS level directly (subject_class_assignments.stream_id null),
+ *  the same class-wide row this table already supported for legacy data.
+ *  Every Db.assignments.* call below is already null-stream-aware — see
+ *  assignments.mjs's comments on getStreamSubjects/setStreamSubjects/
+ *  removeStreamSubject/setStreamSubjectTeacher. */
 async function renderStreamSubjects(root, cls, stream, staff) {
-  const res = await Db.assignments.getStreamSubjects(stream.id);
+  const isClassWide = !stream;
+  const res = isClassWide ? await Db.assignments.getStreamSubjects(null, cls.id) : await Db.assignments.getStreamSubjects(stream.id);
   const rows = res.ok ? res.data : [];
   const inherited = res.ok ? !!res.inherited : false;
   const activeStaff = (staff || []).filter((s) => s.status === 'active');
+  const heading = isClassWide ? cls.name : stream.name;
 
   const subjectRows = rows.length ? rows.map((r) => `
     <tr>
@@ -421,8 +468,10 @@ async function renderStreamSubjects(root, cls, stream, staff) {
 
   root.innerHTML = `
     <div class="page-head">
-      <div><a class="back-link" id="back-to-class">← ${esc(cls.name)}</a><h2>${esc(stream.name)} — Subjects &amp; Teachers</h2>
-      <p>${rows.length ? (inherited ? 'Currently using the class-wide default set — customizing here only changes this arm.' : 'Only these subjects appear in marks entry for this arm.') : 'This is exactly what teachers will see in marks entry for this arm.'}</p></div>
+      <div><a class="back-link" id="back-to-class">← ${esc(cls.name)}</a><h2>${esc(heading)} — Subjects &amp; Teachers</h2>
+      <p>${isClassWide
+        ? 'No streams — every pathway shares this one class-wide subject list. This is exactly what teachers will see in marks entry.'
+        : (rows.length ? (inherited ? 'Currently using the class-wide default set — customizing here only changes this stream.' : 'Only these subjects appear in marks entry for this stream.') : 'This is exactly what teachers will see in marks entry for this stream.')}</p></div>
       <div class="spacer"></div><button class="btn" id="add-subject">+ Add subject</button>
     </div>
     <div class="card"><div class="table-wrap"><table class="data">
@@ -431,15 +480,15 @@ async function renderStreamSubjects(root, cls, stream, staff) {
     </table></div></div>
   `;
 
-  root.querySelector('#back-to-class').onclick = () => { renderLoading(root, 'Loading arms, please wait…'); renderClassDetail(root, cls, staff); };
+  root.querySelector('#back-to-class').onclick = () => { renderLoading(root, 'Loading streams, please wait…'); renderClassDetail(root, cls, staff); };
   root.querySelector('#add-subject').onclick = () => openAddSubjectModal(root, cls, stream, staff, rows.map((r) => r.subject_id));
   root.querySelectorAll('[data-teacher-for]').forEach((sel) => sel.onchange = async () => {
-    const r2 = await Db.assignments.setStreamSubjectTeacher({ stream_id: stream.id, class_id: cls.id, subject_id: sel.dataset.teacherFor, staff_id: sel.value || null });
+    const r2 = await Db.assignments.setStreamSubjectTeacher({ stream_id: isClassWide ? null : stream.id, class_id: cls.id, subject_id: sel.dataset.teacherFor, staff_id: sel.value || null });
     if (!r2.ok) { toast(r2.message, 'err'); return; }
     toast('Teacher updated.', 'ok');
   });
-  root.querySelectorAll('[data-remove-subject]').forEach((b) => b.onclick = () => confirmAction('Remove this subject from the arm?', async () => {
-    const r = await Db.assignments.removeStreamSubject(stream.id, b.dataset.removeSubject);
+  root.querySelectorAll('[data-remove-subject]').forEach((b) => b.onclick = () => confirmAction(`Remove this subject from ${isClassWide ? 'the class' : 'the stream'}?`, async () => {
+    const r = await Db.assignments.removeStreamSubject(isClassWide ? null : stream.id, b.dataset.removeSubject, cls.id);
     if (!r.ok) { toast(r.message, 'err'); return; }
     toast('Subject removed.', 'ok');
     renderStreamSubjects(root, cls, stream, staff);
@@ -452,6 +501,8 @@ async function renderStreamSubjects(root, cls, stream, staff) {
  *  plus what used to be the standalone Subjects module's create action,
  *  folded in here since that module no longer has its own nav entry. */
 async function openAddSubjectModal(root, cls, stream, staff, alreadyAssignedIds) {
+  const isClassWide = !stream; // SignUp_Fixes §2 — see renderStreamSubjects' header comment
+  const targetName = isClassWide ? cls.name : stream.name;
   const subjectsRes = await Db.subjects.list();
   let subjects = subjectsRes.ok ? subjectsRes.data : [];
   const selected = new Set(alreadyAssignedIds.map(String));
@@ -467,7 +518,7 @@ async function openAddSubjectModal(root, cls, stream, staff, alreadyAssignedIds)
     }).join('');
 
     modal({
-      title: `Add subjects — ${stream.name}`,
+      title: `Add subjects — ${targetName}`,
       wide: true,
       body: `
         ${groups || '<p class="muted">No subjects in the system yet — add one below.</p>'}
@@ -481,9 +532,9 @@ async function openAddSubjectModal(root, cls, stream, staff, alreadyAssignedIds)
       `,
       okLabel: 'Save selection',
       onOk: async () => {
-        const res = await Db.assignments.setStreamSubjects(stream.id, cls.id, [...selected]);
+        const res = await Db.assignments.setStreamSubjects(isClassWide ? null : stream.id, cls.id, [...selected]);
         if (!res.ok) { toast(res.message, 'err'); return; }
-        toast(`Saved ${res.count} subject(s) for ${stream.name}.`, 'ok');
+        toast(`Saved ${res.count} subject(s) for ${targetName}.`, 'ok');
         closeModal();
         renderStreamSubjects(root, cls, stream, staff);
       }

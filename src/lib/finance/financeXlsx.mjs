@@ -11,7 +11,7 @@ export function buildBalancesAoa({ settings, rows, title }) {
   aoa.push([settings.school_name || 'School']);
   aoa.push([title || 'Balances']);
   aoa.push([]);
-  aoa.push(['Adm. No.', 'Name', 'Class', 'Arm', 'Expected', 'Paid', 'Credit Note', 'Balance']);
+  aoa.push(['Adm. No.', 'Name', 'Class', 'Stream', 'Expected', 'Paid', 'Credit Note', 'Balance']);
   (rows || []).forEach((r) => {
     aoa.push([r.admission_no, r.full_name, r.class_name || '', r.stream_name || '',
       Number(r.expected || 0), Number(r.paid || 0), Number(r.credit_note || 0), Number(r.balance || 0)]);

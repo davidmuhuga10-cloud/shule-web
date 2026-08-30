@@ -83,7 +83,7 @@ function run() {
   const settings = { school_name: 'Green Hills Academy' };
   const balancesAoa = buildBalancesAoa({ settings, title: 'Balances', rows: [{ admission_no: 'A1', full_name: 'Amos Otieno', class_name: 'Form 2', stream_name: 'East', expected: 5000, paid: 3000, credit_note: 0, balance: 2000 }] });
   check('buildBalancesAoa leads with the school name', balancesAoa[0][0] === 'Green Hills Academy');
-  check('buildBalancesAoa has the expected header row', balancesAoa[3].join(',') === ['Adm. No.', 'Name', 'Class', 'Arm', 'Expected', 'Paid', 'Credit Note', 'Balance'].join(','));
+  check('buildBalancesAoa has the expected header row', balancesAoa[3].join(',') === ['Adm. No.', 'Name', 'Class', 'Stream', 'Expected', 'Paid', 'Credit Note', 'Balance'].join(','));
   check('buildBalancesAoa carries the balance figure through as a number', balancesAoa[4][7] === 2000);
 
   const vhAoa = buildVoteHeadCollectionsAoa({ settings, rows: [{ vote_head_name: 'Tuition', collected: 12000 }] });

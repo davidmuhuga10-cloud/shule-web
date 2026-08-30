@@ -8,7 +8,7 @@ const CL_COLS = [
   { key: 'admission_no', label: 'Admission No.', on: true },
   { key: 'full_name', label: 'Name', on: true },
   { key: 'gender', label: 'Gender', on: true },
-  { key: 'stream_name', label: 'Arm', on: true },
+  { key: 'stream_name', label: 'Stream', on: true },
   { key: 'guardian_name', label: 'Guardian', on: false },
   { key: 'guardian_contact', label: 'Guardian Contact', on: false }
 ];
@@ -31,7 +31,7 @@ function render(root, classes, sel) {
     <div class="card no-print" style="margin-bottom:16px">
       <div class="card-b grid2">
         <div class="field"><label>Class</label><select id="cl-class">${options(classes, 'id', 'name', sel.class_id, 'Choose a class')}</select></div>
-        <div class="field"><label>Arm (optional)</label><select id="cl-stream" ${sel.class_id ? '' : 'disabled'}><option value="">Whole class</option></select></div>
+        <div class="field"><label>Stream (optional)</label><select id="cl-stream" ${sel.class_id ? '' : 'disabled'}><option value="">Whole class</option></select></div>
       </div>
       <div class="card-b" style="padding-top:0">
         <label style="font-weight:600;font-size:12.5px;margin-bottom:6px;display:block">Columns to print</label>
@@ -131,7 +131,7 @@ async function load(root, classes, sel) {
         <table class="print-grid">
           <thead><tr>
             <th class="col-admission_no">Admission No.</th><th class="col-full_name">Name</th>
-            <th class="col-gender">Gender</th><th class="col-stream_name">Arm</th>
+            <th class="col-gender">Gender</th><th class="col-stream_name">Stream</th>
             <th class="col-guardian_name print-hide">Guardian</th><th class="col-guardian_contact print-hide">Guardian Contact</th>${blankHeaderCells}
           </tr></thead>
           <tbody>${students.map((s) => `<tr>
@@ -139,7 +139,7 @@ async function load(root, classes, sel) {
             <td class="col-gender">${esc(s.gender)}</td><td class="col-stream_name">${esc(s.stream_name || '—')}</td>
             <td class="col-guardian_name print-hide">${esc(s.guardian_name || '—')}</td><td class="col-guardian_contact print-hide">${esc(s.guardian_contact || '—')}</td>${blankBodyCells}
           </tr>`).join('')}</tbody>
-        </table>` : `<div class="empty"><div class="e-ico">🎒</div><h3>No students found</h3><p>No active students in this class/arm yet.</p></div>`}
+        </table>` : `<div class="empty"><div class="e-ico">🎒</div><h3>No students found</h3><p>No active students in this class/stream yet.</p></div>`}
       </div>
     </div>
   `;

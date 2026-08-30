@@ -148,6 +148,54 @@ create trigger trg_terms_updated_at before update on public.terms
   for each row execute function public.set_updated_at();
 create index idx_terms_school on public.terms(school_id);
 
+-- 0038_auto_detect_current_term.sql (SignUp_Fixes §4): a small, easily
+-- updatable reference table of real term date ranges per calendar year, so
+-- seed_school_defaults() can work out which term is ACTUALLY current on the
+-- day a new school signs up, instead of always assuming Term 1. Adding a
+-- future year is a plain INSERT here — never a function/schema change.
+create table public.term_date_reference (
+  year int not null,
+  term_name text not null check (term_name in ('Term 1', 'Term 2', 'Term 3')),
+  start_date date not null,
+  end_date date not null,
+  created_at timestamptz not null default now(),
+  primary key (year, term_name)
+);
+alter table public.term_date_reference enable row level security;
+create policy term_date_reference_read on public.term_date_reference
+  for select to authenticated using (true);
+insert into public.term_date_reference (year, term_name, start_date, end_date) values
+  (2026, 'Term 1', '2026-01-01', '2026-04-26'),
+  (2026, 'Term 2', '2026-04-27', '2026-08-23'),
+  (2026, 'Term 3', '2026-08-24', '2026-12-29');
+
+-- Given a year + term name, returns whether that term is 'upcoming', 'active',
+-- or 'archived' relative to p_date — with a Term-1-active fallback for a year
+-- nobody has added reference dates for yet.
+create or replace function public.term_status_for(p_year int, p_term_name text, p_date date default current_date)
+returns lifecycle_status
+language plpgsql
+stable
+as $$
+declare
+  v_start date;
+  v_end date;
+begin
+  select start_date, end_date into v_start, v_end
+  from public.term_date_reference
+  where year = p_year and term_name = p_term_name;
+
+  if v_start is null then
+    return case when p_term_name = 'Term 1' then 'active'::lifecycle_status else 'upcoming'::lifecycle_status end;
+  end if;
+
+  if p_date < v_start then return 'upcoming'::lifecycle_status;
+  elsif p_date > v_end then return 'archived'::lifecycle_status;
+  else return 'active'::lifecycle_status;
+  end if;
+end;
+$$;
+
 -- ----------------------------------------------------------------------------
 -- classes + streams
 -- ----------------------------------------------------------------------------
@@ -209,7 +257,11 @@ create table public.subjects (
   description text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  unique (school_id, name, level)
+  -- 0037_senior_school_mathematics_naming.sql: pathway is part of the
+  -- uniqueness, not just (school_id, name, level) — "Essential Mathematics"
+  -- is one name that legitimately exists twice at Senior Secondary level,
+  -- once under Social Sciences and once under Arts and Sports Science.
+  unique (school_id, name, level, pathway)
 );
 create trigger trg_subjects_updated_at before update on public.subjects
   for each row execute function public.set_updated_at();
@@ -1281,6 +1333,7 @@ declare
   -- a sign-up-time choice only (see schools.category's comment in
   -- schema.sql), so this reads it once, here.
   v_category text;
+  v_year int := extract(year from current_date)::int;
 begin
   select category into v_category from public.schools where id = p_school_id;
 
@@ -1319,7 +1372,7 @@ begin
       (p_school_id, 'Agriculture', 'Junior Secondary', '', ''),
       (p_school_id, 'Religious Education', 'Junior Secondary', '', ''),
       (p_school_id, 'Creative Arts and Sports', 'Junior Secondary', '', '')
-    on conflict (school_id, name, level) do nothing;
+    on conflict (school_id, name, level, pathway) do nothing;
   else
     -- Senior School category (Next Sprint 3 §1.3/§1.4): core subjects every
     -- Grade 10-12 student takes regardless of pathway (pathway = null),
@@ -1331,12 +1384,11 @@ begin
     insert into public.subjects (school_id, name, level, pathway, code, description) values
       (p_school_id, 'English', 'Senior Secondary', null, '', ''),
       (p_school_id, 'Kiswahili (or Kenyan Sign Language)', 'Senior Secondary', null, '', ''),
-      (p_school_id, 'Mathematics', 'Senior Secondary', null, '', ''),
       (p_school_id, 'Community Service Learning', 'Senior Secondary', null, '', ''),
       (p_school_id, 'Physics', 'Senior Secondary', 'STEM', '', ''),
       (p_school_id, 'Chemistry', 'Senior Secondary', 'STEM', '', ''),
       (p_school_id, 'Biology', 'Senior Secondary', 'STEM', '', ''),
-      (p_school_id, 'Advanced Mathematics', 'Senior Secondary', 'STEM', '', ''),
+      (p_school_id, 'Core Mathematics', 'Senior Secondary', 'STEM', '', ''),
       (p_school_id, 'Computer Studies', 'Senior Secondary', 'STEM', '', ''),
       (p_school_id, 'Agriculture', 'Senior Secondary', 'STEM', '', ''),
       (p_school_id, 'Home Science', 'Senior Secondary', 'STEM', '', ''),
@@ -1346,11 +1398,13 @@ begin
       (p_school_id, 'Business Studies', 'Senior Secondary', 'Social Sciences', '', ''),
       (p_school_id, 'Literature in English', 'Senior Secondary', 'Social Sciences', '', ''),
       (p_school_id, 'Fasihi ya Kiswahili', 'Senior Secondary', 'Social Sciences', '', ''),
+      (p_school_id, 'Essential Mathematics', 'Senior Secondary', 'Social Sciences', '', ''),
       (p_school_id, 'Music and Dance', 'Senior Secondary', 'Arts and Sports Science', '', ''),
       (p_school_id, 'Fine Arts', 'Senior Secondary', 'Arts and Sports Science', '', ''),
       (p_school_id, 'Theatre and Film', 'Senior Secondary', 'Arts and Sports Science', '', ''),
       (p_school_id, 'Sports and Recreation', 'Senior Secondary', 'Arts and Sports Science', '', ''),
       (p_school_id, 'Physical Education', 'Senior Secondary', 'Arts and Sports Science', '', ''),
+      (p_school_id, 'Essential Mathematics', 'Senior Secondary', 'Arts and Sports Science', '', ''),
       (p_school_id, 'English', 'Form 3-4', null, '', ''),
       (p_school_id, 'Kiswahili', 'Form 3-4', null, '', ''),
       (p_school_id, 'Mathematics', 'Form 3-4', null, '', ''),
@@ -1364,7 +1418,7 @@ begin
       (p_school_id, 'Business Studies', 'Form 3-4', null, '', ''),
       (p_school_id, 'Computer Studies', 'Form 3-4', null, '', ''),
       (p_school_id, 'Home Science', 'Form 3-4', null, '', '')
-    on conflict (school_id, name, level) do nothing;
+    on conflict (school_id, name, level, pathway) do nothing;
   end if;
 
   -- Round 3 §8: "Do not auto-set a grading scale for a school... the
@@ -1434,15 +1488,18 @@ begin
   -- on a manual setup step. on conflict is a no-op guard for re-running this
   -- function against a school that already has a year (e.g. a retried call).
   insert into public.academic_years (id, school_id, name, status)
-  values (gen_random_uuid(), p_school_id, extract(year from now())::text, 'active')
+  values (gen_random_uuid(), p_school_id, v_year::text, 'active')
   on conflict (school_id, name) do nothing
   returning id into v_year_id;
 
   if v_year_id is not null then
+    -- SignUp_Fixes §4 (BUG FIX): a new school no longer always gets "Term 1
+    -- active" regardless of the real date — each term's status is derived
+    -- from today's date against term_date_reference (see term_status_for()).
     insert into public.terms (school_id, academic_year_id, name, status) values
-      (p_school_id, v_year_id, 'Term 1', 'active'),
-      (p_school_id, v_year_id, 'Term 2', 'upcoming'),
-      (p_school_id, v_year_id, 'Term 3', 'upcoming')
+      (p_school_id, v_year_id, 'Term 1', public.term_status_for(v_year, 'Term 1')),
+      (p_school_id, v_year_id, 'Term 2', public.term_status_for(v_year, 'Term 2')),
+      (p_school_id, v_year_id, 'Term 3', public.term_status_for(v_year, 'Term 3'))
     on conflict (academic_year_id, name) do nothing;
   end if;
 
@@ -2624,6 +2681,18 @@ grant execute on function public.save_results_batch(uuid, uuid, uuid, uuid, json
 alter table public.staff_capabilities drop constraint staff_capabilities_capability_check;
 alter table public.staff_capabilities add constraint staff_capabilities_capability_check
   check (capability in ('publish_results', 'finance_manage_fees', 'finance_record_collections'));
+
+-- 0039_module_access_control.sql (SignUp_Fixes §5): 'deny_<module>' rows —
+-- same table, same grant/revoke mechanism, opposite polarity from every
+-- other capability here. Presence of one of these means "this staff member
+-- does NOT see <module>", checked in app.js's buildNav()/allowedRoutes()
+-- (see capabilities.mjs's DENIABLE_MODULES for the full list + labels).
+alter table public.staff_capabilities drop constraint staff_capabilities_capability_check;
+alter table public.staff_capabilities add constraint staff_capabilities_capability_check
+  check (capability in (
+    'publish_results', 'finance_manage_fees', 'finance_record_collections',
+    'deny_students', 'deny_attendance', 'deny_messaging', 'deny_exams', 'deny_reports', 'deny_timetable'
+  ));
 
 create or replace function public.finance_can_manage()
 returns boolean language sql stable security definer set search_path = public

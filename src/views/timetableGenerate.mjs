@@ -65,9 +65,9 @@ export async function viewTimetableGenerate(root, onGenerated) {
           <div style="font-size:22px;line-height:1">⛔</div>
           <div>
             <div style="font-weight:750;color:var(--danger)">Maximum timeslots reached — can't generate yet</div>
-            <p class="hint" style="margin:4px 0 0">${capacity.overloaded.length} class/arm${capacity.overloaded.length === 1 ? '' : 's'} ${capacity.overloaded.length === 1 ? 'needs' : 'need'} more periods/week than the daily grid has room for:</p>
+            <p class="hint" style="margin:4px 0 0">${capacity.overloaded.length} class/stream${capacity.overloaded.length === 1 ? '' : 's'} ${capacity.overloaded.length === 1 ? 'needs' : 'need'} more periods/week than the daily grid has room for:</p>
             <ul style="margin:6px 0 0;padding-left:20px">
-              ${capacity.overloaded.map((o) => `<li><b>${esc(`${o.class_name} ${o.stream_name}`.trim() || 'A class/arm')}</b>: needs ${o.required}, but the week only has ${o.available} <span style="color:var(--danger);font-weight:700">(${o.required - o.available} over)</span></li>`).join('')}
+              ${capacity.overloaded.map((o) => `<li><b>${esc(`${o.class_name} ${o.stream_name}`.trim() || 'A class/stream')}</b>: needs ${o.required}, but the week only has ${o.available} <span style="color:var(--danger);font-weight:700">(${o.required - o.available} over)</span></li>`).join('')}
             </ul>
             <p class="hint" style="margin:8px 0 0">Fix this under Setup → Subject Periods &amp; Double Lessons (reduce a subject's periods/week) or Setup → Teaching Days &amp; Periods (add more periods to the grid), then come back here.</p>
           </div>
@@ -77,7 +77,7 @@ export async function viewTimetableGenerate(root, onGenerated) {
         <div class="card-b grid4">
           <div class="field"><label>Academic Year</label><select id="tt-year">${options(years, 'id', 'name', sel.year_id, 'Choose a year')}</select></div>
           <div class="field"><label>Term</label><select id="tt-term">${options(terms, 'id', 'name', sel.term_id, 'Choose a term')}</select></div>
-          <div class="field"><label>&nbsp;</label><button class="btn" id="tt-generate" ${overCapacity ? 'disabled title="Can\'t generate while a class/arm is over its weekly period limit — see the warning above."' : ''}>🔄 Generate Timetable</button></div>
+          <div class="field"><label>&nbsp;</label><button class="btn" id="tt-generate" ${overCapacity ? 'disabled title="Can\'t generate while a class/stream is over its weekly period limit — see the warning above."' : ''}>🔄 Generate Timetable</button></div>
           <div class="field"><label>&nbsp;</label><p class="hint" style="margin:0">Regenerating replaces this term's active timetable — the last 3 versions are kept, so you can switch back on the View tab if this one turns out worse. Once done, you'll be taken straight there.</p></div>
         </div>
       </div>
@@ -130,7 +130,7 @@ export async function viewTimetableGenerate(root, onGenerated) {
     body.className = 'card no-print';
     body.style.marginBottom = '16px';
     body.innerHTML = `<div class="card-h"><h3>⚠️ Couldn't be scheduled (${unresolved.length})</h3></div>
-      <div class="card-b table-wrap"><table class="data"><thead><tr><th>Class/Arm</th><th>Subject</th><th>Type</th><th>Why</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="card-b table-wrap"><table class="data"><thead><tr><th>Class/Stream</th><th>Subject</th><th>Type</th><th>Why</th></tr></thead><tbody>${rows}</tbody></table></div>
       <div class="card-b"><p class="hint" style="margin:0">Usually means a teacher is stretched across more lessons than the week has room for, or the period grid is too tight for everything configured. Free up a slot (fewer periods/week for that subject, another teacher, or a bigger period grid in Setup) and generate again.</p></div>
       <div class="card-b" style="padding-top:0"><button class="btn secondary sm" id="tt-gen-continue">Continue to View →</button></div>`;
     root.querySelector('#tt-gen-result').prepend(body);

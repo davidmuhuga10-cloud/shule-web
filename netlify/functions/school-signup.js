@@ -38,6 +38,7 @@
 
 const { getAdminClient } = require('./_lib/supabaseAdmin');
 const { staffUsernameFor, staffEmailFor } = require('./_lib/studentLogin');
+const { isValidPhone } = require('../../src/lib/phone.shared.js');
 
 function json(statusCode, body) {
   return { statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
@@ -91,7 +92,16 @@ async function createSchoolAndAdmin(admin, payload) {
 
   if (!schoolName || schoolName.length < 2) return { ok: false, message: 'Enter your school\'s name.' };
   if (!adminName) return { ok: false, message: 'Enter your (the admin\'s) full name.' };
-  if (!adminPhone || adminPhone.length < 7) return { ok: false, message: 'Enter your (the admin\'s) phone number.' };
+  // SignUp_Fixes §1 (BUG): this used to be one message ("Enter your (the
+  // admin's) phone number") for BOTH a blank field and an actually-malformed
+  // one — so typing something invalid produced a response that read like
+  // the field's own description restated, not like an error. Now a missing
+  // number and a badly-formatted one get their own distinct, specific
+  // messages (mirrors the same isValidPhone() check the signup form itself
+  // already runs client-side — see phone.shared.js — so a bypass of the
+  // frontend validation still gets a clear, real error here).
+  if (!adminPhone) return { ok: false, message: 'Enter your (the admin\'s) phone number.' };
+  if (!isValidPhone(adminPhone)) return { ok: false, message: 'Enter a correct phone number, e.g. 0712345678.' };
   if (password.length < 6) return { ok: false, message: 'Password must be at least 6 characters.' };
   if (!code || code.length < 3) return { ok: false, message: 'School Code must be at least 3 characters (letters, numbers, hyphens only).' };
 

@@ -318,14 +318,14 @@ async function loadNotes(root, kind, ctx, sel) {
     targetBody.querySelector('#fn-class').onchange = (e) => { sel.class_id = e.target.value; };
   } else {
     targetBody.innerHTML = `<div class="field"><label>Class</label><select id="fn-class-for-stream">${options(classes, 'id', 'name', sel.class_id, 'Choose a class')}</select></div>
-      <div class="field"><label>Arm</label><select id="fn-stream" disabled><option value="">Choose a class first</option></select></div>
-      <p class="hint">The same note is issued to every active student in this arm.</p>`;
+      <div class="field"><label>Stream</label><select id="fn-stream" disabled><option value="">Choose a class first</option></select></div>
+      <p class="hint">The same note is issued to every active student in this stream.</p>`;
     const wireStreams = async (classId) => {
       const streamSelect = targetBody.querySelector('#fn-stream');
       if (!classId) { streamSelect.innerHTML = '<option value="">Choose a class first</option>'; streamSelect.disabled = true; return; }
       const sres = await Db.streams.list(classId);
       const streams = sres.ok ? sres.data : [];
-      streamSelect.innerHTML = options(streams, 'id', 'name', sel.stream_id, 'Choose an arm');
+      streamSelect.innerHTML = options(streams, 'id', 'name', sel.stream_id, 'Choose a stream');
       streamSelect.disabled = false;
       streamSelect.onchange = (e) => { sel.stream_id = e.target.value; };
     };
@@ -361,7 +361,7 @@ async function loadNotes(root, kind, ctx, sel) {
         if (!classId) { toast('Choose a class.', 'err'); return; }
         const filters = { class_id: classId };
         if (sel.target === 'stream') {
-          if (!sel.stream_id) { toast('Choose an arm.', 'err'); return; }
+          if (!sel.stream_id) { toast('Choose a stream.', 'err'); return; }
           filters.stream_id = sel.stream_id;
         }
         const studentsRes = await Db.students.list(filters);

@@ -66,22 +66,44 @@ export async function viewFinanceHub(root) {
   let active = TABS[0].key;
   root.innerHTML = `
     <div class="page-head no-print" style="justify-content:space-between;align-items:flex-start;gap:20px">
-      <div><h2>Finance</h2></div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="icon-btn fin-side-toggle" id="fin-menu-toggle" title="Menu">☰</button>
+        <h2 style="margin:0">Finance</h2>
+      </div>
       <div style="position:relative;flex:1 1 480px;min-width:280px;max-width:640px">
         <input id="fin-search-q" class="fin-search-prominent" placeholder="🔍 Search student — admission no. or name…" autocomplete="off">
         <div id="fin-search-results" class="search-results"></div>
       </div>
     </div>
-    <div class="fin-tabs no-print">
-      ${TABS.map((t) => `<button data-tab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</button>`).join('')}
+    <div class="fin-shell">
+      <div class="scrim no-print" id="fin-scrim"></div>
+      <nav class="fin-side-nav no-print" id="fin-side-nav">
+        ${TABS.map((t) => `<a data-tab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</a>`).join('')}
+      </nav>
+      <div class="fin-side-body">
+        <div id="fin-hub-body"></div>
+      </div>
     </div>
-    <div id="fin-hub-body"></div>
   `;
   const body = root.querySelector('#fin-hub-body');
+  const sideNav = root.querySelector('#fin-side-nav');
+  const finScrim = root.querySelector('#fin-scrim');
+
+  // Same open/close/scrim pattern as the main app sidebar (App.toggleSidebar
+  // in app.js), scoped to this module's own side-nav — Finance's nav is only
+  // ever shown while inside Finance, never on the main shell.
+  const toggleFinNav = (force) => {
+    const open = typeof force === 'boolean' ? force : !sideNav.classList.contains('open');
+    sideNav.classList.toggle('open', open);
+    finScrim.classList.toggle('show', open);
+  };
+  root.querySelector('#fin-menu-toggle').onclick = () => toggleFinNav();
+  finScrim.onclick = () => toggleFinNav(false);
 
   const showTab = (key) => {
     active = key;
     root.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === key));
+    toggleFinNav(false);
     renderLoading(body, 'Loading, please wait…');
     if (key === 'dashboard') viewFinanceDashboard(body, access);
     else if (key === 'invoicing') viewFinanceInvoicing(body, access);

@@ -59,7 +59,7 @@ export async function renderMarksPanel(container, sel) {
   container.innerHTML = '<div id="mk-panel"></div>';
   if (!subjects.length) {
     container.innerHTML = `<div class="card"><div class="card-b"><div class="empty">
-      <div class="e-ico">📚</div><h3>No subjects found</h3><p>Open a class's arm and assign it some subjects first.</p>
+      <div class="e-ico">📚</div><h3>No subjects found</h3><p>Open a class's stream and assign it some subjects first.</p>
     </div></div></div>`;
     return;
   }
@@ -88,7 +88,7 @@ export async function renderMarksBulkPanel(container, sel) {
   const subjects = subjectsRes.ok ? subjectsRes.data : [];
   if (!subjects.length) {
     container.innerHTML = `<div class="card"><div class="card-b"><div class="empty">
-      <div class="e-ico">📚</div><h3>No subjects found</h3><p>Open a class's arm and assign it some subjects first.</p>
+      <div class="e-ico">📚</div><h3>No subjects found</h3><p>Open a class's stream and assign it some subjects first.</p>
     </div></div></div>`;
     return;
   }
@@ -206,7 +206,7 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
 
     if (!rows.length) {
       gridEl.innerHTML = `<div class="card"><div class="card-b"><div class="empty">
-        <div class="e-ico">🎒</div><h3>No students found</h3><p>No active students match this class/arm yet.</p>
+        <div class="e-ico">🎒</div><h3>No students found</h3><p>No active students match this class/stream yet.</p>
       </div></div></div>`;
       return;
     }
@@ -384,7 +384,7 @@ async function renderBulkUpload(area, sel, subjectTabs) {
 
   if (!students.length) {
     area.innerHTML = `<div class="card" style="margin-bottom:16px"><div class="card-b"><div class="empty">
-      <div class="e-ico">🎒</div><h3>No students found</h3><p>No active students match this class/arm yet.</p>
+      <div class="e-ico">🎒</div><h3>No students found</h3><p>No active students match this class/stream yet.</p>
     </div></div></div>`;
     return;
   }

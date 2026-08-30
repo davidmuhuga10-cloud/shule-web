@@ -36,7 +36,7 @@ const TEMPLATE_COLUMNS = [
   { key: 'admission_no', label: 'Admission Number' },
   { key: 'full_name', label: 'Student Name' },
   { key: 'gender', label: 'Gender (Male/Female)' },
-  { key: 'stream', label: 'Arm (required)' },
+  { key: 'stream', label: 'Stream (required)' },
   { key: 'guardian_name', label: 'Guardian Name' },
   { key: 'guardian_contact', label: 'Guardian Contact' },
   { key: 'guardian_relationship', label: 'Guardian Relationship' },
@@ -113,9 +113,9 @@ function validateRow(row, streamNames, existingAdmissionSet, seenInBatch) {
   // Round 4 §1 (BUG): blank Arm used to be fine — now it's a hard error like
   // every other required field, so it trips the same "any error blocks the
   // whole Import button" gate this preview already enforces below.
-  if (!streamText) return 'Stream not filled — every student must have an Arm.';
+  if (!streamText) return 'Stream not filled — every student must have a Stream.';
   if (!streamNames || !streamNames.has(streamText.toLowerCase())) {
-    return `Arm "${streamText}" was not found for this class.`;
+    return `Stream "${streamText}" was not found for this class.`;
   }
   const admissionKey = String(row.admission_no || '').trim().toLowerCase();
   if (admissionKey) {
@@ -144,13 +144,13 @@ function render(root, classes, state) {
         <div class="field"><label>Class</label><select id="bu-class">${options(classes, 'id', 'name', state.class_id, 'Choose a class')}</select></div>
       </div>
       <div class="card-b" style="padding-top:0"><p class="hint">Every row you import will be enrolled into this class — the spreadsheet itself never sets the class.
-        ${state.streams.length ? `This class has arms set up (${state.streams.map((s) => esc(s.name)).join(', ')}) — use the "Arm" column in the template to place each student into one. Every row needs one filled in.` : ''}</p></div>
+        ${state.streams.length ? `This class has streams set up (${state.streams.map((s) => esc(s.name)).join(', ')}) — use the "Stream" column in the template to place each student into one. Every row needs one filled in.` : ''}</p></div>
     </div>
 
     <div class="card" style="margin-bottom:16px">
       <div class="card-h"><h3>2. Download template, fill it in, upload it back</h3></div>
       <div class="card-b">
-        <p class="hint" style="margin-top:0">Admission Number, Student Name, Gender and Arm are all required for every row — every other column is optional, but filling them in now means you won't need to go back and edit each student afterward.</p>
+        <p class="hint" style="margin-top:0">Admission Number, Student Name, Gender and Stream are all required for every row — every other column is optional, but filling them in now means you won't need to go back and edit each student afterward.</p>
         <button class="btn secondary" id="bu-template">⬇ Download template (.xlsx)</button>
         <div class="field" style="margin-top:14px"><label>Upload the filled-in spreadsheet</label><input id="bu-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></div>
         <button class="btn" id="bu-preview" style="margin-top:6px" disabled>Preview</button>
@@ -220,7 +220,7 @@ function renderPreview(root, classes, state) {
         ${invalidCount} row(s) have an error — fix them in the spreadsheet and re-upload. Nothing will be imported until every row is valid.</p></div>`
         : `<div class="card-b" style="padding-bottom:0"><p class="hint" style="color:var(--ok,#1a7f4b)">All ${validCount} row(s) look good — ready to import.</p></div>`}
       <div class="card-b table-wrap"><table class="data">
-        <thead><tr><th class="num">Row</th><th>Admission No.</th><th>Name</th><th>Gender</th><th>Arm</th><th>Guardian</th><th>Status</th></tr></thead>
+        <thead><tr><th class="num">Row</th><th>Admission No.</th><th>Name</th><th>Gender</th><th>Stream</th><th>Guardian</th><th>Status</th></tr></thead>
         <tbody>${withStatus.map((r, i) => `<tr style="${r.error ? 'background:var(--danger-bg)' : ''}">
           <td class="num">${i + 1}</td><td>${esc(r.admission_no)}</td><td>${esc(r.full_name)}</td><td>${esc(r.gender)}</td>
           <td>${esc(r.stream || '—')}</td>

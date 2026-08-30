@@ -251,7 +251,7 @@ async function renderRequirements(root) {
       <div class="card-b"><p class="hint" style="margin:0 0 10px">How many periods a week each subject needs, and how many of those should be scheduled as double lessons (e.g. Math might get 3 doubles a week and the rest as singles). Leave "Periods/week" blank to use the default (5), and "Doubles/week" blank or 0 for no doubles — you don't have to configure every subject before generating a timetable.</p>
         <div class="grid2">
           <div class="field"><label>Class</label><select id="req-class">${options(classes, 'id', 'name', '', 'Choose a class')}</select></div>
-          <div class="field"><label>Arm</label><select id="req-stream" disabled><option value="">Choose a class first</option></select></div>
+          <div class="field"><label>Stream</label><select id="req-stream" disabled><option value="">Choose a class first</option></select></div>
         </div>
       </div>
       <div class="card-b table-wrap" id="req-table"></div>
@@ -263,7 +263,7 @@ async function renderRequirements(root) {
     if (!cid) { streamSel.disabled = true; streamSel.innerHTML = '<option value="">Choose a class first</option>'; root.querySelector('#req-table').innerHTML = ''; return; }
     const r = await Db.streams.list(cid);
     streamSel.disabled = false;
-    streamSel.innerHTML = options(r.ok ? r.data : [], 'id', 'name', '', 'Choose an arm');
+    streamSel.innerHTML = options(r.ok ? r.data : [], 'id', 'name', '', 'Choose a stream');
     root.querySelector('#req-table').innerHTML = '';
   };
   streamSel.onchange = () => loadStreamSubjects(streamSel.value);
@@ -275,9 +275,9 @@ async function renderRequirements(root) {
     const res = await Db.assignments.getStreamSubjects(streamId);
     if (!res.ok) { table.innerHTML = `<p class="hint">${esc(res.message)}</p>`; return; }
     const rows = res.data;
-    if (!rows.length) { table.innerHTML = '<p class="hint" style="margin:0">This arm has no subjects assigned yet — add subjects under Classes &amp; Arms first.</p>'; return; }
+    if (!rows.length) { table.innerHTML = '<p class="hint" style="margin:0">This stream has no subjects assigned yet — add subjects under Classes &amp; Streams first.</p>'; return; }
     table.innerHTML = `
-      ${res.inherited ? '<p class="hint" style="margin:0 0 10px">Showing this class\'s default subjects (not yet customized for this arm specifically) — editing here changes the class-wide default.</p>' : ''}
+      ${res.inherited ? '<p class="hint" style="margin:0 0 10px">Showing this class\'s default subjects (not yet customized for this stream specifically) — editing here changes the class-wide default.</p>' : ''}
       <table class="data"><thead><tr><th>Subject</th><th>Teacher</th><th>Periods/week</th><th>Doubles/week</th></tr></thead><tbody>
         ${rows.map((r) => `<tr data-assignment="${r.assignment_id || ''}">
           <td>${esc(r.name)}</td>
@@ -296,7 +296,7 @@ async function renderRequirements(root) {
         <div class="tt-cap-tile">
           <div class="tt-cap-label">EXPECTED</div>
           <div class="tt-cap-value" id="req-expected-val">${weeklyCapacity || '—'}</div>
-          <div class="tt-cap-sub">timeslots this class/arm's week has</div>
+          <div class="tt-cap-sub">timeslots this class/stream's week has</div>
         </div>
         <div class="tt-cap-tile" id="req-scheduled-tile">
           <div class="tt-cap-label">SCHEDULED</div>
@@ -335,13 +335,13 @@ async function renderRequirements(root) {
       if (scheduledTile) scheduledTile.classList.toggle('over', atOrOverMax);
       if (msgEl) {
         if (!weeklyCapacity) {
-          msgEl.innerHTML = `Scheduled so far: <b>${total}</b> — set up the period grid under Teaching Days &amp; Periods to see how much room this class/arm's week has.`;
+          msgEl.innerHTML = `Scheduled so far: <b>${total}</b> — set up the period grid under Teaching Days &amp; Periods to see how much room this class/stream's week has.`;
           msgEl.classList.remove('danger');
         } else if (over) {
           msgEl.innerHTML = `⛔ <b>Maximum timeslots reached</b> — ${total}/${weeklyCapacity}, ${total - weeklyCapacity} too many. Reduce a subject's periods/week, or add more periods under Teaching Days &amp; Periods.`;
           msgEl.classList.add('danger');
         } else if (atOrOverMax) {
-          msgEl.innerHTML = `⛔ <b>Maximum timeslots reached</b> — ${total}/${weeklyCapacity}, this class/arm's week is completely full. Add more periods under Teaching Days &amp; Periods for any more.`;
+          msgEl.innerHTML = `⛔ <b>Maximum timeslots reached</b> — ${total}/${weeklyCapacity}, this class/stream's week is completely full. Add more periods under Teaching Days &amp; Periods for any more.`;
           msgEl.classList.add('danger');
         } else {
           msgEl.innerHTML = `✓ ${total}/${weeklyCapacity} used — ${weeklyCapacity - total} free.`;
@@ -365,7 +365,7 @@ async function renderRequirements(root) {
           // generator for more periods than the week's grid can physically
           // hold — revert this field to its last-saved value rather than
           // leaving an unsaved, over-budget number sitting on screen.
-          toast(`Lessons exceed the number of periods set for this class/arm's week. Reduce this subject's periods/week, or add more periods to the grid under Teaching Days & Periods.`, 'err');
+          toast(`Lessons exceed the number of periods set for this class/stream's week. Reduce this subject's periods/week, or add more periods to the grid under Teaching Days & Periods.`, 'err');
           periodsInp.value = periodsInp.dataset.saved;
           recomputeTotal();
           return;

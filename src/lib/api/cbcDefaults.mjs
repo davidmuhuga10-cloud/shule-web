@@ -121,20 +121,29 @@ export function levelBucketForClassName(name) {
 }
 
 /** Core Senior Secondary subjects EVERY Grade 10-12 student takes,
- *  regardless of pathway (brief §1.3). */
+ *  regardless of pathway (brief §1.3). NOTE (SignUp_Fixes §3): there is no
+ *  single generic "Mathematics" subject at Senior School level — per KICD,
+ *  Mathematics splits into two distinct, differently-named subjects by
+ *  pathway ("Core Mathematics" for STEM, "Essential Mathematics" for Social
+ *  Sciences and Arts and Sports Science), so Mathematics is NOT in this
+ *  shared core list — it lives in SENIOR_SECONDARY_PATHWAY_SUBJECTS below,
+ *  once per pathway, under its pathway-correct name. */
 export const SENIOR_SECONDARY_CORE_SUBJECTS = [
-  'English', 'Kiswahili (or Kenyan Sign Language)', 'Mathematics', 'Community Service Learning'
+  'English', 'Kiswahili (or Kenyan Sign Language)', 'Community Service Learning'
 ];
 
 /** Each pathway's own specialised subjects, on top of the core list above —
  *  standard KICD-aligned lists (brief §1.3: "these differ meaningfully from
  *  Junior School's subject list and need their own setup"). Schools can add
  *  to or edit this from the Classes screen's "+ Add subject" picker same as
- *  any other subject — this is only the starting default. */
+ *  any other subject — this is only the starting default.
+ *  SignUp_Fixes §3: Mathematics is two separate, correctly-named subjects,
+ *  not one subject with a difficulty label — "Core Mathematics" for STEM,
+ *  "Essential Mathematics" for Social Sciences AND Arts and Sports Science. */
 export const SENIOR_SECONDARY_PATHWAY_SUBJECTS = {
-  'STEM': ['Physics', 'Chemistry', 'Biology', 'Advanced Mathematics', 'Computer Studies', 'Agriculture', 'Home Science'],
-  'Social Sciences': ['History and Citizenship', 'Geography', 'Christian Religious Education', 'Business Studies', 'Literature in English', 'Fasihi ya Kiswahili'],
-  'Arts and Sports Science': ['Music and Dance', 'Fine Arts', 'Theatre and Film', 'Sports and Recreation', 'Physical Education']
+  'STEM': ['Physics', 'Chemistry', 'Biology', 'Core Mathematics', 'Computer Studies', 'Agriculture', 'Home Science'],
+  'Social Sciences': ['History and Citizenship', 'Geography', 'Christian Religious Education', 'Business Studies', 'Literature in English', 'Fasihi ya Kiswahili', 'Essential Mathematics'],
+  'Arts and Sports Science': ['Music and Dance', 'Fine Arts', 'Theatre and Film', 'Sports and Recreation', 'Physical Education', 'Essential Mathematics']
 };
 
 /** Form 3/4 (8-4-4 legacy) subjects — one fixed full list, no pathways

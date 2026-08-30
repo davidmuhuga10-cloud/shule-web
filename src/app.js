@@ -12,6 +12,7 @@
 import { loginStaff, loginStaffByUsername, loginParent, logout as authLogout, getCurrentProfile, changePassword, findLoginAccountsByPhone, getAccessToken } from './lib/auth.js';
 import { supabase } from './lib/supabaseClient.js';
 import { Db } from './lib/api/index.mjs';
+import { DENIABLE_MODULES } from './lib/api/capabilities.mjs';
 
 import { renderComingSoon } from './views/_comingSoon.mjs';
 
@@ -378,7 +379,7 @@ const ROLE_LABEL = { admin: 'Administrator', teacher: 'Teacher', parent: 'Parent
 export function renderAuth(errorMsg) {
   const name = (state.settings && state.settings.school_name) || (window.SHULE_CONFIG && window.SHULE_CONFIG.SCHOOL_BRAND_NAME) || 'Shule';
   const features = [
-    ['🎒', 'Students', 'Classes, arms & enrollment'],
+    ['🎒', 'Students', 'Classes, streams & enrollment'],
     ['🧑‍🏫', 'Teachers', 'Subjects & teacher assignment'],
     ['📝', 'Exams', 'Marks with automatic grading'],
     ['🧾', 'Reports', 'Mark lists & report forms']
@@ -410,7 +411,7 @@ export function renderAuth(errorMsg) {
         <button class="btn block" type="submit" id="login-btn">Sign in</button>
       </form>
       <p class="hint"><a href="#" id="go-forgot">Forgot password?</a></p>
-      <p class="hint">First time here? Ask your admin to set up your account.</p>
+      <p class="hint">First time here? <a href="#" id="go-first-time">Set your password</a></p>
       <p class="hint">New school? <a href="#" id="go-signup">Create your school's account</a></p>
     </div></div>
   </div></div>`;
@@ -420,7 +421,13 @@ export function renderAuth(errorMsg) {
   $('#login-phone').oninput = (e) => { lastPhone = e.target.value; };
   $('#login-form').onsubmit = doLogin;
   $('#go-signup').onclick = (e) => { e.preventDefault(); renderSignup(); };
-  $('#go-forgot').onclick = (e) => { e.preventDefault(); renderForgotPassword(); };
+  $('#go-forgot').onclick = (e) => { e.preventDefault(); renderForgotPassword(undefined, false); };
+  // Round 2 (Item 2): reuses the same phone-verified reset flow as "Forgot
+  // password?" — a brand-new teacher's account already exists (their admin
+  // added it), it just has no password set yet, so "set a password" and
+  // "reset a password" are the same operation under the hood. Only the
+  // copy differs (isFirstTime), so this avoids any new backend/migration.
+  $('#go-first-time').onclick = (e) => { e.preventDefault(); renderForgotPassword(undefined, true); };
   wirePasswordToggle('login-pw');
 }
 
@@ -501,7 +508,11 @@ function renderAccountPicker(accounts, phone, pw, opts) {
  * password for it. That's a real, acknowledged tradeoff, not an oversight —
  * flagged again in the delivery notes, not just here.
  * -------------------------------------------------------------------- */
-function renderForgotPassword(errorMsg) {
+function renderForgotPassword(errorMsg, isFirstTime) {
+  const heading = isFirstTime ? 'Set your password' : 'Reset your password';
+  const sub = isFirstTime
+    ? 'Enter the phone number your admin added, and choose a password to finish setting up your account.'
+    : 'Enter your phone number and choose a new password.';
   $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
@@ -509,16 +520,16 @@ function renderForgotPassword(errorMsg) {
       <p>A clean, modern way to run your school — from enrollment to report forms.</p>
     </div></div>
     <div class="formside"><div class="formcard">
-      <h2 class="auth-center">Reset your password</h2>
-      <div class="sub auth-center">Enter your phone number and choose a new password.</div>
+      <h2 class="auth-center">${heading}</h2>
+      <div class="sub auth-center">${sub}</div>
       ${errorMsg ? `<div class="auth-err">${esc(errorMsg)}</div>` : ''}
       <form id="forgot-form">
         <div class="field"><label>Phone number</label><input id="fp-phone" type="tel" placeholder="e.g. 0712345678" value="${esc(lastPhone)}" required></div>
-        <div class="field"><label>New password</label>${passwordFieldHtml('<input id="fp-pw" type="password" autocomplete="new-password" required>')}</div>
-        <div class="field"><label>Confirm new password</label>${passwordFieldHtml('<input id="fp-pw2" type="password" autocomplete="new-password" required>')}</div>
-        <button class="btn block" type="submit" id="forgot-btn">Reset password</button>
+        <div class="field"><label>${isFirstTime ? 'Choose a password' : 'New password'}</label>${passwordFieldHtml('<input id="fp-pw" type="password" autocomplete="new-password" required>')}</div>
+        <div class="field"><label>Confirm password</label>${passwordFieldHtml('<input id="fp-pw2" type="password" autocomplete="new-password" required>')}</div>
+        <button class="btn block" type="submit" id="forgot-btn">${isFirstTime ? 'Set password' : 'Reset password'}</button>
       </form>
-      <p class="hint">⚠️ This doesn't verify it's really you yet — anyone who knows this phone number could reset this password. A verified (OTP) reset is planned for a later update.</p>
+      <p class="hint">⚠️ This doesn't verify it's really you yet — anyone who knows this phone number could set this password. A verified (OTP) reset is planned for a later update.</p>
       <p class="hint"><a href="#" id="forgot-back">Back to sign in</a></p>
     </div></div>
   </div></div>`;
@@ -526,48 +537,48 @@ function renderForgotPassword(errorMsg) {
   $('#app').classList.add('hidden');
 
   $('#forgot-back').onclick = (e) => { e.preventDefault(); renderAuth(); };
-  $('#forgot-form').onsubmit = doForgotPassword;
+  $('#forgot-form').onsubmit = (e) => doForgotPassword(e, isFirstTime);
   wirePasswordToggle('fp-pw');
   wirePasswordToggle('fp-pw2');
 }
 
-async function doForgotPassword(e) {
+async function doForgotPassword(e, isFirstTime) {
   e.preventDefault();
   const btn = $('#forgot-btn'); btn.disabled = true; btn.textContent = 'Checking…';
   const phone = $('#fp-phone').value;
   const pw = $('#fp-pw').value, pw2 = $('#fp-pw2').value;
   lastPhone = phone;
 
-  if (pw.length < 6) { renderForgotPassword('New password must be at least 6 characters.'); return false; }
-  if (pw !== pw2) { renderForgotPassword('Passwords do not match.'); return false; }
+  if (pw.length < 6) { renderForgotPassword('New password must be at least 6 characters.', isFirstTime); return false; }
+  if (pw !== pw2) { renderForgotPassword('Passwords do not match.', isFirstTime); return false; }
 
   const lookup = await findLoginAccountsByPhone(phone);
   if (!lookup.ok || !lookup.accounts.length) {
-    renderForgotPassword('We could not find an account with that phone number.');
+    renderForgotPassword('We could not find an account with that phone number.', isFirstTime);
     return false;
   }
   if (lookup.accounts.length === 1) {
-    await submitPasswordReset(lookup.accounts[0], phone, pw);
+    await submitPasswordReset(lookup.accounts[0], phone, pw, isFirstTime);
   } else {
     renderAccountPicker(lookup.accounts, phone, pw, {
-      onBack: () => renderForgotPassword(),
-      onChoose: (account, ph, newPw) => submitPasswordReset(account, ph, newPw)
+      onBack: () => renderForgotPassword(undefined, isFirstTime),
+      onChoose: (account, ph, newPw) => submitPasswordReset(account, ph, newPw, isFirstTime)
     });
   }
   return false;
 }
 
-async function submitPasswordReset(account, phone, newPassword) {
+async function submitPasswordReset(account, phone, newPassword, isFirstTime) {
   try {
     const res = await fetch('/.netlify/functions/forgot-password', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ phone, school_code: account.school_code, role: account.role, new_password: newPassword })
     });
     const result = await res.json();
-    if (!result.ok) { renderForgotPassword(result.message || 'Could not reset that password.'); return; }
-    renderAuth('Password reset — sign in with your new password.');
+    if (!result.ok) { renderForgotPassword(result.message || 'Could not reset that password.', isFirstTime); return; }
+    renderAuth(isFirstTime ? 'Password set — sign in with your new password.' : 'Password reset — sign in with your new password.');
   } catch (err) {
-    renderForgotPassword('Something went wrong: ' + (err.message || err));
+    renderForgotPassword('Something went wrong: ' + (err.message || err), isFirstTime);
   }
 }
 
@@ -605,7 +616,9 @@ function renderSignup() {
           <p class="hint">This decides which class levels and subjects your account is set up with — you won't need to change it later.</p>
         </div>
         <div class="field"><label>Your full name</label><input id="su-admin-name" placeholder="e.g. Jane Wanjiru" required></div>
-        <div class="field"><label>Your phone number</label><input id="su-phone" type="tel" placeholder="e.g. 0712345678" required></div>
+        <div class="field"><label>Your phone number</label><input id="su-phone" type="tel" placeholder="e.g. 0712345678" required>
+          <div id="su-phone-err" class="field-err"></div>
+        </div>
         <div class="field"><label>Password</label>${passwordFieldHtml('<input id="su-pw" type="password" autocomplete="new-password" required>')}</div>
         <button class="btn block" type="submit" id="signup-btn">Create school account</button>
       </form>
@@ -623,6 +636,21 @@ function renderSignup() {
     codeInput.value = nameInput.value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
   };
 
+  // SignUp_Fixes §1 (BUG): the old flow only ever caught a bad phone number
+  // at submit time, and even then the message was just the field's own
+  // description restated ("Enter your (the admin's) phone number") — which
+  // reads like nothing actually happened, not "this is wrong". Validate as
+  // the person types instead: a real, specific "Enter a correct phone
+  // number" appears the moment they leave the field with something
+  // malformed in it, and disappears the instant they start correcting it —
+  // never left lingering once they've begun fixing the problem.
+  const phoneInput = $('#su-phone'), phoneErr = $('#su-phone-err');
+  phoneInput.oninput = () => { phoneErr.textContent = ''; };
+  phoneInput.onblur = () => {
+    const v = phoneInput.value.trim();
+    phoneErr.textContent = (v && !window.ShulePhone.isValidPhone(v)) ? 'Enter a correct phone number, e.g. 0712345678.' : '';
+  };
+
   $('#go-login').onclick = (e) => { e.preventDefault(); renderAuth(); };
   $('#signup-form').onsubmit = doSignup;
   wirePasswordToggle('su-pw');
@@ -630,6 +658,12 @@ function renderSignup() {
 
 async function doSignup(e) {
   e.preventDefault();
+  const phoneVal = $('#su-phone').value.trim();
+  if (!window.ShulePhone.isValidPhone(phoneVal)) {
+    $('#su-phone-err').textContent = 'Enter a correct phone number, e.g. 0712345678.';
+    $('#su-phone').focus();
+    return false;
+  }
   const btn = $('#signup-btn'); btn.disabled = true; btn.textContent = 'Creating…';
   const body = {
     school_name: $('#su-name').value,
@@ -756,7 +790,7 @@ const NAV = {
   admin: [
     { route: 'dashboard', label: 'Dashboard', ico: '🏠' },
     { section: 'Academics' },
-    { route: 'classes', label: 'Classes & Arms', ico: '🏫' },
+    { route: 'classes', label: 'Classes & Streams', ico: '🏫' },
     { section: 'People' },
     { route: 'students', label: 'Students', ico: '🎒' },
     { route: 'staff-teachers', label: 'Teachers and Staff', ico: '👨‍🏫' },
@@ -820,6 +854,13 @@ const HIDDEN_ALLOWED_ROUTES = {
   teacher: ['bulk-upload', 'exam-desk', 'class-list', 'broadsheet', 'reports', 'transcript', 'certificates', 'exam-analysis', 'score-sheet']
 };
 
+// SignUp_Fixes §5: maps a nav route back to its 'deny_<module>' capability
+// key, if that route is deniable at all (most aren't — see DENIABLE_MODULES).
+function routeDenyKey(route) {
+  const m = DENIABLE_MODULES.find((d) => d.route === route);
+  return m ? m.key : null;
+}
+
 function allowedRoutes(role) {
   const set = {};
   (NAV[role] || []).forEach((it) => {
@@ -827,6 +868,13 @@ function allowedRoutes(role) {
     if (it.children) it.children.forEach((c) => { set[c.route] = true; });
   });
   (HIDDEN_ALLOWED_ROUTES[role] || []).forEach((r) => { set[r] = true; });
+  // SignUp_Fixes §5: a per-USER deny (see DENIABLE_MODULES/state.profile.
+  // deniedModules, set at boot) removes a route that role would otherwise
+  // always have — same mechanism as hideUnless above, opposite polarity.
+  const denied = state.profile && state.profile.deniedModules;
+  if (denied && denied.size) {
+    DENIABLE_MODULES.forEach((m) => { if (denied.has(m.key)) delete set[m.route]; });
+  }
   return set;
 }
 
@@ -839,6 +887,10 @@ function buildNav() {
     // once individually granted a capability. See bootApp()'s capability
     // fetch, which sets this flag on state.profile at login.
     if (it.hideUnless && !state.profile[it.hideUnless]) return;
+    // SignUp_Fixes §5: the opposite direction — a module every teacher gets
+    // by default, but THIS ONE has been explicitly blocked from via Access
+    // Control (state.profile.deniedModules, set at boot).
+    if (it.route && state.profile.deniedModules && state.profile.deniedModules.has(routeDenyKey(it.route))) return;
     if (it.section) {
       html += `<div class="group">${esc(it.section)}</div>`;
     } else if (it.parent) {
@@ -951,10 +1003,18 @@ async function bootApp() {
   // this check is skipped for them. One cheap query at login, not on every
   // navigation.
   state.profile.financeAccess = state.profile.role === 'admin';
+  // SignUp_Fixes §5: the reverse of financeAccess above — modules a teacher
+  // gets by DEFAULT, but that this specific one has been explicitly blocked
+  // from via Access Control (staff.mjs's staff-edit modal). Always empty for
+  // an admin — the school creator/an admin always has full access, exactly
+  // like financeAccess never being checked for them above.
+  state.profile.deniedModules = new Set();
   if (state.profile.role === 'teacher' && state.profile.staff_id) {
     try {
       const capsRes = await Db.capabilities.listForStaff(state.profile.staff_id);
-      state.profile.financeAccess = capsRes.ok && (capsRes.data.indexOf('finance_manage_fees') !== -1 || capsRes.data.indexOf('finance_record_collections') !== -1);
+      const caps = capsRes.ok ? capsRes.data : [];
+      state.profile.financeAccess = caps.indexOf('finance_manage_fees') !== -1 || caps.indexOf('finance_record_collections') !== -1;
+      state.profile.deniedModules = new Set(caps.filter((c) => c.indexOf('deny_') === 0));
     } catch (e) {
       state.profile.financeAccess = false;
     }
@@ -1100,6 +1160,14 @@ async function exitImpersonation() {
 /* ------------------------------- INIT ----------------------------------- */
 (async function init() {
   state.settings = {}; // no school context yet — the auth screen shows generic platform branding until sign-in
+
+  // Mobile UI fix: tapping the dimmed area behind an open nav drawer used to
+  // do nothing — closing it required tapping a nav link (or the same module
+  // again), an extra step when the person just wanted to dismiss the drawer
+  // and keep doing whatever they were doing. #scrim already existed and
+  // already gets shown/hidden in lockstep with the drawer (see
+  // App.toggleSidebar) — it just had no click handler wired to it.
+  $('#scrim').onclick = () => App.toggleSidebar(false);
 
   await consumePendingImpersonation();
 

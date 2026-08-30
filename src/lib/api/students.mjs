@@ -135,7 +135,7 @@ export function createStudentsApi(supabase) {
       if (VALID_GENDERS.indexOf(gender) === -1) return err('Please choose a gender (Male or Female).');
       if (!payload.class_id) return err('Please choose a class.');
       if (!payload.stream_id && await classHasStreams(supabase, payload.class_id)) {
-        return err('Please choose an arm — this class has arms set up.');
+        return err('Please choose a stream — this class has streams set up.');
       }
 
       const rec = {
@@ -263,7 +263,7 @@ export function createStudentsApi(supabase) {
         .map((row, idx) => (String(row.stream || '').trim() ? null : idx + 1))
         .filter((line) => line !== null);
       if (blankStreamLines.length) {
-        return err(`Import rejected — stream not filled for row(s) ${blankStreamLines.slice(0, 10).join(', ')}${blankStreamLines.length > 10 ? ', and more' : ''}. Every student needs an Arm before importing — fix the spreadsheet and re-upload.`);
+        return err(`Import rejected — stream not filled for row(s) ${blankStreamLines.slice(0, 10).join(', ')}${blankStreamLines.length > 10 ? ', and more' : ''}. Every student needs a Stream before importing — fix the spreadsheet and re-upload.`);
       }
 
       const [{ data: existing }, { data: classStreams }] = await Promise.all([
@@ -295,7 +295,7 @@ export function createStudentsApi(supabase) {
         if (streamText) {
           streamId = streamByName[streamText.toLowerCase()] || null;
           if (!streamId) {
-            skipped.push({ line, admission_no: admissionNo, full_name: fullName, reason: `Arm "${streamText}" was not found for this class.` });
+            skipped.push({ line, admission_no: admissionNo, full_name: fullName, reason: `Stream "${streamText}" was not found for this class.` });
             return;
           }
         }

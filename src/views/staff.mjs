@@ -1,5 +1,6 @@
 import { esc, modal, closeModal, toast, confirmAction, options, go } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
+import { DENIABLE_MODULES } from '../lib/api/capabilities.mjs';
 
 export const JOB_TITLES = ['Teacher', 'Head Teacher', 'Deputy Head Teacher', 'Bursar', 'Support Staff'];
 
@@ -110,19 +111,27 @@ export async function openStaffModal(root, existing, onSaved) {
   let canPublish = false;
   let canFinanceCollect = false;
   let canFinanceManage = false;
+  // SignUp_Fixes §5: which modules THIS staff member is currently blocked
+  // from (deny_* rows) — everything not listed here they get by default.
+  let deniedModules = [];
   if (existing) {
     const capsRes = await Db.capabilities.listForStaff(existing.id);
     const caps = capsRes.ok ? capsRes.data : [];
     canPublish = caps.indexOf('publish_results') !== -1;
     canFinanceCollect = caps.indexOf('finance_record_collections') !== -1;
     canFinanceManage = caps.indexOf('finance_manage_fees') !== -1;
+    deniedModules = caps.filter((c) => c.indexOf('deny_') === 0);
   }
   modal({
     title: existing ? 'Edit staff member' : 'Add staff member',
     body: `
-      <div class="field"><label>Full name</label><input id="sf-name" value="${esc(existing ? existing.full_name : '')}"></div>
+      ${existing ? `<div class="field"><label>Full name</label><input id="sf-name" value="${esc(existing.full_name)}"></div>` : `
       <div class="grid2">
-        <div class="field"><label>Phone${existing ? '' : ' (used to sign in, along with a username)'}</label><input id="sf-phone" value="${esc(existing ? existing.phone || '' : '')}"></div>
+        <div class="field"><label>First name</label><input id="sf-fname" placeholder="e.g. Jane"></div>
+        <div class="field"><label>Last name</label><input id="sf-lname" placeholder="e.g. Wanjiru"></div>
+      </div>`}
+      <div class="grid2">
+        <div class="field"><label>Phone${existing ? '' : ' (required — used to sign in)'}</label><input id="sf-phone" value="${esc(existing ? existing.phone || '' : '')}"></div>
         <div class="field"><label>Email (optional, contact only)</label><input id="sf-email" type="email" value="${esc(existing ? existing.email : '')}"></div>
       </div>
       <div class="grid2">
@@ -147,13 +156,33 @@ export async function openStaffModal(root, existing, onSaved) {
       ${existing ? `<div class="field"><label class="chk"><input type="checkbox" id="sf-publish" ${canPublish ? 'checked' : ''}> Can publish exam results (final step of the approval workflow)</label></div>` : ''}
       ${existing ? `<div class="field"><label class="chk"><input type="checkbox" id="sf-finance-collect" ${canFinanceCollect ? 'checked' : ''}> Finance: can record collections &amp; view statements</label></div>` : ''}
       ${existing ? `<div class="field"><label class="chk"><input type="checkbox" id="sf-finance-manage" ${canFinanceManage ? 'checked' : ''}> Finance: can manage fees, invoices &amp; credit/debit notes</label></div>` : ''}
+      ${existing ? `
+      <details style="margin-top:4px">
+        <summary style="cursor:pointer;font-weight:600;font-size:13px">Access Control — block modules (optional)</summary>
+        <div style="margin-top:8px">
+          <p class="muted" style="margin:0 0 8px;font-size:12.5px">This staff member sees every module above by default (unless it's an admin login, which always sees everything). Check a box below to block them from that specific module — e.g. a bursar who should only use Finance.</p>
+          ${DENIABLE_MODULES.map((m) => `<div class="field"><label class="chk"><input type="checkbox" data-deny-module="${m.key}" ${deniedModules.indexOf(m.key) !== -1 ? 'checked' : ''}> Block access to ${esc(m.label)}</label></div>`).join('')}
+        </div>
+      </details>` : ''}
       ${existing ? '' : `<div class="field"><label class="chk"><input type="checkbox" id="sf-admin"> Grant admin (full) access, not just teacher access</label></div>`}
     `,
     okLabel: 'Save',
     onOk: async () => {
+      // New teachers/staff only (existing logins/records are untouched):
+      // First/Last Name are separate inputs for a cleaner add-form, but the
+      // `full_name` column is unchanged — they're just concatenated here.
+      // Phone is required for a new record since it's now how they sign in
+      // (see the "First time here?" phone-verified password-set flow).
+      if (!existing) {
+        const fname = document.getElementById('sf-fname').value.trim();
+        const lname = document.getElementById('sf-lname').value.trim();
+        if (!fname || !lname) { toast('Please enter both first and last name.', 'err'); return; }
+        if (!document.getElementById('sf-phone').value.trim()) { toast('Phone number is required — it\'s how this person will sign in.', 'err'); return; }
+      }
       const payload = {
         id: existing ? existing.id : undefined,
-        full_name: document.getElementById('sf-name').value,
+        full_name: existing ? document.getElementById('sf-name').value
+          : `${document.getElementById('sf-fname').value.trim()} ${document.getElementById('sf-lname').value.trim()}`.trim(),
         email: document.getElementById('sf-email').value,
         phone: document.getElementById('sf-phone').value,
         role: document.getElementById('sf-role').value,
@@ -174,7 +203,12 @@ export async function openStaffModal(root, existing, onSaved) {
           staff_id: res.data.id, full_name: res.data.full_name, role: isAdmin ? 'admin' : 'teacher', phone: res.data.phone
         });
         if (prov && prov.ok && prov.username) {
-          toast(`Staff saved. Login created — username: ${prov.username}, default password: ${prov.defaultPassword}`, 'ok');
+          // Round 2 (Item 2): no more sharing a single static default
+          // password out loud — the teacher sets their own via "First time
+          // here?" on the login screen (phone-verified, same flow as
+          // Forgot Password), so nothing sensitive needs to be read out or
+          // written down here.
+          toast('Staff saved. Ask them to sign in and tap "First time here?" using their phone number to set a password.', 'ok');
         } else {
           toast('Staff saved. (Login provisioning will be available once the Netlify function is deployed.)', 'warn');
         }
@@ -199,6 +233,20 @@ export async function openStaffModal(root, existing, onSaved) {
             ? await Db.capabilities.grant(existing.id, 'finance_manage_fees')
             : await Db.capabilities.revoke(existing.id, 'finance_manage_fees');
           if (!capRes.ok) toast(capRes.message, 'err');
+        }
+        // SignUp_Fixes §5: Access Control's module-block checkboxes — each
+        // is its own independent deny_* capability, same grant/revoke calls
+        // as every other checkbox above, just inverted (checked = blocked).
+        for (const m of DENIABLE_MODULES) {
+          const box = document.querySelector(`[data-deny-module="${m.key}"]`);
+          const wantsDenied = !!(box && box.checked);
+          const currentlyDenied = deniedModules.indexOf(m.key) !== -1;
+          if (wantsDenied !== currentlyDenied) {
+            const capRes = wantsDenied
+              ? await Db.capabilities.grant(existing.id, m.key)
+              : await Db.capabilities.revoke(existing.id, m.key);
+            if (!capRes.ok) toast(capRes.message, 'err');
+          }
         }
         toast('Staff saved.', 'ok');
       }

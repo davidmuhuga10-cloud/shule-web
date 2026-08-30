@@ -65,7 +65,7 @@ function render(root, exams, classes, intent, settings) {
       <div class="card-b grid4">
         <div class="field"><label>Class</label><select id="rf-class">${options(classes, 'id', 'name', intent.class_id || '', 'Choose a class')}</select></div>
         <div class="field"><label>Exam</label><select id="rf-exam" disabled><option value="">Choose a class first</option></select></div>
-        <div class="field"><label>Arm (optional)</label><select id="rf-stream" ${intent.class_id ? '' : 'disabled'}><option value="">Whole class</option></select></div>
+        <div class="field"><label>Stream (optional)</label><select id="rf-stream" ${intent.class_id ? '' : 'disabled'}><option value="">Whole class</option></select></div>
         <div class="field"><label>Student</label><select id="rf-student" disabled><option value="">Choose a class first</option></select></div>
       </div>
     </div>
