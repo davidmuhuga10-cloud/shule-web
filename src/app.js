@@ -145,8 +145,22 @@ export function printWithOptions(orientation, paperSize, marginMm) {
  *  Returns the HTML; call wirePrintOptions(root, idPrefix, onPrint) after
  *  inserting it to wire the Print button to printWithOptions() using
  *  whichever orientation/size is currently selected. */
-export function printOptionsHtml(idPrefix, defaultOrientation) {
+/** opts.simple (design standard rollout round 2): some screens (Finance
+ *  Reports, Fee Structures) don't want the Portrait/Landscape + A4/A5/
+ *  Letter pickers cluttering the toolbar — just a Print button, using
+ *  whichever orientation the screen already asked for as a fixed default.
+ *  The orientation/size are still rendered as hidden inputs with the same
+ *  ids wirePrintOptions() reads, so nothing else about how printing is
+ *  wired needs to change. */
+export function printOptionsHtml(idPrefix, defaultOrientation, opts) {
   const landscapeDefault = defaultOrientation === 'landscape';
+  if (opts && opts.simple) {
+    return `<div class="print-opts print-opts-simple no-print">
+      <input type="hidden" id="${idPrefix}-orient" value="${landscapeDefault ? 'landscape' : 'portrait'}">
+      <input type="hidden" id="${idPrefix}-size" value="A4">
+      <button class="btn secondary" id="${idPrefix}-print-btn">🖨️ Print</button>
+    </div>`;
+  }
   return `<div class="print-opts no-print">
     <select id="${idPrefix}-orient" title="Orientation">
       <option value="portrait" ${landscapeDefault ? '' : 'selected'}>Portrait</option>

@@ -136,6 +136,18 @@ export function createFinanceApi(supabase) {
       if (error) return err(error.message);
       return ok(data || []);
     },
+    /** Design standard rollout round 2: the Un-invoice button should only
+     *  ever show for a structure that's actually been invoiced to someone
+     *  — otherwise it's a dead/confusing action. finance_invoice_items
+     *  carries fee_structure_id on every line item generated from one, so
+     *  the distinct set of ids in there is exactly "structures currently
+     *  invoiced to at least one student". One query, RLS already scopes
+     *  it to this school like every other read here. */
+    async invoicedStructureIds() {
+      const { data, error } = await supabase.from('finance_invoice_items').select('fee_structure_id').not('fee_structure_id', 'is', null);
+      if (error) return err(error.message);
+      return ok([...new Set((data || []).map((r) => r.fee_structure_id))]);
+    },
     /** payload: { id?, academic_year_id, term_id, name, class_ids: [], items: [{vote_head_id, amount}] } */
     async save(payload) {
       payload = payload || {};

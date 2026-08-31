@@ -39,7 +39,7 @@ export async function viewFinanceReports(root, access) {
   const tabs = access.canManage ? SUB_TABS.concat([{ key: 'opening', label: 'Opening Balances' }]) : SUB_TABS;
   let active = 'balances';
   root.innerHTML = `
-    <div class="fin-tabs">
+    <div class="fin-tabs wrap-tabs">
       ${tabs.map((t) => `<button data-rtab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</button>`).join('')}
     </div>
     <div id="fr-body" style="margin-top:12px">${loader()}</div>
@@ -86,7 +86,7 @@ async function loadBalances(root, settings, classes, sel) {
       <div class="spacer"></div>
       <div class="fin-report-actions">
         <button class="btn secondary" id="fb-xlsx">⬇️ Excel</button>
-        ${printOptionsHtml('fb', 'landscape')}
+        ${printOptionsHtml('fb', 'landscape', { simple: true })}
       </div>
     </div>
     <div id="fb-table" style="margin-top:14px">${loader()}</div>
@@ -160,7 +160,7 @@ async function loadVoteHead(root, settings, years, terms, sel) {
       <div class="spacer"></div>
       <div class="fin-report-actions">
         <button class="btn secondary" id="fv-xlsx">⬇️ Excel</button>
-        ${printOptionsHtml('fv', 'portrait')}
+        ${printOptionsHtml('fv', 'portrait', { simple: true })}
       </div>
     </div>
     <div id="fv-table" style="margin-top:14px">${loader()}</div>
@@ -202,7 +202,7 @@ async function loadCashbook(root, settings, sel) {
       <div class="spacer"></div>
       <div class="fin-report-actions">
         <button class="btn secondary" id="fcb-xlsx">⬇️ Excel</button>
-        ${printOptionsHtml('fcb', 'portrait')}
+        ${printOptionsHtml('fcb', 'portrait', { simple: true })}
       </div>
     </div>
     <div id="fcb-table" style="margin-top:14px">${loader()}</div>
@@ -263,7 +263,7 @@ async function loadTrial(root, settings, years, terms, sel) {
       <div class="spacer"></div>
       <div class="fin-report-actions">
         <button class="btn secondary" id="ft-xlsx">⬇️ Excel</button>
-        ${printOptionsHtml('ft', 'portrait')}
+        ${printOptionsHtml('ft', 'portrait', { simple: true })}
       </div>
     </div>
     <div id="ft-table" style="margin-top:14px">${loader()}</div>

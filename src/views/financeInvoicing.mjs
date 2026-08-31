@@ -63,22 +63,28 @@ export async function viewFinanceInvoicing(root, access) {
 /* --------------------------------------------------------- fee structures --- */
 async function renderStructures(root, access) {
   root.innerHTML = loader();
-  const [structRes, yearsRes, termsRes, classesRes, voteHeadsRes] = await Promise.all([
-    Db.finance.feeStructures.list(), Db.academicYears.list(), Db.terms.list(), Db.classes.list(), Db.finance.voteHeads.list()
+  const [structRes, yearsRes, termsRes, classesRes, voteHeadsRes, invoicedRes] = await Promise.all([
+    Db.finance.feeStructures.list(), Db.academicYears.list(), Db.terms.list(), Db.classes.list(), Db.finance.voteHeads.list(),
+    Db.finance.feeStructures.invoicedStructureIds()
   ]);
   const structures = structRes.ok ? structRes.data : [];
   const years = yearsRes.ok ? yearsRes.data : [];
   const terms = termsRes.ok ? termsRes.data : [];
   const classes = classesRes.ok ? classesRes.data : [];
   const voteHeads = voteHeadsRes.ok ? voteHeadsRes.data : [];
+  // Design standard rollout round 2: Un-invoice only makes sense — and
+  // only shows — once a structure has actually been invoiced to at least
+  // one student. Before that it's a dead action with nothing to undo.
+  const invoicedIds = new Set(invoicedRes.ok ? invoicedRes.data : []);
   const classNameById = {}; classes.forEach((c) => { classNameById[c.id] = c.name; });
   const yearNameById = {}; years.forEach((y) => { yearNameById[y.id] = y.name; });
   const termNameById = {}; terms.forEach((t) => { termNameById[t.id] = t.name; });
+  const voteHeadNameById = {}; voteHeads.forEach((v) => { voteHeadNameById[v.id] = v.name; });
 
   root.innerHTML = `
-    <div class="fin-toolbar no-print"><p class="hint" style="margin:0">A fee structure carries a flat amount per vote head, applied uniformly to every class it's tagged to.</p>
+    <div class="fin-toolbar no-print"><p class="hint" style="margin:0">A fee structure carries a flat amount per vote head, applied uniformly to every class it's tagged to. Tap a row to see its vote heads, print it, or edit it.</p>
       <div class="spacer"></div>
-      <div class="fin-report-actions">${printOptionsHtml('fis', 'landscape')}</div>
+      <div class="fin-report-actions">${printOptionsHtml('fis', 'landscape', { simple: true })}</div>
       ${access.canManage ? '<button class="btn" id="fi-add-structure">+ Add Fee Structure</button>' : ''}
     </div>
     <div class="card side-accent tile-teal"><div class="card-b table-wrap"><table class="data">
@@ -86,21 +92,28 @@ async function renderStructures(root, access) {
       <tbody>${structures.map((s) => {
         const total = (s.finance_fee_structure_items || []).reduce((a, it) => a + Number(it.amount || 0), 0);
         const classNames = (s.finance_fee_structure_classes || []).map((c) => classNameById[c.class_id] || '').join(', ');
-        return `<tr>
+        return `<tr class="clickable-row" data-view="${s.id}">
           <td>${esc(s.name)}</td>
           <td>${esc(yearNameById[s.academic_year_id] || '')} / ${esc(termNameById[s.term_id] || '')}</td>
           <td>${esc(classNames)}</td>
           <td class="num">${total.toLocaleString()}</td>
-          <td class="no-print">
+          <td class="no-print row-actions">
             ${access.canManage ? `<button class="btn secondary sm" data-edit="${s.id}">Edit</button>
             <button class="btn secondary sm" data-generate="${s.id}">Invoice Now</button>
-            <button class="btn secondary sm" data-uninvoice="${s.id}">Un-invoice</button>` : ''}
+            ${invoicedIds.has(s.id) ? `<button class="btn secondary sm" data-uninvoice="${s.id}">Un-invoice</button>` : ''}` : ''}
           </td>
         </tr>`;
       }).join('') || '<tr><td colspan="5" class="muted">No fee structures yet.</td></tr>'}</tbody>
     </table></div></div>
   `;
   wirePrintOptions(root, 'fis', 'Fee Structures');
+
+  const openDetail = (s) => openStructureDetailModal(root, access, s, { classNameById, yearNameById, termNameById, voteHeadNameById, years, terms, classes, voteHeads });
+  root.querySelectorAll('[data-view]').forEach((tr) => tr.onclick = (e) => {
+    if (e.target.closest('.row-actions')) return; // row-action buttons handle their own clicks below
+    const s = structures.find((x) => x.id === tr.dataset.view);
+    if (s) openDetail(s);
+  });
 
   if (access.canManage) {
     root.querySelector('#fi-add-structure').onclick = () => openStructureModal(root, access, { years, terms, classes, voteHeads });
@@ -110,7 +123,7 @@ async function renderStructures(root, access) {
     });
     root.querySelectorAll('[data-generate]').forEach((b) => b.onclick = () => withBusy(b, async () => {
       const res = await Db.finance.feeStructures.generateInvoices(b.dataset.generate);
-      if (res.ok) toast(`Invoiced ${res.data.invoiced_count} student(s).`, 'ok');
+      if (res.ok) { toast(`Invoiced ${res.data.invoiced_count} student(s).`, 'ok'); renderStructures(root, access); }
       else toast(res.message, 'err');
     }, 'Invoicing…'));
     // Round 2 §10 (BUG fix) — until now there was no way back once a
@@ -123,9 +136,74 @@ async function renderStructures(root, access) {
         const res = await Db.finance.feeStructures.uninvoice(b.dataset.uninvoice);
         if (!res.ok) { toast(res.message, 'err'); return; }
         toast(`Un-invoiced ${res.data.affected_students} student(s) (${res.data.removed_items} line item(s) removed).`, 'ok');
+        renderStructures(root, access);
       }, 'Un-invoicing…'), true);
     });
   }
+}
+
+/** Design standard rollout round 2: tapping a fee structure's row shows
+ *  exactly what it charges — every vote head and its amount, plus the
+ *  total — rather than making someone open Edit just to check figures.
+ *  Print and Edit are both reachable right from here so this doubles as
+ *  the structure's "detail" screen. */
+function openStructureDetailModal(root, access, s, ctx) {
+  const { classNameById, yearNameById, termNameById, voteHeadNameById, years, terms, classes, voteHeads } = ctx;
+  const items = s.finance_fee_structure_items || [];
+  const total = items.reduce((a, it) => a + Number(it.amount || 0), 0);
+  const classNames = (s.finance_fee_structure_classes || []).map((c) => classNameById[c.class_id] || '').join(', ') || '—';
+  modal({
+    title: s.name,
+    cancelLabel: 'Close',
+    body: `
+      <p class="hint" style="margin-top:0">${esc(yearNameById[s.academic_year_id] || '')} / ${esc(termNameById[s.term_id] || '')} · ${esc(classNames)}</p>
+      <div class="table-wrap"><table class="data">
+        <thead><tr><th>Vote Head</th><th class="num">Amount</th></tr></thead>
+        <tbody>${items.length ? items.map((it) => `<tr><td>${esc(voteHeadNameById[it.vote_head_id] || '')}</td><td class="num">${Number(it.amount || 0).toLocaleString()}</td></tr>`).join('') : '<tr><td colspan="2" class="muted">No vote heads set on this structure yet.</td></tr>'}</tbody>
+        <tfoot><tr><td><b>Total</b></td><td class="num"><b>${total.toLocaleString()}</b></td></tr></tfoot>
+      </table></div>
+      <div class="modal-f" style="padding:14px 0 0;border-top:none">
+        <button type="button" class="btn secondary" id="fsd-print">🖨️ Print</button>
+        ${access.canManage ? '<button type="button" class="btn" id="fsd-edit">Edit</button>' : ''}
+      </div>
+    `
+  });
+  document.getElementById('fsd-print').onclick = () => printFeeStructure(s, { yearNameById, termNameById, classNames, voteHeadNameById });
+  const editBtn = document.getElementById('fsd-edit');
+  if (editBtn) editBtn.onclick = () => { closeModal(); openStructureModal(root, access, { years, terms, classes, voteHeads }, s); };
+}
+
+/** Plain printable breakdown of one fee structure — same "open a blank
+ *  window, write the HTML, print it" pattern printReceipt() (in
+ *  financeCollections.mjs) already uses, so this behaves identically to
+ *  every other print-one-thing action in Finance. */
+function printFeeStructure(s, { yearNameById, termNameById, classNames, voteHeadNameById }) {
+  const items = s.finance_fee_structure_items || [];
+  const total = items.reduce((a, it) => a + Number(it.amount || 0), 0);
+  const win = window.open('', '_blank', 'width=760,height=880');
+  if (!win) { toast('Please allow pop-ups to print this fee structure.', 'err'); return; }
+  win.document.write(`
+    <html><head><title>${esc(s.name)}</title>
+    <style>
+      body{font-family:Arial,sans-serif;padding:32px;color:#1b2733}
+      h1{font-size:20px;margin:0 0 4px}
+      p.sub{color:#6b7a8d;margin:0 0 20px;font-size:13px}
+      table{width:100%;border-collapse:collapse;font-size:13px}
+      th,td{border:1px solid #000;padding:8px 10px;text-align:left}
+      td.num,th.num{text-align:right}
+      tfoot td{font-weight:700;background:#f0f2f5}
+    </style></head>
+    <body onload="window.print()">
+      <h1>${esc(s.name)}</h1>
+      <p class="sub">${esc(yearNameById[s.academic_year_id] || '')} / ${esc(termNameById[s.term_id] || '')} · ${esc(classNames)}</p>
+      <table>
+        <thead><tr><th>Vote Head</th><th class="num">Amount</th></tr></thead>
+        <tbody>${items.map((it) => `<tr><td>${esc(voteHeadNameById[it.vote_head_id] || '')}</td><td class="num">${Number(it.amount || 0).toLocaleString()}</td></tr>`).join('') || '<tr><td colspan="2">No vote heads set.</td></tr>'}</tbody>
+        <tfoot><tr><td>Total</td><td class="num">${total.toLocaleString()}</td></tr></tfoot>
+      </table>
+    </body></html>
+  `);
+  win.document.close();
 }
 
 function openStructureModal(root, access, { years, terms, classes, voteHeads }, existing) {
