@@ -27,6 +27,10 @@ async function load(root, access, opts) {
   const terms = termsRes.ok ? termsRes.data : [];
   const filters = { text: '', term_id: '', min_amount: '' };
 
+  // Captured by renderTable() on every call so the mobile view (which needs
+  // an async per-student balance lookup, unlike the plain desktop table)
+  // can be kicked off right after with the exact same filtered set.
+  let lastFiltered = [];
   const renderTable = () => {
     const filtered = opts.studentId ? rows : rows.filter((r) => {
       if (filters.text) {
@@ -40,8 +44,10 @@ async function load(root, access, opts) {
       if (filters.min_amount !== '' && Number(r.amount || 0) < Number(filters.min_amount)) return false;
       return true;
     });
+    lastFiltered = filtered;
     return `
-    <div class="card side-accent tile-teal"><div class="card-b table-wrap"><table class="data">
+    <div class="card side-accent tile-teal">
+      <div class="card-b table-wrap fcol-desktop-view"><table class="data">
       <thead><tr><th>Date</th><th>Receipt No</th>${opts.studentId ? '' : '<th>Student</th><th>Class</th>'}<th>Mode</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead>
       <tbody>${filtered.map((c) => `<tr>
         <td>${new Date(c.created_at).toLocaleDateString()}</td>
@@ -56,7 +62,40 @@ async function load(root, access, opts) {
           <button class="icon-btn info" data-transfer="${c.id}" title="Transfer to another student">🔀</button>` : ''}
         </td>
       </tr>`).join('') || `<tr><td colspan="${opts.studentId ? 5 : 7}" class="muted">No collections match.</td></tr>`}</tbody>
-    </table></div></div>`;
+    </table></div>
+      <div class="card-b fcol-mobile-view" id="fc-mobile">${loader()}</div>
+    </div>`;
+  };
+  /** Collections mobile view — one line per receipt (student + class/
+   *  receipt/mode as a subtitle), amount, and the student's current
+   *  balance colored red if they still owe or green if cleared/overpaid.
+   *  Desktop table above is untouched. Capped to the 30 most recent rows
+   *  shown (already newest-first) and balance lookups are deduped per
+   *  student, so this never fires more than a handful of extra requests
+   *  even against the full 300-row list. */
+  const renderMobileList = async (filtered) => {
+    const mobileEl = root.querySelector('#fc-mobile');
+    if (!mobileEl) return;
+    const recent = filtered.slice(0, 30);
+    if (!recent.length) { mobileEl.innerHTML = '<p class="muted center" style="margin:20px 0">No collections match.</p>'; return; }
+    const uniqueIds = [...new Set(recent.map((c) => c.student_id).filter(Boolean))];
+    const balMap = new Map();
+    await Promise.all(uniqueIds.map(async (id) => {
+      const r = await Db.finance.students.balance(id);
+      balMap.set(id, r.ok ? Number((r.data || {}).balance || 0) : null);
+    }));
+    mobileEl.innerHTML = recent.map((c) => {
+      const bal = c.student_id ? balMap.get(c.student_id) : null;
+      const balHtml = bal == null ? '' : `<span class="fcol-bal ${bal > 0 ? 'owe' : 'ok'}">${bal > 0 ? `Owes ${bal.toLocaleString()}` : (bal < 0 ? `Overpaid ${Math.abs(bal).toLocaleString()}` : 'Cleared')}</span>`;
+      const nameLine = opts.studentId ? esc(modeLabel(c.mode)) : `${esc(c.students ? c.students.full_name : '')}`;
+      const subLine = opts.studentId
+        ? esc(c.receipt_no || '')
+        : `${esc(c.students && c.students.classes ? c.students.classes.name : '')} · ${esc(c.receipt_no || '')} · ${esc(modeLabel(c.mode))}`;
+      return `<div class="fcol-row">
+        <div class="l"><span class="name">${nameLine}</span><span class="sub">${subLine}</span></div>
+        <div class="r"><span class="amt">${Number(c.amount || 0).toLocaleString()}</span>${balHtml}</div>
+      </div>`;
+    }).join('');
   };
 
   root.innerHTML = `
@@ -72,6 +111,7 @@ async function load(root, access, opts) {
     </div>
     <div id="fc-table">${renderTable()}</div>
   `;
+  renderMobileList(lastFiltered);
 
   const wireRows = () => {
     root.querySelectorAll('[data-print]').forEach((b) => b.onclick = () => {
@@ -92,7 +132,7 @@ async function load(root, access, opts) {
   wireRows();
 
   if (!opts.studentId) {
-    const refresh = () => { root.querySelector('#fc-table').innerHTML = renderTable(); wireRows(); };
+    const refresh = () => { root.querySelector('#fc-table').innerHTML = renderTable(); wireRows(); renderMobileList(lastFiltered); };
     root.querySelector('#fc-search').oninput = (e) => { filters.text = e.target.value; refresh(); };
     root.querySelector('#fc-term').onchange = (e) => { filters.term_id = e.target.value; refresh(); };
     root.querySelector('#fc-min').oninput = (e) => { filters.min_amount = e.target.value; refresh(); };
