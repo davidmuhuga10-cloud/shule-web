@@ -340,6 +340,58 @@ function openOpeningBalanceModal(root, access, student, ctx, existing) {
  *  confirm the shading actually survives printing) without needing to
  *  stand up the whole Supabase-backed student-search flow just to get
  *  there. See tests/print_statement.js. */
+/** Design standard rollout round 2 item 1: on-screen mobile Statement view.
+ *  Only the last 3 terms are shown (as tiles you switch between, bordered
+ *  the same way every other card/tile in this round is — border only, no
+ *  fill change), each transaction collapsed to one plain line (date,
+ *  description, a green "+"/red "−" amount, and the running balance —
+ *  r.balance is already the running balance groupByTerm() computed, so no
+ *  new math is needed here). This is purely a screen-only presentation —
+ *  see .print-only in main.css for how the original boxed table below
+ *  stays exactly what actually prints. */
+function shortTermLabel(label) {
+  return String(label).replace(/^TERM:/, '');
+}
+function mobileStatementHtml(groups) {
+  const recent = groups.slice(-3);
+  if (!recent.length) return '<p class="muted center" style="margin:20px 0">No transactions yet.</p>';
+  const lastIdx = recent.length - 1;
+  return `
+    <div class="mstate">
+      <div class="mstate-tabs">
+        ${recent.map((g, i) => `<button data-mterm="${i}" class="${i === lastIdx ? 'active' : ''}">${esc(shortTermLabel(g.label))}</button>`).join('')}
+      </div>
+      ${recent.map((g, i) => `
+        <div class="mstate-panel" data-mpanel="${i}" ${i === lastIdx ? '' : 'style="display:none"'}>
+          <div class="mstate-total"><div class="lbl">Closing balance — ${esc(g.label)}</div><div class="val">KES ${Number(g.closingBalance).toLocaleString()}</div></div>
+          <div class="mstate-col-heads"><span>Amount</span><span>Balance</span></div>
+          <div class="mstate-list">
+            ${g.rows.map((r) => {
+              const isPaid = Number(r.credit) > 0;
+              const amt = isPaid ? Number(r.credit) : Number(r.debit);
+              return `<div class="row">
+                <div class="l"><span class="date">${r.date ? new Date(r.date).toLocaleDateString(undefined, { day: '2-digit', month: 'short' }) : ''}</span><span class="desc">${esc(r.description)}</span></div>
+                <div class="r"><span class="amt ${isPaid ? 'plus' : 'minus'}">${isPaid ? '+' : '−'}${amt.toLocaleString()}</span><span class="bal">${Number(r.balance).toLocaleString()}</span></div>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+/** Wires the mobile term-tile switcher above — plain show/hide, no
+ *  re-render, since all 3 panels are already in the DOM. */
+export function wireMobileStatementTabs(root) {
+  root.querySelectorAll('[data-mterm]').forEach((btn) => {
+    btn.onclick = () => {
+      const idx = btn.dataset.mterm;
+      root.querySelectorAll('[data-mterm]').forEach((b) => b.classList.toggle('active', b === btn));
+      root.querySelectorAll('[data-mpanel]').forEach((p) => { p.style.display = p.dataset.mpanel === idx ? '' : 'none'; });
+    };
+  });
+}
+
 export function termGroupHtml(g) {
   return `
     <div class="fin-statement-term">
@@ -378,7 +430,8 @@ export function statementSheetHtml(schoolName, student, groups) {
       <div class="card-b">
         <h2 style="margin:0">${esc(schoolName)}</h2>
         <p style="margin:2px 0 12px">Statement of Account — ${esc(student.full_name)} (${esc(student.admission_no)})</p>
-        ${groups.length ? groups.map(termGroupHtml).join('') : '<p class="muted">No transactions yet.</p>'}
+        <div class="no-print">${mobileStatementHtml(groups)}</div>
+        <div class="print-only">${groups.length ? groups.map(termGroupHtml).join('') : '<p class="muted">No transactions yet.</p>'}</div>
       </div>
     </div>
   `;
@@ -422,6 +475,7 @@ async function renderStatement(root, student, years, terms) {
   const schoolName = (state.settings && state.settings.school_name) || 'Shule';
 
   root.innerHTML = statementSheetHtml(schoolName, student, groups);
+  wireMobileStatementTabs(root);
   // BUG FIX: this used to pass root.querySelector('#fss-sheet') here, but
   // the print button (id="fss-print-btn", from printOptionsHtml()) lives in
   // the SIBLING .page-head div, not inside #fss-sheet — so
