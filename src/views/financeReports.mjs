@@ -110,15 +110,35 @@ async function loadBalances(root, settings, classes, sel) {
   streamSel.innerHTML = `<option value="">All streams</option>${streamNames.map((n) => `<option value="${esc(n)}" ${n === sel.stream_name ? 'selected' : ''}>${esc(n)}</option>`).join('')}`;
   streamSel.onchange = (e) => refilter({ stream_name: e.target.value });
   const rows = allRows.filter((r) => !sel.stream_name || r.stream_name === sel.stream_name);
-  tableEl.innerHTML = reportSheetHtml('fb-sheet', settings, 'Balances', `<table class="print-grid">
+  const desktopTable = `<div class="frb-desktop-view"><table class="print-grid">
       <thead><tr><th>Adm. No.</th><th>Name</th><th>Class</th><th class="num">Expected</th><th class="num">Paid</th><th class="num">Credit Note</th><th class="num">Balance</th></tr></thead>
       <tbody>${rows.map((r) => `<tr>
         <td>${esc(r.admission_no)}</td><td>${esc(r.full_name)}</td><td>${esc(r.class_name)}${r.stream_name ? ' ' + esc(r.stream_name) : ''}</td>
         <td class="num">${Number(r.expected || 0).toLocaleString()}</td><td class="num">${Number(r.paid || 0).toLocaleString()}</td>
         <td class="num">${Number(r.credit_note || 0).toLocaleString()}</td><td class="num">${Number(r.balance || 0).toLocaleString()}</td>
       </tr>`).join('') || '<tr><td colspan="7" class="muted">No students match this filter.</td></tr>'}</tbody>
-    </table>`);
+    </table></div>`;
+  tableEl.innerHTML = reportSheetHtml('fb-sheet', settings, 'Balances', `${desktopTable}<div class="frb-mobile-view no-print">${rows.length ? rows.map(balanceCardHtml).join('') : '<p class="muted center" style="margin:20px 0">No students match this filter.</p>'}</div>`);
   wirePrintOptions(root, 'fb', 'Balances');
+}
+
+/** Balances mobile view (approved "Style 3") — one card per student, a
+ *  thin bar showing how much of the expected fee is paid, and the
+ *  resulting balance called out in red (still owing) or green (cleared/
+ *  overpaid) — see .frb-* in main.css. Screen-only; desktop and print
+ *  both keep the plain print-grid table above untouched. */
+function balanceCardHtml(r) {
+  const expected = Number(r.expected || 0);
+  const paid = Number(r.paid || 0);
+  const balance = Number(r.balance || 0);
+  const pct = expected > 0 ? Math.max(0, Math.min(100, Math.round((paid / expected) * 100))) : (paid > 0 ? 100 : 0);
+  const balLabel = balance > 0 ? `Owes ${balance.toLocaleString()}` : (balance < 0 ? `Overpaid ${Math.abs(balance).toLocaleString()}` : 'Cleared');
+  return `<div class="frb-card">
+    <div class="frb-top"><span>${esc(r.full_name)}</span><span class="frb-bal ${balance > 0 ? 'owe' : 'ok'}">${esc(balLabel)}</span></div>
+    <div class="frb-sub">${esc(r.admission_no)} · ${esc(r.class_name)}${r.stream_name ? ' ' + esc(r.stream_name) : ''}</div>
+    <div class="frb-bar"><div class="frb-bar-fill" style="width:${pct}%"></div></div>
+    <div class="frb-bottom"><span>Paid ${paid.toLocaleString()}</span><span>of ${expected.toLocaleString()}</span></div>
+  </div>`;
 }
 
 /* --------------------------------------------------------- vote head --- */
@@ -199,14 +219,29 @@ async function loadCashbook(root, settings, sel) {
   const res = await Db.finance.reports.cashbook(sel.from, sel.to);
   const rows = res.ok ? res.data : [];
   const total = rows.reduce((a, r) => a + Number(r.amount || 0), 0);
-  tableEl.innerHTML = reportSheetHtml('fcb-sheet', settings, `Cashbook — ${sel.from} to ${sel.to}`, `<table class="print-grid">
+  const desktopTable = `<div class="rcb-desktop-view"><table class="print-grid">
       <thead><tr><th>Date</th><th>Receipt No</th><th>Student</th><th>Adm. No.</th><th>Mode</th><th class="num">Amount</th></tr></thead>
       <tbody>${rows.map((r) => `<tr>
         <td>${esc(r.collection_date)}</td><td>${esc(r.receipt_no)}</td><td>${esc(r.student_name)}</td><td>${esc(r.admission_no)}</td><td>${esc(r.mode)}</td><td class="num">${Number(r.amount || 0).toLocaleString()}</td>
       </tr>`).join('') || '<tr><td colspan="6" class="muted">No collections in this range.</td></tr>'}</tbody>
       <tfoot><tr><td colspan="5"><b>Total</b></td><td class="num"><b>${total.toLocaleString()}</b></td></tr></tfoot>
-    </table>`);
+    </table></div>`;
+  const mobileList = `<div class="rcb-mobile-view no-print">${rows.length ? rows.map(cashbookRowHtml).join('') : '<p class="muted center" style="margin:20px 0">No collections in this range.</p>'}${rows.length ? `<div class="rcb-row" style="font-weight:700"><span>Total</span><span>${total.toLocaleString()}</span></div>` : ''}</div>`;
+  tableEl.innerHTML = reportSheetHtml('fcb-sheet', settings, `Cashbook — ${sel.from} to ${sel.to}`, `${desktopTable}${mobileList}`);
   wirePrintOptions(root, 'fcb', `Cashbook ${sel.from} to ${sel.to}`);
+}
+
+/** Cashbook mobile view — one plain feed line per entry (date, student +
+ *  receipt, a small payment-mode tag, amount), same shape as the
+ *  Statement rows already approved. Screen-only; desktop and print keep
+ *  the print-grid table above untouched — see .rcb-* in main.css. */
+function cashbookRowHtml(r) {
+  let dateLabel = r.collection_date;
+  try { dateLabel = new Date(r.collection_date).toLocaleDateString(undefined, { day: '2-digit', month: 'short' }); } catch (e) { /* keep raw value */ }
+  return `<div class="rcb-row">
+    <div class="l"><span class="date">${esc(dateLabel)}</span><span>${esc(r.student_name)} · ${esc(r.receipt_no)}<span class="mode-tag">${esc(r.mode)}</span></span></div>
+    <span class="amt">${Number(r.amount || 0).toLocaleString()}</span>
+  </div>`;
 }
 
 /* --------------------------------------------------------- trial balance --- */

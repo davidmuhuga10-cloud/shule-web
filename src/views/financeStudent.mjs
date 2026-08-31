@@ -430,8 +430,8 @@ export function statementSheetHtml(schoolName, student, groups) {
       <div class="card-b">
         <h2 style="margin:0">${esc(schoolName)}</h2>
         <p style="margin:2px 0 12px">Statement of Account — ${esc(student.full_name)} (${esc(student.admission_no)})</p>
-        <div class="no-print">${mobileStatementHtml(groups)}</div>
-        <div class="print-only">${groups.length ? groups.map(termGroupHtml).join('') : '<p class="muted">No transactions yet.</p>'}</div>
+        <div class="fss-mobile-view no-print">${mobileStatementHtml(groups)}</div>
+        <div class="fss-desktop-view">${groups.length ? groups.map(termGroupHtml).join('') : '<p class="muted">No transactions yet.</p>'}</div>
       </div>
     </div>
   `;

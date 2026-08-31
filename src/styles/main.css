@@ -1144,15 +1144,25 @@ table.data td.num,table.data th.num{text-align:center}
 .fin-statement-term-close td{background:#eef1f5;font-weight:700}
 @media print{.fin-receipt{border-color:#000}.fin-receipt .fr-h,.fin-receipt .fr-words{border-color:#000}.fin-receipt table th,.fin-receipt table td{border-color:#000}}
 /* Design standard rollout round 2 item 1: the on-screen Statement view is
-   simplified for mobile (last 3 terms, one plain line per transaction with
-   a running balance) — but printing must stay byte-for-byte identical to
-   the original boxed per-term table above (.fin-statement-term). So the
-   mobile view lives inside .no-print (already hidden by the @media print
-   block near the top of this file) and the original table is wrapped in
-   .print-only, the mirror image: invisible on screen, shown only when
-   printing. Nothing about the print output changes. */
-.print-only{display:none}
-@media print{.print-only{display:block}}
+   simplified ONLY on narrow/phone screens (last 3 terms, one plain line
+   per transaction with a running balance) — the desktop screen view and
+   the print output both stay exactly the original boxed per-term table
+   (.fin-statement-term), untouched. BUG FIX: this used to gate purely on
+   .no-print/.print-only (screen vs print), which meant the simplified
+   view replaced the desktop table too — wrong, desktop was never meant to
+   change. Now gated on viewport width (same 960px breakpoint .fin-tabs
+   already uses for its own mobile behaviour), with print forced back to
+   the desktop table regardless of viewport. */
+.fss-mobile-view{display:none}
+.fss-desktop-view{display:block}
+@media screen and (max-width:960px){
+  .fss-mobile-view{display:block}
+  .fss-desktop-view{display:none}
+}
+@media print{
+  .fss-mobile-view{display:none!important}
+  .fss-desktop-view{display:block!important}
+}
 /* Mobile statement view — term switcher rendered as bordered tiles, same
    left/right-accent-border language used everywhere else this round
    (.side-accent/.tile-*), not a filled pill/segmented control. */
@@ -1174,6 +1184,62 @@ table.data td.num,table.data th.num{text-align:center}
 .mstate-col-heads{display:flex;justify-content:flex-end;gap:14px;padding:0 2px 4px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px}
 .mstate-col-heads span:first-child{min-width:64px;text-align:right}
 .mstate-col-heads span:last-child{min-width:56px;text-align:right}
+/* Design standard rollout round 2 item 9: same mobile-only / desktop-and-
+   print-untouched pattern as the Statement view above, now applied to
+   Balances (Finance Reports) and Cashbook (Finance Reports) — each report
+   keeps its exact print-grid table for desktop screens and printing, and
+   only swaps in a simplified view under the same 960px breakpoint. */
+.frb-mobile-view,.rcb-mobile-view{display:none}
+.frb-desktop-view,.rcb-desktop-view{display:block}
+@media screen and (max-width:960px){
+  .frb-mobile-view,.rcb-mobile-view{display:block}
+  .frb-desktop-view,.rcb-desktop-view{display:none}
+}
+@media print{
+  .frb-mobile-view,.rcb-mobile-view{display:none!important}
+  .frb-desktop-view,.rcb-desktop-view{display:block!important}
+}
+/* Balances — one card per student with a Paid-vs-Expected progress bar
+   (approved "Style 3"), balance colored red if still owing, green if
+   cleared/overpaid. */
+.frb-card{padding:10px 2px;border-bottom:1px solid var(--line);font-size:13px}
+.frb-card:last-child{border-bottom:none}
+.frb-top{display:flex;justify-content:space-between}
+.frb-sub{font-size:11px;color:var(--muted);margin:1px 0 6px}
+.frb-bar{height:5px;border-radius:3px;background:var(--line);overflow:hidden}
+.frb-bar-fill{height:100%;background:var(--primary)}
+.frb-bottom{display:flex;justify-content:space-between;margin-top:4px;font-size:11px;color:var(--muted)}
+.frb-bal.owe{color:var(--danger)}
+.frb-bal.ok{color:var(--ok)}
+/* Cashbook — one plain feed line per entry, same shape as the Statement
+   rows already approved. */
+.rcb-row{display:flex;justify-content:space-between;align-items:baseline;padding:9px 2px;border-bottom:1px solid var(--line);font-size:13px}
+.rcb-row:last-child{border-bottom:none}
+.rcb-row .l{display:flex;gap:8px;align-items:baseline}
+.rcb-row .date{font-size:11px;color:var(--muted);min-width:40px}
+.rcb-row .mode-tag{font-size:9.5px;text-transform:uppercase;color:var(--muted);border:1px solid var(--line);border-radius:5px;padding:1px 5px;margin-left:6px}
+.rcb-row .amt{color:var(--ok)}
+/* Collections — one line per receipt (student + class/receipt/mode as
+   subtitle), amount plus the student's resulting balance: red if they
+   still owe, green if cleared or overpaid. Desktop table is untouched;
+   this list has no print view of its own (receipts print individually),
+   so only the 960px screen-width breakpoint applies, no @media print
+   override is needed here. */
+.fcol-mobile-view{display:none}
+.fcol-desktop-view{display:block}
+@media screen and (max-width:960px){
+  .fcol-mobile-view{display:block}
+  .fcol-desktop-view{display:none}
+}
+.fcol-row{display:flex;justify-content:space-between;align-items:baseline;padding:9px 2px;border-bottom:1px solid var(--line);font-size:13px}
+.fcol-row:last-child{border-bottom:none}
+.fcol-row .l{display:flex;flex-direction:column}
+.fcol-row .sub{font-size:11px;color:var(--muted)}
+.fcol-row .r{text-align:right}
+.fcol-row .amt{color:var(--ink)}
+.fcol-row .fcol-bal{display:block;font-size:11px;margin-top:1px}
+.fcol-row .fcol-bal.owe{color:var(--danger)}
+.fcol-row .fcol-bal.ok{color:var(--ok)}
 /* BUG FIX: this used to be position:relative, which means it took up real
    space in the page's normal flow — as results loaded in, the dropdown
    grew taller and physically shoved the Finance tabs (Dashboard/Invoicing/
