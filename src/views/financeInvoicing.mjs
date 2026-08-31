@@ -81,7 +81,7 @@ async function renderStructures(root, access) {
       <div class="fin-report-actions">${printOptionsHtml('fis', 'landscape')}</div>
       ${access.canManage ? '<button class="btn" id="fi-add-structure">+ Add Fee Structure</button>' : ''}
     </div>
-    <div class="card"><div class="card-b table-wrap"><table class="data">
+    <div class="card side-accent tile-teal"><div class="card-b table-wrap"><table class="data">
       <thead><tr><th>Name</th><th>Year / Term</th><th>Classes</th><th class="num">Total / Class</th><th class="no-print"></th></tr></thead>
       <tbody>${structures.map((s) => {
         const total = (s.finance_fee_structure_items || []).reduce((a, it) => a + Number(it.amount || 0), 0);
@@ -476,7 +476,7 @@ async function renderUnpaidVoteHead(root, voteHeads, years, terms, sel) {
   const res = await Db.finance.reports.voteHeadStudentBalances(sel.vote_head_id, sel.academic_year_id || null, sel.term_id || null);
   const rows = (res.ok ? res.data : []).filter((r) => Number(r.balance) > 0);
   root.querySelector('#ir-table').innerHTML = `
-    <div class="card"><div class="card-b table-wrap"><table class="data">
+    <div class="card side-accent tile-teal"><div class="card-b table-wrap"><table class="data">
       <thead><tr><th>Adm. No.</th><th>Name</th><th>Class</th><th class="num">Expected</th><th class="num">Paid</th><th class="num">Balance</th></tr></thead>
       <tbody>${rows.map((r) => `<tr>
         <td>${esc(r.admission_no)}</td><td>${esc(r.full_name)}</td><td>${esc(r.class_name)}${r.stream_name ? ' ' + esc(r.stream_name) : ''}</td>

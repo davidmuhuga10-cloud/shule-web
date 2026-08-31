@@ -66,9 +66,9 @@ async function renderList(root) {
   root.innerHTML = `
     <div class="page-head"><div><h2>Classes &amp; Streams</h2><p>Click a class to manage its streams, subjects and teachers.</p></div>
       <div class="spacer"></div>
-      <button class="btn secondary" id="bulk-add-classes">+ Bulk Add Classes</button>
+      <button class="btn secondary accent-blue" id="bulk-add-classes">+ Bulk Add Classes</button>
       <button class="btn" id="add-class">+ Add class</button></div>
-    <div class="card">
+    <div class="card side-accent tile-blue">
       ${classes.length ? `<div class="table-wrap"><table class="data">
         <thead><tr><th>Class</th><th class="num">Streams</th><th class="num">Students</th><th>Class Teacher</th><th></th></tr></thead>
         <tbody>${rows}</tbody></table></div>` : `<div class="card-b"><div class="empty">
@@ -359,9 +359,14 @@ async function renderClassDetail(root, cls, staff) {
   const sres = await Db.streams.list(cls.id);
   const streams = sres.ok ? sres.data : [];
 
+  // Design standard rollout round 2 (approved, site-wide pass): each stream
+  // is its own separate card in a repeating list — same cycling accent
+  // border treatment as the Reports/Exams hub tiles and teacher cards, one
+  // colour per item, layout/content otherwise untouched.
+  const STREAM_ACCENTS = ['tile-blue', 'tile-green', 'tile-purple', 'tile-amber', 'tile-teal', 'tile-rose', 'tile-indigo'];
   const rows = streams.length
-    ? streams.map((s) => `
-      <div class="card" style="margin-bottom:10px">
+    ? streams.map((s, i) => `
+      <div class="card side-accent ${STREAM_ACCENTS[i % STREAM_ACCENTS.length]}" style="margin-bottom:10px">
         <div class="card-b stream-row clickable-row" data-open-stream="${s.id}">
           <div class="stream-info">
             <div style="font-weight:650">${esc(s.name)}${s.pathway ? ` <span class="badge blue" style="font-weight:500">${esc(s.pathway)}</span>` : ''}</div>

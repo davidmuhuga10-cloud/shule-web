@@ -29,7 +29,7 @@ async function render(root) {
   root.innerHTML = `
     <div class="page-head"><div><h2>Staff</h2><p>Teachers and other staff members, and who has admin access.</p></div>
       <div class="spacer"></div><button class="btn" id="add-staff">+ Add staff</button></div>
-    <div class="card">
+    <div class="card side-accent tile-green">
       ${staff.length ? `<div class="table-wrap"><table class="data">
         <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Phone</th><th>Status</th><th></th></tr></thead>
         <tbody>${staff.map((s) => {

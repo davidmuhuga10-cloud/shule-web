@@ -38,7 +38,8 @@ export async function viewTimetableHub(root) {
   // elements explicitly marked no-print are excluded (see main.css's
   // `.sidebar,.topbar,.no-print{display:none!important}` print rule).
   root.innerHTML = `
-    <div class="page-head no-print"><div><h2>Timetable</h2><p>Generate a conflict-free school timetable, view it by class or by teacher, and print it.</p></div></div>
+    <div class="page-head no-print"><div><h2>Timetable</h2></div></div>
+    <div class="dev-notice no-print"><span class="dev-notice-ico">🚧</span><div><strong>This module is still under development.</strong> Some features may change or behave unexpectedly.</div></div>
     <div class="fin-tabs no-print">
       ${TABS.map((t) => `<button data-tab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</button>`).join('')}
     </div>

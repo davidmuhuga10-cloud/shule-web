@@ -29,7 +29,7 @@ async function render(root, classes, subjects, classId) {
 
   root.innerHTML = `
     <div class="page-head"><div><h2>Class Subjects</h2><p>Tick the subjects each class offers — every stream of that class inherits them automatically.</p></div></div>
-    <div class="card">
+    <div class="card side-accent tile-blue">
       <div class="card-h"><h3>Class</h3><div class="spacer"></div>
         <select id="cs-class" style="max-width:240px">${options(classes, 'id', 'name', classId)}</select>
       </div>

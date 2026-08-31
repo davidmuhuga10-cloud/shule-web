@@ -19,8 +19,8 @@ const ADMIN_PAY_PHONE = '0705041512';
 
 export async function renderSmsCredits(body) {
   body.innerHTML = `
-    <div class="card"><div class="card-b" id="sms-wallet-box">${loader()}</div></div>
-    <div class="card" style="margin-top:16px"><div class="card-h">Request more credits</div>
+    <div class="card side-accent tile-teal"><div class="card-b" id="sms-wallet-box">${loader()}</div></div>
+    <div class="card side-accent tile-teal" style="margin-top:16px"><div class="card-h">Request more credits</div>
       <div class="card-b">
         <p class="hint" style="margin-top:0">Send your payment to <b>${ADMIN_PAY_PHONE}</b>, then paste the payment confirmation message below. The platform administrator reviews and approves requests from the Admin Dashboard.</p>
         <div class="field"><label>Credits requested</label><input id="sms-req-credits" type="number" min="1" placeholder="e.g. 1000"></div>
@@ -29,7 +29,7 @@ export async function renderSmsCredits(body) {
         <button class="btn" id="sms-req-submit">Submit request</button>
       </div>
     </div>
-    <div class="card" style="margin-top:16px"><div class="card-h">Your requests</div>
+    <div class="card side-accent tile-teal" style="margin-top:16px"><div class="card-h">Your requests</div>
       <div class="card-b" id="sms-req-list">${loader()}</div>
     </div>
   `;

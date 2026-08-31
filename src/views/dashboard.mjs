@@ -95,7 +95,7 @@ export async function viewDashboard(root) {
         statTileSkeleton('🔀', 'Streams', 't-purple', 'classes'),
         statTileSkeleton('👨‍🏫', 'Teachers', 't-green', 'staff-teachers')
       ].join('')}</div>
-      <div class="card dash-gender-desktop">
+      <div class="card side-accent tile-blue dash-gender-desktop">
         <div class="card-h"><h3>Students by gender</h3></div>
         <div class="card-b"><div class="skeleton" style="width:100%;height:48px"></div></div>
       </div>
@@ -165,12 +165,12 @@ export async function viewDashboard(root) {
     <div class="stats-mobile">${mobileTiles}</div>
     <div class="dash-top-row">
       <div class="stats-desktop">${desktopTiles}</div>
-      <div class="card dash-gender-desktop">
+      <div class="card side-accent tile-blue dash-gender-desktop">
         <div class="card-h"><h3>Students by gender</h3></div>
         ${genderBlock}
       </div>
     </div>
-    <div class="card">
+    <div class="card side-accent tile-blue">
       <div class="card-h"><h3>Students per class</h3></div>
       <div class="card-b table-wrap">
         <table class="data"><thead><tr><th>Class</th><th class="num">Students</th></tr></thead>

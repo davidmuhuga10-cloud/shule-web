@@ -28,14 +28,14 @@ function render(root, children, selectedId) {
 
   root.innerHTML = `
     <div class="page-head"><div><h2>My Children</h2><p>${children.length > 1 ? 'Choose a child to view their details.' : ''}</p></div></div>
-    ${children.length > 1 ? `<div class="card" style="margin-bottom:16px"><div class="card-b" style="max-width:320px">
+    ${children.length > 1 ? `<div class="card side-accent tile-rose" style="margin-bottom:16px"><div class="card-b" style="max-width:320px">
       <div class="field"><label>Child</label><select id="mc-child">${children.map((c) => `<option value="${c.id}" ${c.id === child.id ? 'selected' : ''}>${esc(c.full_name)}</option>`).join('')}</select></div>
     </div></div>` : ''}
-    <div class="card" style="margin-bottom:16px"><div class="card-b">
+    <div class="card side-accent tile-rose" style="margin-bottom:16px"><div class="card-b">
       <h3 style="margin:0 0 8px">${esc(child.full_name)}</h3>
       <div class="muted" style="font-size:13.5px">Admission No. ${esc(child.admission_no)} · ${esc(child.class_name || 'No class set')}${child.relationship ? ' · ' + esc(child.relationship) : ''}</div>
     </div></div>
-    <div class="card" style="margin-bottom:16px"><div class="card-b"><h3 style="margin:0 0 12px">Recent attendance</h3><div id="mc-attendance">${loader()}</div></div></div>
+    <div class="card side-accent tile-rose" style="margin-bottom:16px"><div class="card-b"><h3 style="margin:0 0 12px">Recent attendance</h3><div id="mc-attendance">${loader()}</div></div></div>
     <div class="card no-print" style="margin-bottom:16px"><div class="card-b">
       <h3 style="margin:0 0 12px">Report cards</h3>
       <div id="mc-exam-picker">${loader()}</div>

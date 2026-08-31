@@ -28,7 +28,7 @@ function renderRoutesList(root, access, routes) {
       <div class="spacer"></div>
       ${access.canManage ? '<button class="btn" id="ft-add">+ Add Route</button>' : ''}
     </div>
-    <div class="card"><div class="card-b table-wrap"><table class="data">
+    <div class="card side-accent tile-teal"><div class="card-b table-wrap"><table class="data">
       <thead><tr><th>Route</th><th>Pickup Point</th><th class="num">One-way</th><th class="num">Two-way</th><th>Status</th><th></th></tr></thead>
       <tbody>${routes.map((r) => `<tr>
         <td><a href="javascript:void(0)" data-open="${r.id}">${esc(r.name)}</a></td><td>${esc(r.pickup_point || '')}</td>
@@ -133,7 +133,7 @@ async function loadRouteDetail(root, access, route, routes, years, terms, sel) {
     const res = await Db.finance.routes.studentsOnRoute(route.id, sel.academic_year_id, sel.term_id);
     const rows = res.ok ? res.data : [];
     rosterEl.innerHTML = `
-      <div class="card"><div class="card-b table-wrap"><table class="data">
+      <div class="card side-accent tile-teal"><div class="card-b table-wrap"><table class="data">
         <thead><tr><th>Student</th><th>Class</th><th>Direction</th></tr></thead>
         <tbody>${rows.map((r) => `<tr>
           <td>${esc(r.students ? r.students.full_name : '')} <span class="muted">${esc(r.students ? r.students.admission_no : '')}</span></td>

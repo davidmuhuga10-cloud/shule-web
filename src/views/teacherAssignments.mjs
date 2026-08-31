@@ -20,7 +20,7 @@ async function render(root, staff, subjects, classes) {
 
   root.innerHTML = `
     <div class="page-head"><div><h2>Teacher Assignments</h2><p>Who teaches what, in which class/stream.</p></div></div>
-    <div class="card" style="margin-bottom:16px">
+    <div class="card side-accent tile-green" style="margin-bottom:16px">
       <div class="card-h"><h3>Add assignment</h3></div>
       <div class="card-b grid2">
         <div class="field"><label>Teacher</label><select id="ta-staff">${options(staff, 'id', 'full_name', '', 'Choose a teacher')}</select></div>
@@ -30,7 +30,7 @@ async function render(root, staff, subjects, classes) {
       </div>
       <div class="modal-f" style="border-top:1px solid var(--line)"><button class="btn" id="ta-save">+ Add</button></div>
     </div>
-    <div class="card">
+    <div class="card side-accent tile-green">
       ${rows.length ? `<div class="table-wrap"><table class="data">
         <thead><tr><th>Teacher</th><th>Subject</th><th>Class</th><th>Stream</th><th></th></tr></thead>
         <tbody>${rows.map((r) => `<tr>

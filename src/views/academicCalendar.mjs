@@ -61,12 +61,12 @@ async function render(root) {
   root.innerHTML = `
     <div class="page-head"><div><h2>Academic Calendar</h2><p>Academic years and terms — one active year and one active term drive the rest of the app.</p></div></div>
     <div class="grid2">
-      <div class="card">
+      <div class="card side-accent tile-amber">
         <div class="card-h"><h3>Academic Years</h3><div class="spacer"></div><button class="btn sm" id="add-year">+ Add year</button></div>
         <div class="card-b table-wrap"><table class="data"><thead><tr><th>Year</th><th>Status</th><th></th></tr></thead>
         <tbody>${yearRows}</tbody></table></div>
       </div>
-      <div class="card">
+      <div class="card side-accent tile-purple">
         <div class="card-h"><h3>Terms</h3><div class="spacer"></div>
           <button class="btn sm" id="add-term" ${years.length ? '' : 'disabled title="Add an academic year first"'}>+ Add term</button>
         </div>

@@ -11,7 +11,12 @@ async function render(root) {
   const subjects = res.ok ? res.data : [];
   const levels = (res.ok && res.levels) || CBC_LEVELS;
 
+  // Design standard rollout round 2 (approved, site-wide pass): one level
+  // group per card, repeating list — same cycling accent border as
+  // Reports/Exams hub tiles, one colour per group.
+  const GROUP_ACCENTS = ['tile-blue', 'tile-green', 'tile-purple', 'tile-amber', 'tile-teal', 'tile-rose', 'tile-indigo'];
   const groups = [...levels, null];
+  let visibleIdx = 0;
   const groupHtml = groups.map((level) => {
     const rows = subjects.filter((s) => (s.level || null) === level);
     if (!rows.length && level !== null) return ''; // hide empty CBC level groups until loaded
@@ -19,7 +24,8 @@ async function render(root) {
     const items = rows.map((s) => `<span class="chip on" data-edit="${s.id}">
         ${esc(s.name)}${s.code ? ' (' + esc(s.code) + ')' : ''}
       </span>`).join('');
-    return `<div class="card" style="margin-bottom:16px">
+    const accent = GROUP_ACCENTS[visibleIdx % GROUP_ACCENTS.length]; visibleIdx += 1;
+    return `<div class="card side-accent ${accent}" style="margin-bottom:16px">
       <div class="card-h"><h3>${esc(level || 'Custom / other')}</h3></div>
       <div class="card-b"><div class="chips">${items}</div></div>
     </div>`;

@@ -41,7 +41,7 @@ async function load(root, access, opts) {
       return true;
     });
     return `
-    <div class="card"><div class="card-b table-wrap"><table class="data">
+    <div class="card side-accent tile-teal"><div class="card-b table-wrap"><table class="data">
       <thead><tr><th>Date</th><th>Receipt No</th>${opts.studentId ? '' : '<th>Student</th><th>Class</th>'}<th>Mode</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead>
       <tbody>${filtered.map((c) => `<tr>
         <td>${new Date(c.created_at).toLocaleDateString()}</td>

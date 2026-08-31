@@ -32,7 +32,7 @@ async function render(root) {
       <p class="muted" style="margin:0;flex:1">School heads, directors, deputies and system admins — anyone with full admin access. Teachers and other staff are managed from the Staff module.</p>
       <button class="btn" id="add-admin" ${promotable.length ? '' : 'disabled title="No staff logins available to promote yet"'}>+ Grant admin</button>
     </div>
-    <div class="card">
+    <div class="card side-accent tile-purple">
       ${admins.length ? `<div class="table-wrap"><table class="data">
         <thead><tr><th>Name</th><th>Title</th><th>Login</th><th>Status</th><th></th></tr></thead>
         <tbody>${admins.map((u) => `<tr>
