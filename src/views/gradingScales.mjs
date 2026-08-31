@@ -97,7 +97,7 @@ function scaleCard(sc, expanded) {
       </tr>`).join('')
     : `<tr><td colspan="5" class="muted center">No bands yet — add one below.</td></tr>`;
 
-  return `<div class="card" style="margin-bottom:16px">
+  return `<div class="card side-accent tile-purple" style="margin-bottom:16px">
     <div class="card-h">
       <div data-toggle-scale="${sc.id}" style="display:flex;align-items:center;gap:12px;cursor:pointer;flex:1;min-width:0">
         <span style="font-size:12px;color:var(--muted);width:14px;display:inline-block">${expanded ? '▾' : '▸'}</span>

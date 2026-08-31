@@ -37,6 +37,10 @@ import { renderSubjectCombinationScreen } from './subjectCombination.mjs';
 
 const EXAM_TYPE_CHOICES = Object.keys(EXAM_TYPE_LABELS).map((k) => ({ id: k, name: EXAM_TYPE_LABELS[k] }));
 
+// Design standard rollout round 3: one accent hue per exam card, same
+// cycling convention as Reports/Classes/Subjects (ACCENTS[i % length]).
+const ACCENTS = ['tile-blue', 'tile-green', 'tile-purple', 'tile-amber', 'tile-teal', 'tile-rose', 'tile-indigo'];
+
 export async function viewExamDesk(root) {
   const [yearsRes, termsRes] = await Promise.all([Db.academicYears.list(), Db.terms.list()]);
   if (!yearsRes.ok || !termsRes.ok) {
@@ -81,22 +85,31 @@ async function renderBoard(root, exams, classes, years, terms) {
   const rowsByExamId = {};
   exams.forEach((e, i) => { rowsByExamId[e.id] = classRowsByExam[i].ok ? classRowsByExam[i].data : []; });
 
-  board.innerHTML = exams.map((e) => examCard(e, rowsByExamId[e.id])).join('');
+  board.innerHTML = exams.map((e, i) => examCard(e, rowsByExamId[e.id], i)).join('');
 
   exams.forEach((e) => {
     const card = board.querySelector(`[data-exam-card="${e.id}"]`);
     if (!card) return;
     const classRows = rowsByExamId[e.id];
-    card.querySelector('[data-edit-exam]').onclick = () => openExamModal(root, years, terms, classes, e, classRows);
-    card.querySelector('[data-add-classes]').onclick = () => openClassPickerModal(root, e, classRows, () => renderBoardScreen(root, years, terms));
-    card.querySelector('[data-learning-area-papers]').onclick = () => renderLearningAreaPapersScreen(root, e, () => renderBoardScreen(root, years, terms));
-    card.querySelector('[data-subject-combination]').onclick = () => renderSubjectCombinationScreen(root, e, () => renderBoardScreen(root, years, terms));
+    // Each of these now appears twice per card (once in the desktop header/
+    // toolbar, once in the mobile-only view) — querySelectorAll+forEach
+    // instead of the old querySelector so both copies get wired.
+    card.querySelectorAll('[data-edit-exam]').forEach((b) => b.onclick = () => openExamModal(root, years, terms, classes, e, classRows));
+    card.querySelectorAll('[data-add-classes]').forEach((b) => b.onclick = () => openClassPickerModal(root, e, classRows, () => renderBoardScreen(root, years, terms)));
+    card.querySelectorAll('[data-learning-area-papers]').forEach((b) => b.onclick = () => renderLearningAreaPapersScreen(root, e, () => renderBoardScreen(root, years, terms)));
+    card.querySelectorAll('[data-subject-combination]').forEach((b) => b.onclick = () => renderSubjectCombinationScreen(root, e, () => renderBoardScreen(root, years, terms)));
     // Brief §8: Delete now soft-deletes (Deleted Exams submodule, 30-day
     // window) instead of the old immediate hard delete.
-    card.querySelector('[data-del-exam]').onclick = () => confirmAction('Move this exam to Deleted Exams? It can be restored within 30 days, after which it (and any marks recorded for it) is permanently removed.', async () => {
+    card.querySelectorAll('[data-del-exam]').forEach((b) => b.onclick = () => confirmAction('Move this exam to Deleted Exams? It can be restored within 30 days, after which it (and any marks recorded for it) is permanently removed.', async () => {
       const r = await Db.results.softDeleteExam(e.id);
       if (r.ok) { toast('Exam moved to Deleted Exams.', 'ok'); renderBoardScreen(root, years, terms); } else toast(r.message, 'err');
-    }, true);
+    }, true));
+    // Mobile-only accordion: tapping a class row's header (not a button
+    // inside it) opens/closes its actions.
+    card.querySelectorAll('[data-acc-toggle]').forEach((h) => h.onclick = (ev) => {
+      if (ev.target.closest('button')) return;
+      h.closest('.ed-m-acc').classList.toggle('open');
+    });
 
     // Brief §14: these used to navigate away to separate Enter
     // Marks/Publish Results pages — now they open an in-page detail view
@@ -164,40 +177,75 @@ function fmtDate(iso) {
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-function examCard(exam, classRows) {
-  const rowsHtml = classRows.length ? `<div class="table-wrap"><table class="data">
+// Shared per-class action markup so the desktop table and the mobile
+// accordion (see mobileClassAccordion below) can't drift apart. `mobile`
+// picks the 2-column icon-grid variant used inside the accordion body
+// instead of the inline ghost-button row the desktop table cell uses.
+function classActionHtml(r, mobile) {
+  // Brief §7's "classes dropped on save" bug: the real cause was this
+  // board silently hiding zero-enrollment classes, not saveExam() losing
+  // data. A ticked class with no students now stays visible with an honest
+  // "No students enrolled" status and no action, instead of vanishing from
+  // the board entirely.
+  // Round 2 §8 + Round 3 §9: every actionable pre-publish state
+  // (not_started, in_progress, ready_to_publish) now shares the exact same
+  // "✅ Review and Publish" button, landing on the same first tab — Round 3
+  // §9 explicitly asked to stop introducing alternate wording like
+  // "Continue to marks entry" at different states, since a different label
+  // made it look like a different, unrelated action. The Review and Publish
+  // tab already surfaces per-subject "Edit Marks" shortcuts for anyone who
+  // just wants to jump straight into entering marks for one subject.
+  if (r.status === 'no_students') return `<span class="muted" style="font-size:12px">Enrol students in this class first</span>`;
+  if (r.status === 'no_subjects') return `<span class="muted" style="font-size:12px">Assign subjects to this class first</span>`;
+  if (r.status === 'not_started' || r.status === 'in_progress' || r.status === 'ready_to_publish') {
+    return mobile
+      ? `<button class="ed-m-full" data-review="${r.class_id}">✅ Review and Publish</button>`
+      : `<button class="btn ghost sm" data-review="${r.class_id}">✅ Review and Publish</button>`;
+  }
+  // Step 13: published/released classes get the full set of post-publish
+  // actions instead of just "Print Reports".
+  return mobile
+    ? `<div class="ed-m-cgrid">
+        <button data-analyze="${r.class_id}">🔎 Analyze</button>
+        <button data-send-results="${r.class_id}">📨 Send Results</button>
+        <button data-print="${r.class_id}">🖨️ Print</button>
+        <button data-withdraw="${r.class_id}">↩️ Withdraw</button>
+      </div>`
+    : `<button class="btn ghost sm" data-analyze="${r.class_id}">🔎 Analyze</button>
+       <button class="btn ghost sm" data-send-results="${r.class_id}">📨 Send Results</button>
+       <button class="btn ghost sm" data-print="${r.class_id}">🖨️ Print Reports</button>
+       <button class="btn ghost sm" data-withdraw="${r.class_id}">↩️ Withdraw</button>`;
+}
+
+// Mobile-only view (approved sketch "Design 4" — accordion): each class is
+// a collapsed row (name, subjects-with-marks, status badge); tapping a row
+// that actually has an action opens it to reveal that action underneath,
+// instead of a horizontal table. Classes with no action (no students/no
+// subjects) render as a plain static row — nothing to expand.
+function mobileClassAccordion(classRows) {
+  return classRows.map((r) => {
+    const meta = STATUS_META[r.status] || { label: r.status, cls: 'grey' };
+    const hasAction = r.status !== 'no_students' && r.status !== 'no_subjects';
+    const lastPub = (r.status === 'published' || r.status === 'released') && r.last_published_at ? ` · ${fmtDate(r.last_published_at)}` : '';
+    return `<div class="ed-m-acc">
+      <div class="ed-m-acc-head${hasAction ? '' : ' static'}" ${hasAction ? 'data-acc-toggle' : ''}>
+        <div>
+          <div class="ed-m-acc-name">${esc(r.class_name)}</div>
+          <div class="ed-m-acc-meta">${r.subjects_with_marks}/${r.subjects_total || '0'} subjects with marks${lastPub}</div>
+        </div>
+        <span class="badge ${meta.cls}">${esc(meta.label)}</span>
+      </div>
+      ${hasAction ? `<div class="ed-m-acc-body">${classActionHtml(r, true)}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function examCard(exam, classRows, i) {
+  const accent = ACCENTS[i % ACCENTS.length];
+  const desktopRows = classRows.length ? `<div class="table-wrap"><table class="data">
     <thead><tr><th>Class</th><th>Subjects with marks</th><th>Status</th><th>Last published</th><th></th></tr></thead>
     <tbody>${classRows.map((r) => {
       const meta = STATUS_META[r.status] || { label: r.status, cls: 'grey' };
-      let action = '';
-      // Brief §7's "classes dropped on save" bug: the real cause was this
-      // board silently hiding zero-enrollment classes, not saveExam()
-      // losing data. A ticked class with no students now stays visible with
-      // an honest "No students enrolled" status and no action, instead of
-      // vanishing from the board entirely.
-      // Round 2 §8 + Round 3 §9: every actionable pre-publish state
-      // (not_started, in_progress, ready_to_publish) now shares the exact
-      // same "✅ Review and Publish" button, landing on the same first tab —
-      // Round 3 §9 explicitly asked to stop introducing alternate wording
-      // like "Continue to marks entry" at different states, since a
-      // different label made it look like a different, unrelated action.
-      // The Review and Publish tab already surfaces per-subject "Edit
-      // Marks" shortcuts for anyone who just wants to jump straight into
-      // entering marks for one subject.
-      if (r.status === 'no_students') action = `<span class="muted" style="font-size:12px">Enrol students in this class first</span>`;
-      else if (r.status === 'no_subjects') action = `<span class="muted" style="font-size:12px">Assign subjects to this class first</span>`;
-      else if (r.status === 'not_started' || r.status === 'in_progress' || r.status === 'ready_to_publish') {
-        action = `<button class="btn ghost sm" data-review="${r.class_id}">✅ Review and Publish</button>`;
-      }
-      else {
-        // Step 13: published/released classes get the full set of
-        // post-publish actions instead of just "Print Reports".
-        action = `
-          <button class="btn ghost sm" data-analyze="${r.class_id}">🔎 Analyze</button>
-          <button class="btn ghost sm" data-send-results="${r.class_id}">📨 Send Results</button>
-          <button class="btn ghost sm" data-print="${r.class_id}">🖨️ Print Reports</button>
-          <button class="btn ghost sm" data-withdraw="${r.class_id}">↩️ Withdraw</button>`;
-      }
       const lastPub = (r.status === 'published' || r.status === 'released') && r.last_published_at
         ? `${fmtDate(r.last_published_at)}${r.last_published_by ? ` by ${esc(r.last_published_by)}` : ''}` : '—';
       return `<tr>
@@ -205,24 +253,52 @@ function examCard(exam, classRows) {
         <td>${r.subjects_with_marks}/${r.subjects_total || '0'}</td>
         <td><span class="badge ${meta.cls}">${esc(meta.label)}</span></td>
         <td class="muted" style="font-size:12px">${lastPub}</td>
-        <td class="row-actions">${action}</td>
+        <td class="row-actions">${classActionHtml(r, false)}</td>
       </tr>`;
     }).join('')}</tbody>
   </table></div>` : `<div class="card-b"><p class="muted center" style="margin:0">No classes selected yet for this exam — click "+ Add classes" to choose which classes are sitting it.</p></div>`;
 
-  return `<div class="card" style="margin-bottom:16px" data-exam-card="${exam.id}">
-    <div class="card-h">
-      <h3>${esc(exam.name)}</h3>
-      <span class="badge grey">${esc(EXAM_TYPE_LABELS[exam.exam_type] || exam.exam_type || 'Normal Exam')}</span>
-      <span class="badge blue">${esc(exam.academic_year_name)} · ${esc(exam.term_name)}</span>
-      <div class="spacer"></div>
-      <button class="btn ghost sm" data-add-classes>+ Add classes</button>
-      <button class="btn ghost sm" data-learning-area-papers>📄 Learning Area Papers</button>
-      <button class="btn ghost sm" data-subject-combination>🧩 Subject Combination</button>
-      <button class="btn sm secondary" data-edit-exam>Edit</button>
-      <button class="btn sm danger" data-del-exam>Delete</button>
+  const mobileBody = classRows.length
+    ? mobileClassAccordion(classRows)
+    : `<p class="muted center" style="margin:14px 14px 0">No classes selected yet — tap "+ Add classes" above to choose which classes are sitting it.</p>`;
+
+  return `<div class="card side-accent ${accent}" style="margin-bottom:16px" data-exam-card="${exam.id}">
+    <div class="ed-desktop-view">
+      <div class="card-h">
+        <h3>${esc(exam.name)}</h3>
+        <span class="badge grey">${esc(EXAM_TYPE_LABELS[exam.exam_type] || exam.exam_type || 'Normal Exam')}</span>
+        <span class="badge blue">${esc(exam.academic_year_name)} · ${esc(exam.term_name)}</span>
+        <div class="spacer"></div>
+        <button class="btn sm secondary" data-edit-exam>Edit</button>
+        <button class="btn sm danger" data-del-exam>Delete</button>
+      </div>
+      <div class="ed-toolbar">
+        <button class="btn ghost sm" data-add-classes>+ Add classes</button>
+        <button class="btn ghost sm" data-learning-area-papers>📄 Learning Area Papers</button>
+        <button class="btn ghost sm" data-subject-combination>🧩 Subject Combination</button>
+      </div>
+      ${desktopRows}
     </div>
-    ${rowsHtml}
+
+    <div class="ed-mobile-view">
+      <div class="ed-m-head">
+        <div class="ed-m-editrow">
+          <button data-edit-exam title="Edit">✏️</button>
+          <button data-del-exam title="Delete">🗑️</button>
+        </div>
+        <div class="ed-m-name">${esc(exam.name)}</div>
+        <div class="ed-m-badges">
+          <span class="badge grey">${esc(EXAM_TYPE_LABELS[exam.exam_type] || exam.exam_type || 'Normal Exam')}</span>
+          <span class="badge blue">${esc(exam.academic_year_name)} · ${esc(exam.term_name)}</span>
+        </div>
+      </div>
+      <div class="ed-m-toolbar">
+        <button data-add-classes>➕ Add classes</button>
+        <button data-learning-area-papers>📄 Learning Areas</button>
+        <button data-subject-combination>🧩 Combination</button>
+      </div>
+      ${mobileBody}
+    </div>
   </div>`;
 }
 

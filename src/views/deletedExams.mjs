@@ -19,7 +19,7 @@ export async function viewDeletedExams(root) {
 async function render(root) {
   root.innerHTML = `
     <div class="page-head"><div><h2>Deleted Exams</h2><p>Deleted exams are kept here for 30 days before being permanently removed — restore one to put it back in Exam Desk.</p></div></div>
-    <div class="card"><div id="del-exams-list">${loader()}</div></div>
+    <div class="card side-accent tile-rose"><div id="del-exams-list">${loader()}</div></div>
   `;
 
   const listEl = root.querySelector('#del-exams-list');
