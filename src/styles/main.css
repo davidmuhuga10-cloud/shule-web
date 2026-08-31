@@ -1143,6 +1143,37 @@ table.data td.num,table.data th.num{text-align:center}
 .fin-statement-term thead th{background:#f0f2f5;color:var(--grid-text);font-weight:700}
 .fin-statement-term-close td{background:#eef1f5;font-weight:700}
 @media print{.fin-receipt{border-color:#000}.fin-receipt .fr-h,.fin-receipt .fr-words{border-color:#000}.fin-receipt table th,.fin-receipt table td{border-color:#000}}
+/* Design standard rollout round 2 item 1: the on-screen Statement view is
+   simplified for mobile (last 3 terms, one plain line per transaction with
+   a running balance) — but printing must stay byte-for-byte identical to
+   the original boxed per-term table above (.fin-statement-term). So the
+   mobile view lives inside .no-print (already hidden by the @media print
+   block near the top of this file) and the original table is wrapped in
+   .print-only, the mirror image: invisible on screen, shown only when
+   printing. Nothing about the print output changes. */
+.print-only{display:none}
+@media print{.print-only{display:block}}
+/* Mobile statement view — term switcher rendered as bordered tiles, same
+   left/right-accent-border language used everywhere else this round
+   (.side-accent/.tile-*), not a filled pill/segmented control. */
+.mstate-tabs{display:flex;gap:8px;margin-bottom:12px}
+.mstate-tabs button{flex:1;padding:8px 4px;border-radius:8px;border:1.5px solid var(--line);background:#fff;font-family:inherit;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;text-align:center}
+.mstate-tabs button.active{border-color:#2563eb;color:var(--ink)}
+.mstate-total{text-align:center;background:var(--brand);color:#fff;border-radius:10px;padding:10px;margin-bottom:6px}
+.mstate-total .lbl{font-size:11px;opacity:.8}
+.mstate-total .val{font-size:19px;font-weight:700}
+.mstate-list .row{display:flex;justify-content:space-between;align-items:baseline;padding:9px 2px;border-bottom:1px solid var(--line);font-size:13px;font-weight:400}
+.mstate-list .row:last-child{border-bottom:none}
+.mstate-list .row .l{display:flex;gap:8px;align-items:baseline}
+.mstate-list .row .date{font-size:11px;color:var(--muted);min-width:40px}
+.mstate-list .row .r{display:flex;gap:14px;align-items:baseline}
+.mstate-list .row .amt{min-width:64px;text-align:right;display:inline-block;font-weight:400}
+.mstate-list .row .amt.plus{color:var(--ok)}
+.mstate-list .row .amt.minus{color:var(--danger)}
+.mstate-list .row .bal{min-width:56px;text-align:right;display:inline-block;font-weight:400;color:var(--ink)}
+.mstate-col-heads{display:flex;justify-content:flex-end;gap:14px;padding:0 2px 4px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px}
+.mstate-col-heads span:first-child{min-width:64px;text-align:right}
+.mstate-col-heads span:last-child{min-width:56px;text-align:right}
 /* BUG FIX: this used to be position:relative, which means it took up real
    space in the page's normal flow — as results loaded in, the dropdown
    grew taller and physically shoved the Finance tabs (Dashboard/Invoicing/
@@ -1194,6 +1225,18 @@ table.data td.num,table.data th.num{text-align:center}
   .fin-tabs > button:first-child:nth-last-child(2),
   .fin-tabs > button:first-child:nth-last-child(2) ~ button{flex:1;min-width:0;white-space:nowrap}
   .fin-tabs:has(> button:first-child:nth-last-child(2)){overflow-x:visible}
+  /* Design standard rollout round 2 item 2: the same gap-on-the-right bug
+     as above, but for 3-button bars (Finance student's Profile/
+     Collections/Statement, Messaging's Compose/History/SMS Credits,
+     Attendance's Mark Students/Mark Staff/Sign In-Out, Timetable's
+     Setup/Generate/View, Invoicing's Fee Structures/Debit/Credit Notes,
+     Exam Desk's Review/Marks/Bulk) — 3 short labels never need the
+     scroll-strip behaviour that the up-to-6-tab bars above need, so they
+     should always split evenly with no leftover space, same fix as the
+     2-item case. */
+  .fin-tabs > button:first-child:nth-last-child(3),
+  .fin-tabs > button:first-child:nth-last-child(3) ~ button{flex:1;min-width:0;white-space:nowrap}
+  .fin-tabs:has(> button:first-child:nth-last-child(3)){overflow-x:visible}
 }
 @media screen and (max-width:400px){.fin-tabs button{min-width:92px;font-size:12px;padding:9px 8px}}
 
