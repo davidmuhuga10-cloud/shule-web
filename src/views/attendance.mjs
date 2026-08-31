@@ -32,7 +32,7 @@ export async function viewAttendance(root) {
 function render(root, classes, sel) {
   root.innerHTML = `
     <div class="page-head"><div><h2>Attendance</h2><p>Mark daily attendance and review class summaries.</p></div></div>
-    <div class="fin-tabs">
+    <div class="fin-tabs wrap-tabs">
       <button data-tab="mark-students" class="${sel.tab === 'mark-students' ? 'active' : ''}">Mark Students</button>
       <button data-tab="mark-staff" class="${sel.tab === 'mark-staff' ? 'active' : ''}">Mark Staff</button>
       <button data-tab="staff-sign-in-out" class="${sel.tab === 'staff-sign-in-out' ? 'active' : ''}">Staff Sign In/Out</button>

@@ -1426,3 +1426,41 @@ table.data td.num,table.data th.num{text-align:center}
   .fin-tabs.wrap-tabs{overflow-x:visible}
   .fin-tabs.wrap-tabs button{flex:1 1 30%;min-width:90px;white-space:normal}
 }
+
+/* Design standard rollout round 3 — Exam Desk (approved sketch, "Design 4"
+   accordion): border accent added to every exam card (side-accent/tile-*,
+   cycled per exam like Reports/Classes/Subjects already do), the two
+   icon-heavy secondary actions (Learning Area Papers, Subject Combination)
+   plus "+ Add classes" moved off the crowded title row into their own
+   toolbar strip, and — mobile screens only, desktop table and printing
+   left exactly as they were — every class is rendered as a collapsed
+   accordion row instead of a horizontal table, tapping one open to reveal
+   its actions. */
+.ed-toolbar{display:flex;gap:8px;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--line)}
+.ed-desktop-view{display:block}
+.ed-mobile-view{display:none}
+@media screen and (max-width:960px){
+  .ed-desktop-view{display:none}
+  .ed-mobile-view{display:block}
+}
+@media print{
+  .ed-desktop-view{display:block !important}
+  .ed-mobile-view{display:none !important}
+}
+.ed-m-head{padding:14px;position:relative}
+.ed-m-editrow{position:absolute;top:14px;right:14px;display:flex;gap:6px}
+.ed-m-editrow button{width:32px;height:32px;border:1.5px solid var(--line);border-radius:7px;background:#fff}
+.ed-m-name{font-size:16px;font-weight:800;margin:0 76px 6px 0}
+.ed-m-badges{display:flex;gap:6px;flex-wrap:wrap}
+.ed-m-toolbar{display:flex;gap:8px;padding:12px 14px 0}
+.ed-m-toolbar button{flex:1;padding:9px 6px;border:1.5px solid var(--line);border-radius:8px;background:#fff;font-size:11px;font-weight:700;color:#334155}
+.ed-m-acc{border-top:1px solid var(--line);margin-top:12px}
+.ed-m-acc-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;cursor:pointer}
+.ed-m-acc-head.static{cursor:default}
+.ed-m-acc-name{font-weight:700;font-size:14px}
+.ed-m-acc-meta{font-size:11px;color:var(--muted)}
+.ed-m-acc-body{display:none;padding:0 14px 12px}
+.ed-m-acc.open .ed-m-acc-body{display:block}
+.ed-m-cgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.ed-m-cgrid button,.ed-m-full{padding:9px;border:1.5px solid var(--line);border-radius:8px;background:#fff;font-weight:700;font-size:12px}
+.ed-m-full{width:100%}
