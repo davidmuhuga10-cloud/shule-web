@@ -1231,8 +1231,9 @@ table.data td.num,table.data th.num{text-align:center}
   .fcol-mobile-view{display:block}
   .fcol-desktop-view{display:none}
 }
-.fcol-row{display:flex;justify-content:space-between;align-items:baseline;padding:9px 2px;border-bottom:1px solid var(--line);font-size:13px}
+.fcol-row{display:flex;justify-content:space-between;align-items:baseline;padding:9px 2px;border-bottom:1px solid var(--line);font-size:13px;cursor:pointer;border-radius:8px}
 .fcol-row:last-child{border-bottom:none}
+.fcol-row:active{background:#f2f8f7}
 .fcol-row .l{display:flex;flex-direction:column}
 .fcol-row .sub{font-size:11px;color:var(--muted)}
 .fcol-row .r{text-align:right}
@@ -1240,6 +1241,16 @@ table.data td.num,table.data th.num{text-align:center}
 .fcol-row .fcol-bal{display:block;font-size:11px;margin-top:1px}
 .fcol-row .fcol-bal.owe{color:var(--danger)}
 .fcol-row .fcol-bal.ok{color:var(--ok)}
+/* Design standard rollout round 2: Student Profile's Collections rows —
+   date/receipt/mode/amount, no invented per-purpose label (a receipt can
+   span several vote heads), with small Print/Reverse icon buttons on the
+   right instead of the whole row being tappable — Reverse is destructive
+   and shouldn't be one accidental tap away. */
+.fcol-row-student{cursor:default;align-items:center}
+.fcol-row-student:active{background:none}
+.fcol-icons{display:flex;gap:6px;flex:0 0 auto}
+.fcol-ico{width:30px;height:30px;border-radius:8px;border:1.5px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:13px;background:#fff;cursor:pointer}
+.fcol-ico.warn{border-color:var(--warn)}
 /* BUG FIX: this used to be position:relative, which means it took up real
    space in the page's normal flow — as results loaded in, the dropdown
    grew taller and physically shoved the Finance tabs (Dashboard/Invoicing/
@@ -1392,3 +1403,26 @@ table.data td.num,table.data th.num{text-align:center}
   .fin-toolbar .fin-filters .field{flex:1 1 140px}
 }
 @media(max-width:400px){.fin-toolbar{gap:10px}.fin-toolbar .fin-filters{gap:8px}}
+/* Design standard rollout round 2 item 3: on phones, filter fields stack
+   in one clean single column instead of wrapping two-per-row — reads as
+   organised rather than scattered, same intent as the Reports/Fee
+   Structures sketches. .fin-report-actions (Excel + the now print-only
+   button) becomes one even two-button row rather than left-over inline
+   buttons of different widths. */
+@media(max-width:600px){
+  .fin-toolbar .fin-filters .field{flex:1 1 100%;max-width:none}
+  .fin-report-actions{width:100%}
+  .fin-report-actions,.fin-report-actions .print-opts-simple{flex:1 1 auto}
+  .fin-report-actions .btn,.fin-report-actions .print-opts-simple .btn{flex:1}
+}
+/* Design standard rollout round 2 item 2: Reports' own tab bar (Balances/
+   Vote Head Balances/Cashbook/Trial Balance/Opening Balances) wraps into
+   rows instead of scrolling sideways like the generic .fin-tabs bars with
+   many buttons (e.g. the top-level Finance hub nav) still do — opted in
+   per-screen via this extra class rather than changing .fin-tabs itself,
+   so nothing else that relies on the scroll-strip behaviour is affected. */
+.fin-tabs.wrap-tabs{flex-wrap:wrap}
+@media screen and (max-width:960px){
+  .fin-tabs.wrap-tabs{overflow-x:visible}
+  .fin-tabs.wrap-tabs button{flex:1 1 30%;min-width:90px;white-space:normal}
+}

@@ -66,18 +66,56 @@ async function load(root, access, opts) {
       <div class="card-b fcol-mobile-view" id="fc-mobile">${loader()}</div>
     </div>`;
   };
-  /** Collections mobile view — one line per receipt (student + class/
-   *  receipt/mode as a subtitle), amount, and the student's current
-   *  balance colored red if they still owe or green if cleared/overpaid.
-   *  Desktop table above is untouched. Capped to the 30 most recent rows
-   *  shown (already newest-first) and balance lookups are deduped per
-   *  student, so this never fires more than a handful of extra requests
-   *  even against the full 300-row list. */
+  /** Collections mobile view — two different shapes depending on where
+   *  this list is shown:
+   *   - Main Collections module (opts.studentId unset): one line per
+   *     receipt — date (before the receipt no., per direct request),
+   *     student + class/receipt/mode as a subtitle, amount and the
+   *     student's current balance (red if owing, green if cleared/
+   *     overpaid) on the right. Tapping a row prints that receipt — the
+   *     same print already wired to the desktop table's icon button —
+   *     since this list has no Reverse/Transfer actions on mobile anyway.
+   *   - Student Profile's Collections tab (opts.studentId set): rethought
+   *     separately, since Reverse is destructive and shouldn't be one
+   *     stray tap away. Each row shows date/receipt/mode/amount (no
+   *     invented per-purpose label — one receipt can span several vote
+   *     heads) with small Print/Reverse icon buttons on the right,
+   *     mirroring how the desktop row already works.
+   *  Both cap at the 30 most recent rows shown (already newest-first);
+   *  the main-module balance lookups are deduped per student, so this
+   *  never fires more than a handful of extra requests even against the
+   *  full 300-row list. */
   const renderMobileList = async (filtered) => {
     const mobileEl = root.querySelector('#fc-mobile');
     if (!mobileEl) return;
     const recent = filtered.slice(0, 30);
     if (!recent.length) { mobileEl.innerHTML = '<p class="muted center" style="margin:20px 0">No collections match.</p>'; return; }
+
+    if (opts.studentId) {
+      mobileEl.innerHTML = recent.map((c) => `<div class="fcol-row fcol-row-student">
+        <div class="l"><span class="name">${esc(fmtShortDate(c.created_at))} · Receipt ${esc(c.receipt_no || '—')}</span><span class="sub">${esc(modeLabel(c.mode))} · ${Number(c.amount || 0).toLocaleString()}</span></div>
+        <div class="fcol-icons">
+          <button class="fcol-ico" data-mprint-btn="${c.id}" title="Print receipt">🖨️</button>
+          ${access.canCollect && c.status === 'active' ? `<button class="fcol-ico warn" data-mreverse="${c.id}" title="Reverse collection">↩️</button>` : ''}
+        </div>
+      </div>`).join('');
+      mobileEl.querySelectorAll('[data-mprint-btn]').forEach((b) => b.onclick = (e) => {
+        e.stopPropagation();
+        printReceipt(rows.find((x) => x.id === b.dataset.mprintBtn));
+      });
+      mobileEl.querySelectorAll('[data-mreverse]').forEach((b) => b.onclick = (e) => {
+        e.stopPropagation();
+        confirmAction('Reverse this collection? This restores the student\'s balance and cannot be undone.', () => withBusy(b, async () => {
+          const reason = window.prompt('Reason for reversal (optional):') || null;
+          const r = await Db.finance.collections.reverse(b.dataset.mreverse, reason);
+          if (!r.ok) { toast(r.message, 'err'); return; }
+          toast('Collection reversed.', 'ok');
+          await load(root, access, opts);
+        }), true);
+      });
+      return;
+    }
+
     const uniqueIds = [...new Set(recent.map((c) => c.student_id).filter(Boolean))];
     const balMap = new Map();
     await Promise.all(uniqueIds.map(async (id) => {
@@ -87,15 +125,13 @@ async function load(root, access, opts) {
     mobileEl.innerHTML = recent.map((c) => {
       const bal = c.student_id ? balMap.get(c.student_id) : null;
       const balHtml = bal == null ? '' : `<span class="fcol-bal ${bal > 0 ? 'owe' : 'ok'}">${bal > 0 ? `Owes ${bal.toLocaleString()}` : (bal < 0 ? `Overpaid ${Math.abs(bal).toLocaleString()}` : 'Cleared')}</span>`;
-      const nameLine = opts.studentId ? esc(modeLabel(c.mode)) : `${esc(c.students ? c.students.full_name : '')}`;
-      const subLine = opts.studentId
-        ? esc(c.receipt_no || '')
-        : `${esc(c.students && c.students.classes ? c.students.classes.name : '')} · ${esc(c.receipt_no || '')} · ${esc(modeLabel(c.mode))}`;
-      return `<div class="fcol-row">
-        <div class="l"><span class="name">${nameLine}</span><span class="sub">${subLine}</span></div>
+      const subLine = `${esc(fmtShortDate(c.created_at))} · ${esc(c.receipt_no || '')} · ${esc(c.students && c.students.classes ? c.students.classes.name : '')} · ${esc(modeLabel(c.mode))}`;
+      return `<div class="fcol-row" data-mprint="${c.id}">
+        <div class="l"><span class="name">${esc(c.students ? c.students.full_name : '')}</span><span class="sub">${subLine}</span></div>
         <div class="r"><span class="amt">${Number(c.amount || 0).toLocaleString()}</span>${balHtml}</div>
       </div>`;
     }).join('');
+    mobileEl.querySelectorAll('[data-mprint]').forEach((el) => el.onclick = () => printReceipt(rows.find((x) => x.id === el.dataset.mprint)));
   };
 
   root.innerHTML = `
@@ -143,6 +179,9 @@ async function load(root, access, opts) {
 }
 
 function modeLabel(mode) { return { cash: 'Cash', paybill: 'Paybill', bank: 'Bank', other: 'Other' }[mode] || mode || ''; }
+function fmtShortDate(iso) {
+  try { return new Date(iso).toLocaleDateString(undefined, { day: '2-digit', month: 'short' }); } catch (e) { return ''; }
+}
 function statusBadge(status) {
   if (status === 'reversed') return '<span class="badge amber">Reversed</span>';
   if (status === 'transferred') return '<span class="badge amber">Transferred</span>';
