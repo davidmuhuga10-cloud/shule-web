@@ -51,11 +51,11 @@ function render(root, classes, sel) {
 
 async function renderMarkStudents(body, classes, sel) {
   body.innerHTML = `
-    <div class="card" style="margin-bottom:16px"><div class="card-b grid2">
+    <div class="card side-accent tile-amber" style="margin-bottom:16px"><div class="card-b grid2">
       <div class="field"><label>Class</label><select id="att-class">${options(classes, 'id', 'name', sel.class_id)}</select></div>
       <div class="field"><label>Date</label><input id="att-date" type="date" value="${esc(sel.date)}"></div>
     </div></div>
-    <div class="card"><div id="att-roster">${loader()}</div></div>
+    <div class="card side-accent tile-amber"><div id="att-roster">${loader()}</div></div>
   `;
   body.querySelector('#att-class').onchange = (e) => renderMarkStudents(body, classes, { ...sel, class_id: e.target.value });
   body.querySelector('#att-date').onchange = (e) => renderMarkStudents(body, classes, { ...sel, date: e.target.value });
@@ -145,10 +145,10 @@ async function renderMarkStudents(body, classes, sel) {
 
 async function renderMarkStaff(body, sel) {
   body.innerHTML = `
-    <div class="card" style="margin-bottom:16px"><div class="card-b" style="max-width:280px">
+    <div class="card side-accent tile-amber" style="margin-bottom:16px"><div class="card-b" style="max-width:280px">
       <div class="field"><label>Date</label><input id="att-staff-date" type="date" value="${esc(sel.date)}"></div>
     </div></div>
-    <div class="card"><div id="att-staff-roster">${loader()}</div></div>
+    <div class="card side-accent tile-amber"><div id="att-staff-roster">${loader()}</div></div>
   `;
   body.querySelector('#att-staff-date').onchange = (e) => renderMarkStaff(body, { ...sel, date: e.target.value });
 
@@ -198,11 +198,11 @@ async function renderMarkStaff(body, sel) {
  *  pattern), but any staff member can read them and record times. */
 async function renderStaffSignInOut(body, sel) {
   body.innerHTML = `
-    <div class="card" style="margin-bottom:16px"><div class="card-b" style="max-width:280px">
+    <div class="card side-accent tile-amber" style="margin-bottom:16px"><div class="card-b" style="max-width:280px">
       <div class="field"><label>Date</label><input id="att-sio-date" type="date" value="${esc(sel.date)}"></div>
     </div></div>
-    <div class="card" style="margin-bottom:16px"><div id="att-sio-expected">${loader()}</div></div>
-    <div class="card"><div id="att-sio-roster">${loader()}</div></div>
+    <div class="card side-accent tile-amber" style="margin-bottom:16px"><div id="att-sio-expected">${loader()}</div></div>
+    <div class="card side-accent tile-amber"><div id="att-sio-roster">${loader()}</div></div>
   `;
   body.querySelector('#att-sio-date').onchange = (e) => renderStaffSignInOut(body, { ...sel, date: e.target.value });
 
@@ -299,13 +299,13 @@ async function renderSummary(body, classes, sel) {
   const from = sel.from || firstOfMonth();
   const to = sel.to || todayStr();
   body.innerHTML = `
-    <div class="card" style="margin-bottom:16px"><div class="card-b grid2">
+    <div class="card side-accent tile-amber" style="margin-bottom:16px"><div class="card-b grid2">
       <div class="field"><label>Class</label><select id="att-sum-class">${options(classes, 'id', 'name', sel.class_id)}</select></div>
       <div></div>
       <div class="field"><label>From</label><input id="att-sum-from" type="date" value="${esc(from)}"></div>
       <div class="field"><label>To</label><input id="att-sum-to" type="date" value="${esc(to)}"></div>
     </div></div>
-    <div class="card"><div id="att-sum-body">${loader()}</div></div>
+    <div class="card side-accent tile-amber"><div id="att-sum-body">${loader()}</div></div>
   `;
   body.querySelector('#att-sum-class').onchange = (e) => renderSummary(body, classes, { ...sel, class_id: e.target.value, from, to });
   body.querySelector('#att-sum-from').onchange = (e) => renderSummary(body, classes, { ...sel, from: e.target.value, to });

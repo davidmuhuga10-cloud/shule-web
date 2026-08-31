@@ -30,14 +30,18 @@ async function render(root, query) {
   // line, and the three actions are compact icon buttons instead of three
   // full-width text buttons stacked under the contact details — same fields,
   // just not "getting out of hand" the way three stretched rows did.
-  // Design standard brief item 2: cycle through the same accent hues the
-  // Reports/Exams tiles use, one per card, purely decorative.
+  // Design standard brief item 2 (round 1): cycle through the same accent
+  // hues the Reports/Exams tiles use, one per card, purely decorative.
+  // Round 2 item 7 (approved): the avatar badge now carries the SAME hue
+  // as the card's border, via the matching .t-* icon-tint utility class —
+  // same pairing dashboard.mjs's CAT_ACCENT does for .s-ico/.stat-*.
   const ACCENTS = ['tile-blue', 'tile-green', 'tile-purple', 'tile-amber', 'tile-teal', 'tile-rose', 'tile-indigo'];
+  const ICO_ACCENTS = ['t-blue', 't-green', 't-purple', 't-amber', 't-teal', 't-rose', 't-indigo'];
   const cards = filtered.map((t, i) => `
     <div class="card teacher-card ${ACCENTS[i % ACCENTS.length]}">
       <div class="card-b">
         <div class="teacher-card-head">
-          <div class="avatar-circle">${esc(initials(t.full_name))}</div>
+          <div class="avatar-circle ${ICO_ACCENTS[i % ICO_ACCENTS.length]}">${esc(initials(t.full_name))}</div>
           <div class="teacher-card-name">
             <div class="t-name">${esc(t.full_name)}</div>
             <div class="t-contact">${esc(t.email || 'No email')}${t.phone ? ' · ' + esc(t.phone) : ''}</div>

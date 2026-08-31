@@ -35,8 +35,8 @@ async function render(root, students) {
   root.innerHTML = `
     <div class="page-head"><div><h2>Parent Accounts</h2><p>Create parent logins and link them to their children.</p></div>
       <div class="spacer"></div><button class="btn" id="add-parent">+ New parent account</button></div>
-    <div class="card" style="margin-bottom:16px"><div id="parent-list">${loader()}</div></div>
-    <div class="card"><div class="card-b"><h3 style="margin:0 0 4px">Parent ↔ Student links</h3><p class="muted" style="font-size:13px;margin:0 0 14px">Which parent can see which child's attendance and results.</p>
+    <div class="card side-accent tile-rose" style="margin-bottom:16px"><div id="parent-list">${loader()}</div></div>
+    <div class="card side-accent tile-rose"><div class="card-b"><h3 style="margin:0 0 4px">Parent ↔ Student links</h3><p class="muted" style="font-size:13px;margin:0 0 14px">Which parent can see which child's attendance and results.</p>
       <button class="btn secondary sm" id="add-link">+ Link parent to student</button>
     </div><div id="link-list"></div></div>
   `;

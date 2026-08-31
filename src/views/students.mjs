@@ -69,8 +69,8 @@ async function renderHome(root, classes, view) {
   root.innerHTML = `
     <div class="page-head"><div><h2>Students</h2></div>
       <div class="spacer"></div>
-      <button class="icon-btn" id="students-msg" title="Messages">💬</button>
-      ${!isArchived ? `<button class="btn secondary" id="move-students">🔀 Move students</button>` : ''}
+      <button class="icon-btn border-accent" id="students-msg" title="Messages">💬</button>
+      ${!isArchived ? `<button class="btn secondary accent-blue" id="move-students">🔀 Move students</button>` : ''}
       <button class="btn" id="add-student">+ Add student</button></div>
     <div class="fin-tabs">
       <button data-view="active" class="${!isArchived ? 'active' : ''}">Active</button>
@@ -132,7 +132,7 @@ async function loadClassesGrid(root, classes) {
       <td>${esc(c.name)}</td><td class="num">${c.student_count || 0}</td>
       <td class="muted" style="font-size:12.5px">View students →</td></tr>`).join('');
 
-  gridEl.innerHTML = `<div class="card"><div class="table-wrap"><table class="data">
+  gridEl.innerHTML = `<div class="card side-accent tile-blue"><div class="table-wrap"><table class="data">
     <thead><tr><th>Class</th><th class="num">Students</th><th></th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div></div>`;

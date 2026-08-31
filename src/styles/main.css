@@ -162,10 +162,40 @@ h1,h2,h3,h4{margin:0;font-weight:650;color:var(--ink)}
 /* Design standard brief item 2: each teacher's card now carries the same
    coloured accent border as the Reports/Exams hub tiles — reuses the exact
    same .tile-* hue classes, just applied to a .card instead of .hub-tile,
-   so both need the same transparent left/right border to accept them. */
-.teacher-card{border-left:4px solid transparent;border-right:4px solid transparent}
-.avatar-circle{width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,var(--brand),var(--brand-2));
-  color:#fff;display:grid;place-items:center;font-weight:750;font-size:16px;flex-shrink:0}
+   so both need the same transparent left/right border to accept them.
+   BUG FIX (round 2): this used to be the bare class `.teacher-card{...}`,
+   specificity (0,1,0) — tied with plain `.card{border:1px solid var(--line)}`
+   (also 0,1,0) and with `.tile-blue` etc (also 0,1,0). Since `.card` sits
+   LATER in this file, on that tie it always won outright — border-left/
+   right silently stayed the plain 1px grey `.card` border, and the .tile-*
+   colour never showed AT ALL (confirmed with getComputedStyle — not just
+   hard to see, genuinely inactive). Making this selector compound
+   (`.card.teacher-card`, specificity 0,2,0) beats `.card` unconditionally
+   regardless of file order. The matching `.teacher-card.tile-*` overrides
+   below (also 0,2,0, placed after) then win the colour for the same
+   reason a plain `.tile-blue` no longer could. */
+.card.teacher-card{border-left:4px solid transparent;border-right:4px solid transparent}
+.teacher-card.tile-blue{border-color:#2563eb}.teacher-card.tile-green{border-color:var(--ok)}
+.teacher-card.tile-amber{border-color:var(--warn)}.teacher-card.tile-purple{border-color:#7c3aed}
+.teacher-card.tile-teal{border-color:var(--primary)}.teacher-card.tile-rose{border-color:#db2777}
+.teacher-card.tile-indigo{border-color:#4f46e5}
+/* Generic reusable version of the same fix, for any OTHER single .card
+   that just wants a plain left+right accent border (e.g. "Students per
+   class" on the dashboard) without inventing a bespoke class each time —
+   same compound-selector trick: `.card.side-accent` (0,2,0) beats plain
+   `.card` (0,1,0), and `.side-accent.tile-*` (0,2,0, placed after) then
+   wins the colour for the same reason. Usage: class="card side-accent
+   tile-blue" (pick any .tile-* hue). */
+.card.side-accent{border-left:4px solid transparent;border-right:4px solid transparent}
+.side-accent.tile-blue{border-color:#2563eb}.side-accent.tile-green{border-color:var(--ok)}
+.side-accent.tile-amber{border-color:var(--warn)}.side-accent.tile-purple{border-color:#7c3aed}
+.side-accent.tile-teal{border-color:var(--primary)}.side-accent.tile-rose{border-color:#db2777}
+.side-accent.tile-indigo{border-color:#4f46e5}
+/* Round 2 brief item 7 (approved): matches the real dashboard .stat tile
+   language — a tinted square icon badge (same shape/radius as .s-ico)
+   instead of a plain gradient circle, paired to the same hue as the
+   card's .tile-* border via the existing .t-* utility classes. */
+.avatar-circle{width:48px;height:48px;border-radius:12px;display:grid;place-items:center;font-weight:750;font-size:15px;flex-shrink:0}
 .teacher-card .btn.sm{padding:6px 8px;font-size:12px}
 /* Name + status badge share one header row; email/phone collapse onto a
    single truncated line; the three actions became compact icon buttons
@@ -190,6 +220,14 @@ input,select,textarea{width:100%;padding:9px 11px;border:1px solid var(--line);b
   font-size:14px;font-family:inherit;background:#fff;color:var(--ink);transition:.15s}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(18,122,107,.12)}
 .field{margin-bottom:15px}
+/* Design standard rollout round 2 (approved): every search bar site-wide
+   gets a blue accent border — same "just the border colour" treatment as
+   Students per class/Classes/etc, no shape or shadow change. Targets every
+   search input by its shared 🔍-prefixed placeholder (every search field in
+   the app already starts with one) instead of needing a class added to
+   each — students.mjs, teachers.mjs, financeHub.mjs, financeStudent.mjs,
+   and any future one, all covered by this single rule. */
+input[placeholder^="🔍"]{border-color:#2563eb}
 /* Next Sprint 2 §4: show/hide password toggle — see passwordFieldHtml()/
    wirePasswordToggle() in app.js. The toggle button sits inside the input's
    own box (absolutely positioned over the right-padding it reserves) so it
@@ -282,6 +320,7 @@ html,body{max-width:100%;overflow-x:hidden}
 .t-blue{background:#e7f0fe;color:#2563eb}.t-green{background:var(--ok-bg);color:var(--ok)}
 .t-amber{background:var(--warn-bg);color:var(--warn)}.t-purple{background:#f0e9fd;color:#7c3aed}
 .t-teal{background:#e2f5f2;color:var(--primary)}.t-rose{background:#fde8ee;color:#db2777}
+.t-indigo{background:#eef2ff;color:#4f46e5}
 /* UI colour refresh (brief item 4, round 2 — approved direction: a light
    accent border on both sides, tile otherwise unchanged) — a second,
    border-only class distinct from .t-* above so it can go on the OUTER
@@ -343,7 +382,7 @@ html,body{max-width:100%;overflow-x:hidden}
 .gender-bar .gb-b{background:#2563eb}
 .gender-bar .gb-g{background:#db2777}
 .stat.gender-tile{flex-direction:column;align-items:stretch;gap:8px}
-.stat.gender-tile .s-ico{align-self:flex-start}
+.stat.gender-tile .s-ico{align-self:center}
 .stat.gender-tile .s-body{display:flex;align-items:center;justify-content:space-between;flex:1;gap:8px;min-width:0}
 .stat.gender-tile .g-side{text-align:center}
 .stat.gender-tile .g-num{font-size:21px;font-weight:800;line-height:1}
@@ -355,6 +394,15 @@ html,body{max-width:100%;overflow-x:hidden}
 table.data{width:100%;border-collapse:collapse;font-size:13.5px}
 table.data th{text-align:left;padding:11px 14px;background:#f7f9fb;color:var(--muted);font-weight:650;
   font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--line);white-space:nowrap}
+/* BUG FIX: a table sitting flush against its card's edge (no .card-b
+   padding — e.g. Classes, Students' class list) showed a small square
+   gap at the top two corners, because the header row's own grey
+   background is a plain rectangle that doesn't follow the card's rounded
+   corners the way the plain white body rows (no background of their own)
+   already blend into invisibly at the bottom. Rounding just the header's
+   own outer corners to match closes that gap. */
+table.data thead tr:first-child th:first-child{border-top-left-radius:var(--radius)}
+table.data thead tr:first-child th:last-child{border-top-right-radius:var(--radius)}
 table.data td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
 table.data tr:last-child td{border-bottom:none}
 table.data tbody tr:hover{background:#fafbfc}
@@ -499,6 +547,15 @@ table.data td.num,table.data th.num{text-align:center}
 .empty h3{font-size:16.5px;margin-bottom:6px;color:var(--ink)}
 .empty p{margin:0 auto 18px;max-width:420px;font-size:13.5px}
 .empty.warn .e-ico{color:var(--warn)}
+
+/* "Still under development" module banner (Timetable — on hold, brief
+   asked for a designed notice rather than a plain disclaimer line). Soft
+   warn-tinted card, not a harsh full-width alert bar, so it reads as an
+   FYI rather than an error. */
+.dev-notice{display:flex;align-items:flex-start;gap:12px;background:var(--warn-bg);border:1px solid rgba(0,0,0,.04);
+  border-radius:var(--radius);padding:13px 16px;margin-bottom:16px;font-size:13px;color:var(--ink);line-height:1.5}
+.dev-notice-ico{font-size:18px;flex-shrink:0;line-height:1.4}
+.dev-notice strong{color:var(--ink)}
 
 /* ---------- Toolbar / filters ---------- */
 .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
@@ -1035,9 +1092,17 @@ table.data td.num,table.data th.num{text-align:center}
   .gender-panel{padding:18px 16px}
   .gender-panel .g-num{font-size:28px}
   /* The mobile tile set already has its own combined gender tile — don't
-     also show the desktop gender panel (it would duplicate that number). */
+     also show the desktop gender panel (it would duplicate that number).
+     BUG FIX (round 2 brief): this used to be the bare class `.dash-gender-
+     desktop{display:none}`, specificity (0,1,0) — LOWER than the always-on
+     base rule `.dash-top-row .dash-gender-desktop{display:flex;...}` at
+     (0,2,0) above. CSS specificity beats source order, so that override
+     never actually won and the desktop gender card kept rendering
+     alongside the mobile grid's own combined tile — exactly the "shows
+     twice" bug reported. Matching the same two-class selector here fixes
+     it for real. */
   .dash-top-row{display:block;margin-bottom:0}
-  .dash-gender-desktop{display:none}
+  .dash-top-row .dash-gender-desktop{display:none}
 }
 @media screen and (max-width:400px){
   .content{padding:12px}
@@ -1107,6 +1172,14 @@ table.data td.num,table.data th.num{text-align:center}
 .fin-tabs button{flex:1;padding:11px 14px;border:none;background:none;border-radius:7px;cursor:pointer;
   color:var(--ink);font-family:inherit;font-size:13.5px;font-weight:600;text-align:center;transition:background .15s}
 .fin-tabs button.active{background:#fff;font-weight:700;box-shadow:var(--shadow)}
+/* Design standard rollout round 2 (approved — BORDER ONLY, no fill/text
+   colour change, same rule as everywhere else this round): a thin blue
+   border added around each element, nothing about its existing colour,
+   background or text touched. */
+.fin-tabs button{border:1.5px solid transparent}
+.fin-tabs button.active{border-color:#2563eb}
+.btn.secondary.accent-blue{border-color:#2563eb}
+.icon-btn.border-accent{border:1.5px solid #2563eb}
 .fin-tabs button:not(.active):hover{background:rgba(255,255,255,.5)}
 /* Same min-content-width overflow as .tabs above (this bar has up to 6
    labels — Dashboard/Invoicing/Collections/Reports/Transport — plus long

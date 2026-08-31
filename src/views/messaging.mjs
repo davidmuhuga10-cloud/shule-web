@@ -73,7 +73,7 @@ function renderCompose(body, data, sel, root) {
   const { classes, students, staff, exams } = data;
   const isResults = sel.scope === 'exam_results';
   body.innerHTML = `
-    <div class="card">
+    <div class="card side-accent tile-indigo">
       <div class="card-b">
         <div class="field">
           <label>Send to</label>
@@ -209,7 +209,7 @@ async function sendExamResults(examId, classId, classes, students) {
 }
 
 async function renderHistory(body) {
-  body.innerHTML = `<div class="card"><div id="msg-hist-list">${loader()}</div></div>`;
+  body.innerHTML = `<div class="card side-accent tile-indigo"><div id="msg-hist-list">${loader()}</div></div>`;
   const listEl = body.querySelector('#msg-hist-list');
   const res = await Db.messaging.history(200);
   if (!res.ok) { listEl.innerHTML = `<div class="card-b">⚠️ ${esc(res.message)}</div>`; return; }

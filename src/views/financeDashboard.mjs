@@ -83,7 +83,7 @@ async function load(root, years, terms, sel, access) {
   body.innerHTML = `
     <div class="stats-mobile">${tilesHtml}</div>
     <div class="stats-desktop" style="max-width:none">${tilesHtml}</div>
-    <div class="card" style="margin-top:16px">
+    <div class="card side-accent tile-teal" style="margin-top:16px">
       <div class="card-h"><h3>Collections Per Class</h3></div>
       <div class="card-b table-wrap"><table class="data">
         <thead><tr><th>Class</th><th class="num">Expected</th><th class="num">Collected</th><th>% Collected</th></tr></thead>

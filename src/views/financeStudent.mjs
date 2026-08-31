@@ -202,7 +202,7 @@ async function renderProfile(root, access, student, ctx) {
         ${access.canCollect ? '<button class="btn secondary sm" id="fst-sms">Send Balance Reminder</button>' : '<p class="muted">—</p>'}
       </div>
     </div>
-    ${access.canManage ? `<div class="card" style="margin-top:14px">
+    ${access.canManage ? `<div class="card side-accent tile-teal" style="margin-top:14px">
       <div class="card-h">
         <h3>Debit / Credit Notes</h3>
         <div class="spacer"></div>
@@ -225,7 +225,7 @@ async function renderProfile(root, access, student, ctx) {
         </tr>`).join('') || '<tr><td colspan="6" class="muted">No debit or credit notes yet.</td></tr>'}</tbody>
       </table></div>
     </div>` : ''}
-    <div class="card" style="margin-top:14px">
+    <div class="card side-accent tile-teal" style="margin-top:14px">
       <div class="card-h"><h3>This Term's Invoice</h3></div>
       <div class="card-b table-wrap"><table class="data">
         <thead><tr><th>Vote Head</th><th>Description</th><th class="num">Amount</th></tr></thead>
