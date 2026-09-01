@@ -324,13 +324,12 @@ async function renderDetailScreen(root, years, terms, exam, classId, sel) {
       <div>
         <button class="btn ghost sm" id="ed-back" style="margin-bottom:8px">← Back to Exam Desk</button>
         <h2>${esc(exam.name)}${cls ? ` — ${esc(cls.name)}` : ''}</h2>
-        <p>Enter marks, then review and publish — all in one place.</p>
       </div>
     </div>
     <div class="fin-tabs">
       <button data-tab="publish" class="${sel.tab === 'marks' || sel.tab === 'bulk' ? '' : 'active'}">✅ Review and Publish</button>
       <button data-tab="marks" class="${sel.tab === 'marks' ? 'active' : ''}">✍️ Marks Entry</button>
-      <button data-tab="bulk" class="${sel.tab === 'bulk' ? 'active' : ''}">📥 Bulk Upload</button>
+      <button data-tab="bulk" class="ed-desktop-view${sel.tab === 'bulk' ? ' active' : ''}">📥 Bulk Upload</button>
     </div>
     <div id="ed-panel"></div>
   `;
