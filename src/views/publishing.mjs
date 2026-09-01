@@ -256,30 +256,42 @@ async function loadList(root, sel, onEditSubject) {
       </div>
     </div>` : ''}`;
 
+  // Round 3 follow-up (approved sketch): the mobile page no longer merges
+  // everything into one card — "Learning area without results" and
+  // "Subjects with marks entered" are two separate blocks (the latter
+  // renamed and filtered to exclude the zero-entry subjects already shown
+  // in the first block, so nothing is duplicated between the two); the
+  // Publish Results button runs full width instead of sitting right-
+  // aligned; Bulk Upload's tab is hidden on mobile entirely (see
+  // examDesk.mjs) since it already requires a computer.
+  const startedRows = rows.filter((r) => r.entered_count > 0);
   const mobileHtml = `
-    <div class="card side-accent tile-blue">
-      <div class="rp-m-top"><button class="icon-chip primary" id="pb-publish-all-m">🚀 Publish Results</button></div>
-      ${allPublished ? `<div class="rp-m-strip ok">✅ Every subject published <a href="#" id="pb-go-reports-m">🖨️ Reports</a></div>` : ''}
-      ${missing.length ? `<div class="rp-m-strip warn">⚠️ ${missing.length} subject(s) missing marks <a href="#" id="pb-remind-m">Remind</a></div>` : ''}
-      ${noResultsYet.length ? `
-        <div class="rp-m-section-label">Learning area without results</div>
-        ${noResultsYet.map((r) => `<div class="rp-m-inline-row">
-          <div><div class="name">${esc(r.subject_name)}</div><div class="meta">${r.teacher_name ? esc(r.teacher_name) : '— unassigned —'} · ${r.expected_count || '?'} missing</div></div>
-          <button class="icon-chip" data-upload="${r.subject_id}">📤 Upload</button>
-        </div>`).join('')}` : ''}
-      <div class="rp-m-section-label">Subjects</div>
-      ${rows.map((r) => `<div class="ed-m-acc">
+    <button class="icon-chip primary" id="pb-publish-all-m" style="width:100%;margin-bottom:14px">🚀 Publish Results</button>
+    ${allPublished ? `<div class="rp-m-strip ok">✅ Every subject published <a href="#" id="pb-go-reports-m">🖨️ Reports</a></div>` : ''}
+    ${missing.length ? `<div class="rp-m-strip warn">⚠️ ${missing.length} subject(s) missing marks <a href="#" id="pb-remind-m">Remind</a></div>` : ''}
+    ${noResultsYet.length ? `<div class="card side-accent tile-amber" style="margin-bottom:14px">
+      <div class="card-h" style="padding:12px 14px"><h3 style="font-size:13px;margin:0">Learning area without results</h3></div>
+      ${noResultsYet.map((r) => `<div class="ed-m-acc">
+        <div class="ed-m-acc-head">
+          <div><div class="ed-m-acc-name">${esc(r.subject_name)}</div><div class="ed-m-acc-meta">${r.teacher_name ? esc(r.teacher_name) : '— unassigned —'} · ${r.expected_count || '?'} missing</div></div>
+        </div>
+        <div class="ed-m-acc-body" style="display:block"><button class="icon-chip" data-upload="${r.subject_id}" style="width:100%">📤 Upload</button></div>
+      </div>`).join('')}
+    </div>` : ''}
+    ${startedRows.length ? `<div class="card side-accent tile-blue" style="margin-bottom:14px">
+      <div class="card-h" style="padding:12px 14px"><h3 style="font-size:13px;margin:0">Subjects with marks entered</h3></div>
+      ${startedRows.map((r) => `<div class="ed-m-acc">
         <div class="ed-m-acc-head" data-acc-toggle>
           <div><div class="ed-m-acc-name">${esc(r.subject_name)}</div><div class="ed-m-acc-meta">${r.teacher_name ? esc(r.teacher_name) : '— unassigned —'} · ${r.entered_count}/${r.expected_count || '?'}</div></div>
           <span class="badge ${STATUS_BADGE_CLASS[r.status] || 'grey'}">${esc(SUBMISSION_STATUS_LABELS[r.status] || r.status)}</span>
         </div>
         <div class="ed-m-acc-body">${rowActionsHtml(r, true)}</div>
       </div>`).join('')}
-      ${isAdmin ? `<div class="rp-m-bottom">
-        <button class="icon-chip" id="pb-grant-access-m">🔓 Grant access</button>
-        <button class="icon-chip" id="pb-withdraw-m">↩️ Withdraw</button>
-      </div>` : ''}
-    </div>`;
+    </div>` : ''}
+    ${isAdmin ? `<div style="display:flex;gap:8px">
+      <button class="icon-chip" id="pb-grant-access-m" style="flex:1">🔓 Grant access</button>
+      <button class="icon-chip" id="pb-withdraw-m" style="flex:1">↩️ Withdraw</button>
+    </div>` : ''}`;
 
   listEl.innerHTML = `<div class="ed-desktop-view">${desktopHtml}</div><div class="ed-mobile-view">${mobileHtml}</div>`;
 

@@ -289,9 +289,9 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
           ${statusNote}
           ${maxMarksHint}
           <div class="card-b table-wrap"><table class="data">
-            <thead><tr><th class="num">#</th><th>Admission No.</th><th>Name</th><th class="num" style="width:120px">Score</th></tr></thead>
-            <tbody>${rows.map((r, i) => `<tr>
-              <td class="num">${i + 1}</td><td>${esc(r.admission_no)}</td><td>${esc(r.full_name)}</td>
+            <thead><tr><th>Admission No.</th><th>Name</th><th class="num" style="width:120px">Score</th></tr></thead>
+            <tbody>${rows.map((r) => `<tr>
+              <td>${esc(r.admission_no)}</td><td>${esc(r.full_name)}</td>
               <td><input type="number" min="0" max="${res.out_of}" step="0.5" value="${esc(r.score)}" data-student="${r.student_id}" style="text-align:center" ${canEdit ? '' : 'disabled'}></td>
             </tr>`).join('')}</tbody>
           </table></div>
