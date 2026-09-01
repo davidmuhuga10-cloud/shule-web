@@ -1464,3 +1464,47 @@ table.data td.num,table.data th.num{text-align:center}
 .ed-m-cgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .ed-m-cgrid button,.ed-m-full{padding:9px;border:1.5px solid var(--line);border-radius:8px;background:#fff;font-weight:700;font-size:12px}
 .ed-m-full{width:100%}
+
+/* Design standard rollout round 3 continued — Exam Desk's own sub-panels
+   (Review & Publish / Marks Entry / Bulk Upload), approved sketches: a
+   shared bordered "icon-chip" button used instead of the plain ghost .btn
+   for these panels' actions. */
+.icon-chip{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:7px 12px;border:1.5px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;font-size:13px;font-weight:600;color:#334155}
+.icon-chip:hover{background:#f8fafc}
+.icon-chip.primary{background:#0f172a;color:#fff;border-color:#0f172a}
+.icon-chip.primary:hover{background:#1e293b}
+.icon-chip.danger{border-color:#fecaca;color:#b91c1c}
+.icon-chip[disabled]{opacity:.5;cursor:default}
+
+/* Review & Publish — mobile-only view (approved "Design A", consolidated
+   card): one bordered card holds everything with thin dividers + section
+   labels instead of several stacked, separately-bordered cards; no
+   explanatory hint text next to the Publish button (approved feedback: an
+   admin already knows what "Publish Results" does). Reuses the exact same
+   .ed-m-acc accordion the Exam Desk board uses for its subject list. */
+.rp-m-top{padding:14px;display:flex;justify-content:flex-end}
+.rp-m-strip{margin:0 14px 4px;padding:10px 12px;border-radius:8px;font-size:12px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.rp-m-strip.warn{background:#fffbeb;border:1px solid #fde68a}
+.rp-m-strip.ok{background:#f0fdf4;border:1px solid #bbf7d0}
+.rp-m-strip a{font-weight:700;text-decoration:none;white-space:nowrap}
+.rp-m-strip.warn a{color:#b45309}
+.rp-m-strip.ok a{color:#15803d}
+.rp-m-section-label{padding:14px 14px 4px;font-size:11px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:var(--muted)}
+.rp-m-inline-row{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-top:1px solid var(--line)}
+.rp-m-inline-row .name{font-weight:700;font-size:13px}
+.rp-m-inline-row .meta{font-size:11px;color:var(--muted)}
+.rp-m-bottom{display:flex;gap:8px;padding:12px 14px;border-top:1px solid var(--line);background:#f8fafc}
+.rp-m-bottom .icon-chip{flex:1}
+
+/* Marks Entry — mobile-only view (approved "Design 3", compact two-line
+   list): no Grade column (feedback: the grade is only meaningful once a
+   grading scale finalizes it, so showing one at raw entry time is
+   misleading) — score input only, name+admission stacked in one column. */
+.mk-m-head{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.mk-m-name{font-weight:800;font-size:15px}
+.mk-m-row{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+.mk-m-num{width:20px;color:var(--muted);font-size:12px;flex:0 0 auto}
+.mk-m-info{flex:1;min-width:0}
+.mk-m-info .name{font-weight:700;font-size:13px}
+.mk-m-info .adm{font-size:11px;color:var(--muted)}
+.mk-m-score{width:72px;padding:9px 4px;border:1.5px solid var(--line);border-radius:8px;text-align:center;font-weight:700;font-size:15px;flex:0 0 auto}
