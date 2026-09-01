@@ -265,34 +265,66 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
         ${isAdmin ? 'You can save corrected marks here, or reopen it below to let the workflow run again.' : 'Editing is locked now that this has been submitted — ask an admin to reopen it (in Publish Results) if a correction is needed.'}</p>
       </div>`;
 
+    // Design standard rollout round 3 (approved feedback): the Grade
+    // column is gone — it's only meaningful once a grading scale actually
+    // finalizes it, so showing one at raw entry time was misleading.
+    // Header actions switched to the bordered icon-chip style, card gets a
+    // border accent; mobile gets its own compact two-line list (approved
+    // "Design 3") instead of the table — same score input, no separate
+    // Admission No./Name columns to squeeze sideways.
+    const headActions = `
+      ${status === 'draft' && canEdit ? '<button class="icon-chip" id="mk-submit">📤 Submit for approval</button>' : ''}
+      ${status !== 'draft' && isAdmin ? '<button class="icon-chip" id="mk-reopen">↩️ Reopen</button>' : ''}
+      ${hasAnyMarks && status !== 'published' && canEdit ? '<button class="icon-chip danger" id="mk-delete-all">🗑️ Delete All</button>' : ''}
+      ${canEdit ? '<button class="icon-chip primary" id="mk-save">💾 Save marks</button>' : ''}`;
+
     gridEl.innerHTML = `
-      <div class="card">
-        <div class="card-h"><h3>${esc(subject.name)}${paperName ? ` — ${esc(paperName)}` : ''} — marks (out of ${res.out_of})</h3>
-          <span class="badge ${STATUS_BADGE_CLASS[status] || 'grey'}" style="margin-left:10px">${esc(SUBMISSION_STATUS_LABELS[status] || status)}</span>
-          <div class="spacer"></div>
-          ${status === 'draft' && canEdit ? '<button class="btn secondary" id="mk-submit">Submit for approval</button>' : ''}
-          ${status !== 'draft' && isAdmin ? '<button class="btn secondary" id="mk-reopen">Reopen</button>' : ''}
-          ${hasAnyMarks && status !== 'published' && canEdit ? '<button class="btn danger sm" id="mk-delete-all">🗑️ Delete All Results</button>' : ''}
-          ${canEdit ? '<button class="btn" id="mk-save">Save marks</button>' : ''}</div>
-        ${paperPicker}
-        ${statusNote}
-        ${maxMarksHint}
-        <div class="card-b table-wrap"><table class="data">
-          <thead><tr><th class="num">#</th><th>Admission No.</th><th>Name</th><th class="num" style="width:120px">Score</th><th>Grade</th></tr></thead>
-          <tbody>${rows.map((r, i) => `<tr>
-            <td class="num">${i + 1}</td><td>${esc(r.admission_no)}</td><td>${esc(r.full_name)}</td>
-            <td><input type="number" min="0" max="${res.out_of}" step="0.5" value="${esc(r.score)}" data-student="${r.student_id}" style="text-align:center" ${canEdit ? '' : 'disabled'}></td>
-            <td><span class="badge blue" data-grade="${r.student_id}">${esc(r.grade_label || '—')}</span></td>
-          </tr>`).join('')}</tbody>
-        </table></div>
+      <div class="card side-accent tile-green">
+        <div class="ed-desktop-view">
+          <div class="card-h"><h3>${esc(subject.name)}${paperName ? ` — ${esc(paperName)}` : ''} — marks (out of ${res.out_of})</h3>
+            <span class="badge ${STATUS_BADGE_CLASS[status] || 'grey'}" style="margin-left:10px">${esc(SUBMISSION_STATUS_LABELS[status] || status)}</span>
+            <div class="spacer"></div>
+            ${headActions}</div>
+          ${paperPicker}
+          ${statusNote}
+          ${maxMarksHint}
+          <div class="card-b table-wrap"><table class="data">
+            <thead><tr><th class="num">#</th><th>Admission No.</th><th>Name</th><th class="num" style="width:120px">Score</th></tr></thead>
+            <tbody>${rows.map((r, i) => `<tr>
+              <td class="num">${i + 1}</td><td>${esc(r.admission_no)}</td><td>${esc(r.full_name)}</td>
+              <td><input type="number" min="0" max="${res.out_of}" step="0.5" value="${esc(r.score)}" data-student="${r.student_id}" style="text-align:center" ${canEdit ? '' : 'disabled'}></td>
+            </tr>`).join('')}</tbody>
+          </table></div>
+        </div>
+
+        <div class="ed-mobile-view">
+          <div class="mk-m-head">
+            <div>
+              <div class="mk-m-name">${esc(subject.name)}${paperName ? ` — ${esc(paperName)}` : ''}</div>
+              <span class="badge ${STATUS_BADGE_CLASS[status] || 'grey'}">${esc(SUBMISSION_STATUS_LABELS[status] || status)} · out of ${res.out_of}</span>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line)">${headActions}</div>
+          ${paperPicker}
+          ${statusNote}
+          ${maxMarksHint}
+          ${rows.map((r, i) => `<div class="mk-m-row">
+            <span class="mk-m-num">${i + 1}</span>
+            <div class="mk-m-info"><div class="name">${esc(r.full_name)}</div><div class="adm">${esc(r.admission_no)}</div></div>
+            <input class="mk-m-score" type="number" min="0" max="${res.out_of}" step="0.5" value="${esc(r.score)}" data-student="${r.student_id}" ${canEdit ? '' : 'disabled'}>
+          </div>`).join('')}
+        </div>
       </div>`;
 
     gridEl.querySelectorAll('#mk-paper-chips [data-paper]').forEach((chip) => chip.onclick = () => {
       paperId = chip.dataset.paper;
       renderGridForPaper();
     });
-    const maxMarksFixLink = gridEl.querySelector('#mk-maxmarks-fix');
-    if (maxMarksFixLink) maxMarksFixLink.onclick = (e) => {
+    // headActions/paperPicker/statusNote/maxMarksHint are each rendered
+    // twice (once for the desktop table, once for the mobile list, only
+    // one of which is visible at a time via CSS) — querySelectorAll+forEach
+    // throughout this function wires both copies instead of just the first.
+    gridEl.querySelectorAll('#mk-maxmarks-fix').forEach((maxMarksFixLink) => maxMarksFixLink.onclick = (e) => {
       e.preventDefault();
       modal({
         title: 'Set Maximum Marks',
@@ -308,25 +340,32 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
           renderGridForPaper();
         }
       });
-    };
+    });
 
-    const saveMarksBtn = gridEl.querySelector('#mk-save');
-    if (canEdit) saveMarksBtn.onclick = () => withBusy(saveMarksBtn, async () => {
-      const inputs = [...gridEl.querySelectorAll('input[data-student]')];
-      const invalid = inputs.filter((i) => i.value !== '' && (isNaN(Number(i.value)) || Number(i.value) < 0 || Number(i.value) > res.out_of));
-      if (invalid.length) { toast(`${invalid.length} score(s) are out of range (0–${res.out_of}).`, 'err'); return; }
-      const scores = inputs.map((i) => ({ student_id: i.dataset.student, score: i.value }));
-      const saveRes = await Db.results.saveResultsEntry({
-        exam_id: examId, class_id: classId, subject_id: subject.id, paper_id: paperId || null, scores
-      });
-      if (!saveRes.ok) { toast(saveRes.message, 'err'); return; }
-      toast(`Saved ${saveRes.saved} score(s)${saveRes.cleared ? `, cleared ${saveRes.cleared}` : ''}.`, 'ok');
-      renderGridForPaper();
-    }, 'Saving…');
+    // Only one of the desktop table / mobile list is actually visible at a
+    // time (the other is display:none) — offsetWidth/offsetHeight are 0 on
+    // a display:none element, so this filter reads scores from whichever
+    // copy is currently on screen instead of double-collecting both.
+    const visibleScoreInputs = () => [...gridEl.querySelectorAll('input[data-student]')].filter((i) => i.offsetWidth || i.offsetHeight);
 
-    const submitBtn = gridEl.querySelector('#mk-submit');
-    if (submitBtn) submitBtn.onclick = () => {
-      const inputs = [...gridEl.querySelectorAll('input[data-student]')];
+    gridEl.querySelectorAll('#mk-save').forEach((saveMarksBtn) => {
+      if (!canEdit) return;
+      saveMarksBtn.onclick = () => withBusy(saveMarksBtn, async () => {
+        const inputs = visibleScoreInputs();
+        const invalid = inputs.filter((i) => i.value !== '' && (isNaN(Number(i.value)) || Number(i.value) < 0 || Number(i.value) > res.out_of));
+        if (invalid.length) { toast(`${invalid.length} score(s) are out of range (0–${res.out_of}).`, 'err'); return; }
+        const scores = inputs.map((i) => ({ student_id: i.dataset.student, score: i.value }));
+        const saveRes = await Db.results.saveResultsEntry({
+          exam_id: examId, class_id: classId, subject_id: subject.id, paper_id: paperId || null, scores
+        });
+        if (!saveRes.ok) { toast(saveRes.message, 'err'); return; }
+        toast(`Saved ${saveRes.saved} score(s)${saveRes.cleared ? `, cleared ${saveRes.cleared}` : ''}.`, 'ok');
+        renderGridForPaper();
+      }, 'Saving…');
+    });
+
+    gridEl.querySelectorAll('#mk-submit').forEach((submitBtn) => submitBtn.onclick = () => {
+      const inputs = visibleScoreInputs();
       const previewRows = inputs.map((inp, i) => ({ admission_no: rows[i].admission_no, full_name: rows[i].full_name, score: inp.value }));
       modal({
         title: `Preview — ${subject.name}`,
@@ -343,25 +382,23 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
           if (r.ok) { closeModal(); toast('Submitted for approval.', 'ok'); renderGridForPaper(); } else { toast(r.message, 'err'); }
         }
       });
-    };
-    const reopenBtn = gridEl.querySelector('#mk-reopen');
-    if (reopenBtn) reopenBtn.onclick = () => confirmAction(
+    });
+    gridEl.querySelectorAll('#mk-reopen').forEach((reopenBtn) => reopenBtn.onclick = () => confirmAction(
       'Reopen this subject? It goes back to "not submitted" so it can be corrected, resubmitted and re-approved.',
       async () => {
         const r = await Db.results.reopenSubmission(examId, classId, subject.id);
         if (r.ok) { toast('Reopened.', 'ok'); renderGridForPaper(); } else toast(r.message, 'err');
       },
       true
-    );
-    const deleteAllBtn = gridEl.querySelector('#mk-delete-all');
-    if (deleteAllBtn) deleteAllBtn.onclick = () => confirmAction(
+    ));
+    gridEl.querySelectorAll('#mk-delete-all').forEach((deleteAllBtn) => deleteAllBtn.onclick = () => confirmAction(
       `Delete ALL recorded marks for ${subject.name} in this class? This cannot be undone — use this for a genuine re-do, not a small correction (edit the cell above instead for that).`,
       async () => {
         const r = await Db.results.deleteAllResults(examId, classId, subject.id);
         if (r.ok) { toast(`Deleted ${r.deleted} mark(s).`, 'ok'); renderGridForPaper(); } else toast(r.message, 'err');
       },
       true
-    );
+    ));
   }
 }
 
@@ -408,13 +445,13 @@ async function renderBulkUpload(area, sel, subjectTabs) {
   });
 
   area.innerHTML = `
-    <div class="card" style="margin-bottom:16px">
+    <div class="card side-accent tile-amber" style="margin-bottom:16px">
       <div class="card-h"><h3>Bulk upload marks</h3><div class="spacer"></div>
-        <button class="btn secondary sm" id="bm-template">⬇ Download template</button></div>
+        <button class="icon-chip" id="bm-template">⬇️ Download template</button></div>
       <div class="card-b">
         <p class="hint" style="margin-top:0">One row per student, one column per subject${columns.some((c) => c.paper_id) ? ' (or subject/paper)' : ''} — download, fill in the marks in Excel/Sheets, then upload the same file back. Any marks already entered are pre-filled.</p>
         <input id="bm-file" type="file" accept=".csv,text/csv">
-        <button class="btn" id="bm-preview" style="margin-top:10px" disabled>Preview</button>
+        <button class="icon-chip primary" id="bm-preview" style="margin-top:10px" disabled>Preview</button>
       </div>
     </div>
     <div id="bm-preview-area"></div>
@@ -457,10 +494,10 @@ function renderBulkPreview(area, sel, columns, matched, unmatched) {
 
   const previewArea = area.querySelector('#bm-preview-area');
   previewArea.innerHTML = `
-    <div class="card">
+    <div class="card side-accent tile-blue">
       <div class="card-h"><h3>Preview (${matched.length} student row(s) matched, ${totalCells - badCells} mark(s) ready${badCells ? `, ${badCells} flagged` : ''})</h3>
         <div class="spacer"></div>
-        <button class="btn" id="bm-import" ${matched.length ? '' : 'disabled'}>Import marks</button>
+        <button class="icon-chip primary" id="bm-import" ${matched.length ? '' : 'disabled'}>Import marks</button>
       </div>
       ${unmatched.length ? `<div class="card-b" style="padding-bottom:0"><p class="hint" style="color:var(--danger)">${unmatched.length} row(s) didn't match any student in this class by admission number and will be skipped.</p></div>` : ''}
       <div class="card-b table-wrap"><table class="data">

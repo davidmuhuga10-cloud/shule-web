@@ -39,11 +39,17 @@ const STATUS_BADGE_CLASS = { draft: 'grey', submitted: 'blue', approved: 'blue',
  *  over to the Marks Entry tab pre-selecting that subject, entirely within
  *  the same screen (no page navigation, matching brief §14's "one place"). */
 export async function renderPublishPanel(container, sel, onEditSubject) {
+  // Design standard rollout round 3 (approved sketch): the explanatory hint
+  // next to the button is gone — an admin already knows what "Publish
+  // Results" does. Desktop keeps its own small header card (border accent +
+  // icon-chip button); on mobile the button instead sits at the top of the
+  // one consolidated card loadList() renders (see .rp-m-top).
   container.innerHTML = `
-    <div class="card no-print" style="margin-bottom:16px">
-      <div class="card-b" style="display:flex;align-items:center;gap:10px">
-        <p class="hint" style="margin:0;flex:1">Approve and publish each subject's marks so parents can see them — nothing is visible to a parent until it's published here.</p>
-        <button class="btn" id="pb-publish-all">🚀 Publish Results</button>
+    <div class="ed-desktop-view">
+      <div class="card side-accent tile-blue no-print" style="margin-bottom:16px">
+        <div class="card-b" style="display:flex;justify-content:flex-end">
+          <button class="icon-chip primary" id="pb-publish-all">🚀 Publish Results</button>
+        </div>
       </div>
     </div>
     <div id="pb-list"></div>
@@ -193,16 +199,33 @@ async function loadList(root, sel, onEditSubject) {
   // specifically the subjects nobody has started on at all.
   const noResultsYet = rows.filter((r) => r.entered_count === 0);
 
-  listEl.innerHTML = `
+  // Design standard rollout round 3 (approved sketch "Design A"): mobile
+  // gets one consolidated card instead of the desktop's several separately-
+  // bordered cards — a slim status strip instead of a full banner, the
+  // "Learning area without results" subjects folded in with an inline row,
+  // and the subject list as the same .ed-m-acc accordion the Exam Desk
+  // board already uses. Desktop keeps its existing table layout exactly,
+  // just with border accents and the icon-chip button style.
+  const rowActionsHtml = (r, mobile) => {
+    const btns = [];
+    if (r.status !== 'published') btns.push(`<button class="icon-chip" data-publish="${r.subject_id}">Publish</button>`);
+    if (r.status === 'published') btns.push(`<button class="icon-chip" data-reopen="${r.subject_id}">↩️ Reopen</button>`);
+    if (isAdmin) btns.push(`<button class="icon-chip" data-edit="${r.subject_id}">${r.entered_count === 0 ? '📤 Upload' : '✏️ Edit Marks'}</button>`);
+    if (!mobile) return btns.join('');
+    if (btns.length > 1) return `<div class="ed-m-cgrid">${btns.join('')}</div>`;
+    return btns.length ? btns[0].replace('class="icon-chip"', 'class="icon-chip" style="width:100%"') : '';
+  };
+
+  const desktopHtml = `
     ${allPublished ? `<div class="card" style="margin-bottom:16px;border-color:var(--ok)"><div class="card-b" style="display:flex;align-items:center;gap:12px">
       <p class="hint" style="margin:0;flex:1"><b>✅ Every subject is published</b> for this class — report cards and analyses are ready to print, nothing further to do here.</p>
-      <button class="btn" id="pb-go-reports">🖨️ Go to Report Forms</button>
+      <button class="icon-chip" id="pb-go-reports">🖨️ Go to Report Forms</button>
     </div></div>` : ''}
     ${missing.length ? `<div class="card" style="margin-bottom:16px;border-color:var(--warn)"><div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <p class="hint" style="margin:0;flex:1"><b>⚠️ ${missing.length} subject(s) still have missing marks</b> — ${missing.map((r) => `${esc(r.subject_name)} (${r.entered_count}/${r.expected_count || '?'})`).join(', ')}. You can still publish what's complete, or wait for these to finish.</p>
-      <button class="btn secondary sm" id="pb-remind">📣 Remind pending teachers</button>
+      <button class="icon-chip" id="pb-remind">📣 Remind pending teachers</button>
     </div></div>` : ''}
-    ${noResultsYet.length ? `<div class="card" style="margin-bottom:16px">
+    ${noResultsYet.length ? `<div class="card side-accent tile-amber" style="margin-bottom:16px">
       <div class="card-h"><h3>Learning area without results</h3></div>
       <div class="card-b table-wrap"><table class="data">
         <thead><tr><th>Subject</th><th>Teacher</th><th>Missing</th><th></th></tr></thead>
@@ -210,11 +233,11 @@ async function loadList(root, sel, onEditSubject) {
           <td>${esc(r.subject_name)}</td>
           <td>${r.teacher_name ? esc(r.teacher_name) : '<span class="muted">— unassigned —</span>'}</td>
           <td>${r.expected_count || '?'}</td>
-          <td class="row-actions"><button class="btn ghost sm" data-upload="${r.subject_id}">Upload</button></td>
+          <td class="row-actions"><button class="icon-chip" data-upload="${r.subject_id}">📤 Upload</button></td>
         </tr>`).join('')}</tbody>
       </table></div>
     </div>` : ''}
-    <div class="card">
+    <div class="card side-accent tile-blue">
       <div class="card-b table-wrap"><table class="data">
         <thead><tr><th>Subject</th><th>Teacher</th><th>Marks entered</th><th>Status</th><th></th></tr></thead>
         <tbody>${rows.map((r) => `<tr>
@@ -222,35 +245,48 @@ async function loadList(root, sel, onEditSubject) {
           <td>${r.teacher_name ? esc(r.teacher_name) : '<span class="muted">— unassigned —</span>'}</td>
           <td>${r.complete ? `<span class="badge green">${r.entered_count}/${r.expected_count}</span>` : `<span class="badge amber">${r.entered_count}/${r.expected_count || '?'} — incomplete</span>`}</td>
           <td><span class="badge ${STATUS_BADGE_CLASS[r.status] || 'grey'}">${esc(SUBMISSION_STATUS_LABELS[r.status] || r.status)}</span></td>
-          <td class="row-actions">
-            ${r.status !== 'published' ? `<button class="btn ghost sm" data-publish="${r.subject_id}">Publish</button>` : ''}
-            ${r.status === 'published' ? `<button class="btn ghost sm" data-reopen="${r.subject_id}">Reopen</button>` : ''}
-            ${isAdmin ? `<button class="btn ghost sm" data-edit="${r.subject_id}">✏️ Edit Marks</button>` : ''}
-          </td></tr>`).join('')}</tbody>
+          <td class="row-actions">${rowActionsHtml(r, false)}</td></tr>`).join('')}</tbody>
       </table></div>
     </div>
-    ${isAdmin ? `<div class="card" style="margin-top:16px">
+    ${isAdmin ? `<div class="card side-accent tile-teal" style="margin-top:16px">
       <div class="card-h"><h3>Action</h3></div>
       <div class="card-b" style="display:flex;gap:10px;flex-wrap:wrap">
-        <button class="btn secondary sm" id="pb-grant-access">🔓 Grant teacher edit access</button>
-        <button class="btn secondary sm" id="pb-withdraw">↩️ Withdraw Results</button>
+        <button class="icon-chip" id="pb-grant-access">🔓 Grant teacher edit access</button>
+        <button class="icon-chip" id="pb-withdraw">↩️ Withdraw Results</button>
       </div>
     </div>` : ''}`;
 
-  const goReportsBtn = listEl.querySelector('#pb-go-reports');
-  if (goReportsBtn) goReportsBtn.onclick = () => {
-    setNavIntent('report-forms', { exam_id: sel.exam_id, class_id: sel.class_id });
-    go('reports');
-  };
+  const mobileHtml = `
+    <div class="card side-accent tile-blue">
+      <div class="rp-m-top"><button class="icon-chip primary" id="pb-publish-all-m">🚀 Publish Results</button></div>
+      ${allPublished ? `<div class="rp-m-strip ok">✅ Every subject published <a href="#" id="pb-go-reports-m">🖨️ Reports</a></div>` : ''}
+      ${missing.length ? `<div class="rp-m-strip warn">⚠️ ${missing.length} subject(s) missing marks <a href="#" id="pb-remind-m">Remind</a></div>` : ''}
+      ${noResultsYet.length ? `
+        <div class="rp-m-section-label">Learning area without results</div>
+        ${noResultsYet.map((r) => `<div class="rp-m-inline-row">
+          <div><div class="name">${esc(r.subject_name)}</div><div class="meta">${r.teacher_name ? esc(r.teacher_name) : '— unassigned —'} · ${r.expected_count || '?'} missing</div></div>
+          <button class="icon-chip" data-upload="${r.subject_id}">📤 Upload</button>
+        </div>`).join('')}` : ''}
+      <div class="rp-m-section-label">Subjects</div>
+      ${rows.map((r) => `<div class="ed-m-acc">
+        <div class="ed-m-acc-head" data-acc-toggle>
+          <div><div class="ed-m-acc-name">${esc(r.subject_name)}</div><div class="ed-m-acc-meta">${r.teacher_name ? esc(r.teacher_name) : '— unassigned —'} · ${r.entered_count}/${r.expected_count || '?'}</div></div>
+          <span class="badge ${STATUS_BADGE_CLASS[r.status] || 'grey'}">${esc(SUBMISSION_STATUS_LABELS[r.status] || r.status)}</span>
+        </div>
+        <div class="ed-m-acc-body">${rowActionsHtml(r, true)}</div>
+      </div>`).join('')}
+      ${isAdmin ? `<div class="rp-m-bottom">
+        <button class="icon-chip" id="pb-grant-access-m">🔓 Grant access</button>
+        <button class="icon-chip" id="pb-withdraw-m">↩️ Withdraw</button>
+      </div>` : ''}
+    </div>`;
 
-  const remindBtn = listEl.querySelector('#pb-remind');
-  if (remindBtn) remindBtn.onclick = () => remindPendingTeachers(root, sel, rows);
+  listEl.innerHTML = `<div class="ed-desktop-view">${desktopHtml}</div><div class="ed-mobile-view">${mobileHtml}</div>`;
 
-  const grantBtn = listEl.querySelector('#pb-grant-access');
-  if (grantBtn) grantBtn.onclick = () => openGrantAccessModal(root, sel, rows, onEditSubject);
-
-  const withdrawBtn = listEl.querySelector('#pb-withdraw');
-  if (withdrawBtn) withdrawBtn.onclick = () => confirmAction(
+  const goReports = () => { setNavIntent('report-forms', { exam_id: sel.exam_id, class_id: sel.class_id }); go('reports'); };
+  const doRemind = () => remindPendingTeachers(root, sel, rows);
+  const doGrant = () => openGrantAccessModal(root, sel, rows, onEditSubject);
+  const doWithdraw = () => confirmAction(
     'Withdraw all published results for this class? They go back to "not submitted" and will no longer be visible to parents until republished.',
     async () => {
       const r = await Db.results.withdrawExam(sel.exam_id, sel.class_id);
@@ -258,10 +294,26 @@ async function loadList(root, sel, onEditSubject) {
     },
     true
   );
+  const doPublishAll = () => openPublishSettingsModal(root, sel, onEditSubject);
+
+  listEl.querySelectorAll('#pb-go-reports, #pb-go-reports-m').forEach((b) => b.onclick = (e) => { e.preventDefault(); goReports(); });
+  listEl.querySelectorAll('#pb-remind, #pb-remind-m').forEach((b) => b.onclick = (e) => { e.preventDefault(); doRemind(); });
+  listEl.querySelectorAll('#pb-grant-access, #pb-grant-access-m').forEach((b) => b.onclick = doGrant);
+  listEl.querySelectorAll('#pb-withdraw, #pb-withdraw-m').forEach((b) => b.onclick = doWithdraw);
+  listEl.querySelectorAll('#pb-publish-all-m').forEach((b) => b.onclick = doPublishAll);
+
+  // Mobile-only accordion: tapping a subject row's header (not a button
+  // inside it) opens/closes its actions — same mechanism as Exam Desk.
+  listEl.querySelectorAll('[data-acc-toggle]').forEach((h) => h.onclick = (ev) => {
+    if (ev.target.closest('button')) return;
+    h.closest('.ed-m-acc').classList.toggle('open');
+  });
 
   // Brief §14: "Edit Marks"/"Upload" no longer navigates to a separate
   // page — it flips Exam Desk's own detail view over to the Marks Entry
-  // tab, pre-selecting this subject, all within the same screen.
+  // tab, pre-selecting this subject, all within the same screen. Each of
+  // these now appears in both the desktop and mobile views, so
+  // querySelectorAll+forEach wires both copies.
   listEl.querySelectorAll('[data-upload]').forEach((b) => b.onclick = () => onEditSubject(b.dataset.upload));
   listEl.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => onEditSubject(b.dataset.edit));
 
