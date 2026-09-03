@@ -1562,6 +1562,22 @@ table.data td.num,table.data th.num{text-align:center}
 .charcount b{color:var(--ink)}
 .charcount.over b{color:var(--danger)}
 
+/* Compose "send a copy to" — a real second SMS batch to picked staff, not
+   a silent bcc. Multi-select as chips: picking a name ADDS them below
+   without removing anyone already added; each chip's × removes only that
+   one person. */
+.send-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.copy-to-wrap{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.copy-to-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.copy-to-top label{font-size:12.5px;color:var(--ink);cursor:pointer}
+.copy-to-top input[type=checkbox]{width:15px;height:15px;accent-color:var(--primary)}
+.copy-to-top select{border:1px solid var(--line);border-radius:7px;padding:6px 8px;font-size:12.5px;font-family:inherit;color:var(--ink);background:#fff}
+.copy-to-top select:disabled{color:var(--muted);background:#f5f6f8}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:flex;align-items:center;gap:6px;background:#eef1f5;border:1px solid var(--line);border-radius:99px;padding:3px 6px 3px 10px;font-size:12px}
+.chip button{border:none;background:none;cursor:pointer;color:var(--muted);font-size:14px;line-height:1;padding:2px;border-radius:50%}
+.chip button:hover{color:var(--danger);background:#fdecec}
+
 .mode-toggle{display:flex;border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;width:fit-content}
 .mode-toggle button{border:none;background:#fff;padding:8px 14px;font-size:12.5px;font-weight:650;
   color:var(--muted);cursor:pointer;font-family:inherit}

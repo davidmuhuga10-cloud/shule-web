@@ -77,7 +77,9 @@ export async function viewMessaging(root) {
     exam_id: intent.exam_id || (exams[0] ? exams[0].id : ''),
     resultsMode: 'class',
     body: '',
-    customNote: ''
+    customNote: '',
+    ccEnabled: false,
+    ccStaffIds: []
   });
 }
 
@@ -147,11 +149,48 @@ function renderCompose(body, data, sel, root) {
         <div class="charcount" id="msg-count"></div>
         <p class="hint" id="msg-preview" style="margin-top:6px"></p>
       </div>
-      <div class="card-b" style="display:flex;justify-content:flex-end;border-top:1px solid var(--line)">
+      <div class="card-b send-row" style="border-top:1px solid var(--line)">
+        <div class="copy-to-wrap">
+          <div class="copy-to-top">
+            <input type="checkbox" id="msg-cc-check"${sel.ccEnabled ? ' checked' : ''}>
+            <label for="msg-cc-check">Send a copy to</label>
+            <select id="msg-cc-add"${sel.ccEnabled ? '' : ' disabled'}>
+              <option value="">+ Add someone…</option>
+              ${staff.map((s) => `<option value="${esc(s.id)}">${esc(s.full_name)}${s.phone ? '' : ' (no phone on file)'}</option>`).join('')}
+            </select>
+          </div>
+          <div class="chips" id="msg-cc-chips"></div>
+        </div>
         <button class="btn" id="msg-send">Send message</button>
       </div>
     </div>
   `;
+
+  // "Send a copy to" reuses the 'personalized' scope as a SECOND, separate
+  // batch fired after the main one — a real SMS to each picked staff
+  // member (their own message_logs rows, own SMS-credit cost), not a
+  // silent bcc. Picking a name ADDS them; each chip removes only itself,
+  // so a second pick never drops the first one by mistake.
+  const ccChipsEl = body.querySelector('#msg-cc-chips');
+  function renderCcChips() {
+    ccChipsEl.innerHTML = sel.ccStaffIds.map((id) => {
+      const s = staff.find((x) => x.id === id);
+      return `<span class="chip">${esc(s ? s.full_name : 'Unknown')}<button type="button" data-cc-id="${esc(id)}" title="Remove">×</button></span>`;
+    }).join('');
+    ccChipsEl.querySelectorAll('button').forEach((b) => b.onclick = () => {
+      sel.ccStaffIds = sel.ccStaffIds.filter((id) => id !== b.dataset.ccId);
+      renderCcChips();
+    });
+  }
+  renderCcChips();
+  body.querySelector('#msg-cc-check').onchange = (e) => {
+    sel.ccEnabled = e.target.checked;
+    body.querySelector('#msg-cc-add').disabled = !sel.ccEnabled;
+  };
+  body.querySelector('#msg-cc-add').onchange = (e) => {
+    if (e.target.value && !sel.ccStaffIds.includes(e.target.value)) { sel.ccStaffIds.push(e.target.value); renderCcChips(); }
+    e.target.value = '';
+  };
 
   // Only ever shows an actual problem (no contact on file) or an unmade
   // choice — never a plain restating of what the "To" selection already
@@ -187,10 +226,26 @@ function renderCompose(body, data, sel, root) {
     btn.disabled = true; btn.textContent = 'Sending…';
     const payload = { scope: sel.scope, body: textEl.value, class_id: sel.class_id, student_id: sel.student_id, staff_id: sel.staff_id };
     const r = await Db.messaging.send(payload);
+
+    let ccResult = null;
+    if (r.ok && sel.ccEnabled && sel.ccStaffIds.length) {
+      const ccRecipients = sel.ccStaffIds
+        .map((id) => staff.find((s) => s.id === id))
+        .filter((s) => s && s.phone)
+        .map((s) => ({ staff_id: s.id, phone: s.phone, body: textEl.value }));
+      if (ccRecipients.length) {
+        ccResult = await Db.messaging.send({ scope: 'personalized', scope_label: 'Copy of a message', recipients: ccRecipients });
+      }
+    }
+
     btn.disabled = false; btn.textContent = 'Send message';
     if (!r.ok) { toast(r.message, 'err'); return; }
-    toast(r.message || `Sent to ${r.recipients} recipient(s).`, r.delivered ? 'ok' : 'warn');
+    let msg = r.message || `Sent to ${r.recipients} recipient(s).`;
+    if (ccResult) msg += ccResult.ok ? ` Copy sent to ${sel.ccStaffIds.length} staff.` : ` (Copy failed: ${ccResult.message})`;
+    toast(msg, r.delivered ? 'ok' : 'warn');
     sel.body = ''; textEl.value = ''; updateCount();
+    sel.ccEnabled = false; sel.ccStaffIds = [];
+    renderCompose(body, data, sel, root);
   };
 }
 
