@@ -327,7 +327,7 @@ function render(root, exams, classes, intent, settings) {
   // it's refreshed here too before the handed-off exam_id is selected.
   if (intent.class_id && intent.exam_id) {
     Promise.all([refreshStreams(intent.class_id, intent.stream_id), refreshExams(intent.class_id, intent.exam_id)]).then(() => {
-      refreshStudents(intent.class_id, intent.student_id || BATCH_VALUE, intent.stream_id).then(() => { wireStudentSelect(); tryLoad(); });
-    });
+      refreshStudents(intent.class_id, intent.student_id || BATCH_VALUE, intent.stream_id).then(() => { wireStudentSelect(); tryLoad(); }).catch((e) => console.error('reportForms: refreshStudents failed', e));
+    }).catch((e) => console.error('reportForms: prefill from nav intent failed', e));
   }
 }

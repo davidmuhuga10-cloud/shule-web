@@ -274,5 +274,8 @@ function openClassPickerModal(root, exam, currentClassRows, onDone) {
         onDone();
       }
     });
+  }).catch((e) => {
+    console.error('openClassPickerModal: failed to load class choices', e);
+    toast(`Couldn't load classes to add${e && e.message ? ` (${e.message})` : ''}.`, 'err');
   });
 }

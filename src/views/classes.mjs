@@ -170,7 +170,12 @@ function openBulkAddClassesModal(root, allClasses) {
       if (missingStreams) { toast(`Add at least one stream for ${missingStreams.name}.`, 'err'); return; }
       const res = await Db.classes.bulkSave(items);
       if (!res.ok) { toast(res.message, 'err'); return; }
-      const { created, total, failed } = res.data;
+      // bulkSave() returns ok(null, {created, total, failed}) — those
+      // fields sit on the result object itself, not under `.data` (see
+      // ok()'s definition in _util.mjs). Reading `res.data` here always
+      // got `null` and crashed this handler on every single bulk-add,
+      // the exact same mismatch that broke exam-results sending.
+      const { created, total, failed } = res;
       closeModal();
       if (failed && failed.length) {
         toast(`Added ${created} of ${total} classes. Failed: ${failed.map((f) => f.name).join(', ')}.`, created ? 'ok' : 'err');
