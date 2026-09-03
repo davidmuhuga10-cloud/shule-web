@@ -387,13 +387,20 @@ function renderResultsSendCard(el, data, sel, root, body) {
         <label class="f-lab">Optional message <span class="muted" style="text-transform:none;font-weight:500">(added to every message in this batch)</span></label>
         <textarea id="msg-results-note" rows="2" placeholder="e.g. Opening date 14th, please come accompanied by your parent.">${esc(sel.customNote || '')}</textarea>
       </div>
-      <div class="card-b" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;border-top:1px solid var(--line)">
-        <div class="muted" style="font-size:13px" id="msg-results-count"></div>
-        <button class="btn" id="msg-results-send">Send results</button>
+      <div class="card-b" style="display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line)">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <div class="muted" style="font-size:13px" id="msg-results-count"></div>
+          <button class="btn" id="msg-results-send">Send results</button>
+        </div>
+        <div id="msg-results-balance" class="hint" style="margin:0"></div>
       </div>
       <div id="msg-results-processed"></div>
     </div>
   `;
+  // Real oninput wiring happens once the broadsheet loads below, so it can
+  // recompute the preview/count/balance on every keystroke — this early
+  // binding is just a safety net for the (exam/class not found) early
+  // return path above, so typing there doesn't silently do nothing.
   el.querySelector('#msg-results-note').oninput = (e) => { sel.customNote = e.target.value; };
 
   const cls = data.classes.find((c) => c.id === sel.class_id);
@@ -408,7 +415,10 @@ function renderResultsSendCard(el, data, sel, root, body) {
   }
   const examLabel = `${exam.name}${exam.term_name ? `, ${exam.term_name}` : ''}${exam.academic_year_name ? ` ${exam.academic_year_name}` : ''}`;
 
-  Db.results.getBroadsheet({ exam_id: sel.exam_id, class_id: sel.class_id }).then((bsRes) => {
+  Promise.all([
+    Db.results.getBroadsheet({ exam_id: sel.exam_id, class_id: sel.class_id }),
+    Db.smsCredits.wallet()
+  ]).then(([bsRes, walletRes]) => {
     const previewBox = el.querySelector('#msg-results-preview-box');
     const countEl = el.querySelector('#msg-results-count');
     if (!bsRes.ok) { previewBox.innerHTML = `⚠️ ${esc(bsRes.message)}`; return; }
@@ -437,17 +447,53 @@ function renderResultsSendCard(el, data, sel, root, body) {
     }
 
     const previewRow = rows[0];
-    const previewMsg = buildResultsMessage(bs, previewRow, examLabel, cls.name, sel.customNote);
     const schoolName = (state.settings && state.settings.school_name) || 'Your School';
-    previewBox.innerHTML = `
-      <label class="f-lab">Preview — ${esc(previewRow.full_name)}</label>
-      <div class="sms-preview"><b>${esc(schoolName.toUpperCase())}</b>\n\n${esc(previewMsg)}</div>
-    `;
-    countEl.textContent = `${withPhone.length} of ${rows.length} ${sel.resultsMode === 'student' ? 'student' : 'students'} with a guardian number on file will be sent.`;
+    const balanceEl = el.querySelector('#msg-results-balance');
+    const sendBtn = el.querySelector('#msg-results-send');
+    let totalCredits = 0;
+
+    // Recomputed on every keystroke in the note field too — the note is
+    // appended to EVERY message in the batch, so it moves the segment
+    // count (and therefore the credits needed / balance check) as the
+    // admin types, not just once when the card first loads.
+    function refreshPreview() {
+      const previewMsg = buildResultsMessage(bs, previewRow, examLabel, cls.name, sel.customNote);
+      const previewCount = smsCount(previewMsg);
+      previewBox.innerHTML = `
+        <label class="f-lab">Preview — ${esc(previewRow.full_name)}</label>
+        <div class="sms-preview"><b>${esc(schoolName.toUpperCase())}</b>\n\n${esc(previewMsg)}</div>
+        <div class="charcount">Count ${previewCount.segments} SMS (${previewCount.total}/${previewCount.budget} characters)</div>
+      `;
+
+      // Each recipient's message can differ in length (different subjects
+      // counted, different position text) so the real cost is the sum of
+      // each one's own segment count, not the preview's count times N.
+      totalCredits = withPhone.reduce((sum, r) => sum + smsCount(buildResultsMessage(bs, r, examLabel, cls.name, sel.customNote)).segments, 0);
+      countEl.textContent = `${withPhone.length} of ${rows.length} ${sel.resultsMode === 'student' ? 'student' : 'students'} with a guardian number on file will be sent — ${totalCredits} SMS credit${totalCredits === 1 ? '' : 's'} needed.`;
+
+      // Item asked for: don't let an admin click Send only to have it fail
+      // silently against an empty wallet — check the balance up front and
+      // name the exact shortfall so "top up before sending" is actionable,
+      // not just a generic error after the fact.
+      if (walletRes.ok) {
+        const balance = (walletRes.data && walletRes.data.balance) || 0;
+        if (balance < totalCredits) {
+          const short = totalCredits - balance;
+          balanceEl.innerHTML = `⚠️ Not enough SMS credit — this needs <b>${totalCredits}</b>, you have <b>${balance}</b>. Top up at least <b>${short}</b> more credit${short === 1 ? '' : 's'} before sending.`;
+          balanceEl.style.color = 'var(--danger)';
+          sendBtn.disabled = true;
+        } else {
+          balanceEl.textContent = '';
+          sendBtn.disabled = false;
+        }
+      }
+    }
+    refreshPreview();
+    el.querySelector('#msg-results-note').oninput = (e) => { sel.customNote = e.target.value; refreshPreview(); };
 
     el.querySelector('#msg-results-send').onclick = () => {
       const who = sel.resultsMode === 'student' ? previewRow.full_name + "'s guardian" : `${withPhone.length} guardian(s) in ${cls.name}`;
-      confirmAction(`Send exam results to ${who}?`, async () => {
+      confirmAction(`Send exam results to ${who}? (${totalCredits} SMS credit${totalCredits === 1 ? '' : 's'})`, async () => {
         const recipients = withPhone.map((r) => {
           const s = data.students.find((x) => x.id === r.student_id);
           return { student_id: r.student_id, phone: s.guardian_contact, body: buildResultsMessage(bs, r, examLabel, cls.name, sel.customNote) };
@@ -481,6 +527,8 @@ function renderResultsSendCard(el, data, sel, root, body) {
 // SMS HISTORY (items 7 & 8) — a scannable table, and a per-recipient batch
 // detail view with a resend action for anything that failed.
 // ===========================================================================
+const HISTORY_PAGE_SIZE = 10;
+
 async function renderHistory(body, data) {
   body.innerHTML = `<div class="card side-accent tile-indigo"><div id="msg-hist-list">${loader()}</div></div>`;
   const listEl = body.querySelector('#msg-hist-list');
@@ -489,14 +537,34 @@ async function renderHistory(body, data) {
   const batches = groupMessagesByBatch(res.data);
   if (!batches.length) { listEl.innerHTML = `<div class="card-b"><div class="empty"><div class="e-ico">💬</div><h3>No messages sent yet</h3><p>Sends will show up here once you compose one.</p></div></div>`; return; }
 
+  renderHistoryPage(listEl, batches, data, 0, body);
+}
+
+/** Only the current page's rows ever hit the DOM — the rest of `batches`
+ *  stays plain JS until a Prev/Next click asks for it, so a long history
+ *  doesn't render (and keep re-rendering, on every resend) hundreds of
+ *  rows/cards at once. */
+function renderHistoryPage(listEl, batches, data, page, body) {
   const staffById = {}; (data.staff || []).forEach((s) => { staffById[s.id] = s.full_name; });
   const senderOf = (b) => staffById[b.sent_by] || '—';
   const typeLabelOf = (b) => (b.recipient_scope === 'personalized' ? 'Personalized' : 'SMS');
 
+  const pageCount = Math.max(1, Math.ceil(batches.length / HISTORY_PAGE_SIZE));
+  page = Math.min(Math.max(0, page), pageCount - 1);
+  const start = page * HISTORY_PAGE_SIZE;
+  const pageBatches = batches.slice(start, start + HISTORY_PAGE_SIZE);
+
+  const pagerHtml = pageCount > 1 ? `
+    <div class="hist-pager">
+      <button class="btn ghost sm" id="hist-prev" ${page === 0 ? 'disabled' : ''}>← Newer</button>
+      <span class="muted" style="font-size:12.5px">Page ${page + 1} of ${pageCount}</span>
+      <button class="btn ghost sm" id="hist-next" ${page >= pageCount - 1 ? 'disabled' : ''}>Older →</button>
+    </div>` : '';
+
   listEl.innerHTML = `
     <div class="mh-desktop-view"><div class="table-wrap"><table class="data compact">
       <thead><tr><th>Title</th><th>Sender</th><th>Type</th><th class="num">Recipients</th><th class="num">Delivered</th><th class="num">Failed</th><th class="num">Credits</th><th>Date</th><th></th></tr></thead>
-      <tbody>${batches.map((b, i) => `<tr>
+      <tbody>${pageBatches.map((b, i) => `<tr>
         <td>${esc(b.scope_label || b.recipient_scope)}</td>
         <td class="muted">${esc(senderOf(b))}</td>
         <td><span class="badge blue">${esc(typeLabelOf(b))}</span></td>
@@ -508,7 +576,7 @@ async function renderHistory(body, data) {
         <td><button class="btn ghost sm" data-view="${i}">View</button></td>
       </tr>`).join('')}</tbody>
     </table></div></div>
-    <div class="mh-mobile-view">${batches.map((b, i) => `
+    <div class="mh-mobile-view">${pageBatches.map((b, i) => `
       <div class="mh-card" data-view="${i}">
         <div class="mh-card-top">
           <div>
@@ -525,8 +593,13 @@ async function renderHistory(body, data) {
         </div>
       </div>`).join('')}
     </div>
+    ${pagerHtml}
   `;
-  listEl.querySelectorAll('[data-view]').forEach((el) => el.onclick = () => openBatchDetail(batches[Number(el.dataset.view)], body, data));
+  listEl.querySelectorAll('[data-view]').forEach((el) => el.onclick = () => openBatchDetail(pageBatches[Number(el.dataset.view)], body, data));
+  const prevBtn = listEl.querySelector('#hist-prev');
+  const nextBtn = listEl.querySelector('#hist-next');
+  if (prevBtn) prevBtn.onclick = () => renderHistoryPage(listEl, batches, data, page - 1, body);
+  if (nextBtn) nextBtn.onclick = () => renderHistoryPage(listEl, batches, data, page + 1, body);
 }
 
 /** Item 8 — clicking View opens this: individual delivery status, credits

@@ -69,6 +69,11 @@ export async function renderSmsCredits(body) {
     </div>`).join('');
 }
 
+// 1 SMS credit = KSH 1 — the "Credits requested" field used to ask the
+// school to do this arithmetic themselves; now amount paid IS the request,
+// and this rate turns it into the credits the admin approves.
+const KSH_PER_CREDIT = 1;
+
 function openBuyModal(body) {
   modal({
     title: 'Buy SMS Credits',
@@ -76,17 +81,20 @@ function openBuyModal(body) {
     busyLabel: 'Submitting…',
     body: `
       <p class="hint" style="margin-top:0">Send your payment to <b>${ADMIN_PAY_PHONE}</b>, then paste the payment confirmation message below. The platform administrator reviews and approves requests from the Admin Dashboard.</p>
-      <div class="field"><label>Credits requested</label><input id="sms-req-credits" type="number" min="1" placeholder="e.g. 1000"></div>
-      <div class="field"><label>Amount paid (optional)</label><input id="sms-req-amount" type="number" min="0" step="0.01" placeholder="e.g. 1500"></div>
+      <div class="field">
+        <label>Amount paid (KSH)</label>
+        <input id="sms-req-amount" type="number" min="1" step="0.01" placeholder="e.g. 1500">
+        <p class="hint" style="margin:6px 0 0">1 SMS = KSH 1.</p>
+      </div>
       <div class="field"><label>Payment confirmation message</label><textarea id="sms-req-message" rows="3" placeholder="Paste the M-Pesa/other confirmation message here…"></textarea></div>
     `,
     onOk: async () => {
-      const credits = parseInt(document.getElementById('sms-req-credits').value, 10);
       const amount = parseFloat(document.getElementById('sms-req-amount').value);
       const messageText = document.getElementById('sms-req-message').value;
+      if (isNaN(amount) || amount <= 0) { toast('Enter how much you paid.', 'err'); return; }
       const res = await Db.smsCredits.submitRequest({
-        requested_credits: credits,
-        amount_paid: isNaN(amount) ? null : amount,
+        requested_credits: Math.round(amount / KSH_PER_CREDIT),
+        amount_paid: amount,
         payment_message: messageText
       });
       if (!res.ok) { toast(res.message, 'err'); return; }
