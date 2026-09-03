@@ -51,6 +51,17 @@ const REQ = { id: 'req-1', school_id: 'school-1', requested_credits: 500, school
   }
 
   {
+    // "should tell me the school name and amount" — when the school also
+    // recorded how much they paid, the text to 0705041512 includes it too,
+    // not just the credit count.
+    const REQ_WITH_AMOUNT = { ...REQ, id: 'req-2', amount_paid: 1000 };
+    const admin = mockAdmin({ tables: { sms_credit_requests: [REQ_WITH_AMOUNT] } });
+    await notifyAdmin(admin, { request_id: 'req-2' }, { school_id: 'school-1' });
+    const logged = admin._tables.admin_audit_log[0];
+    check('the notification includes the amount paid when the school recorded one', logged && logged.details.message.indexOf('KES 1000') !== -1);
+  }
+
+  {
     // A different school's staff token must never be able to trigger a
     // notification for a request that isn't theirs (defence in depth on
     // top of RLS, same shape as send-message.js's per-school scoping).

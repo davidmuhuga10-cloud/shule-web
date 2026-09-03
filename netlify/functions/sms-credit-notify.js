@@ -66,13 +66,14 @@ async function notifyAdmin(admin, payload, callerProfile) {
 
   const { data: req } = await admin
     .from('sms_credit_requests')
-    .select('id, school_id, requested_credits, schools(name)')
+    .select('id, school_id, requested_credits, amount_paid, schools(name)')
     .eq('id', requestId).eq('school_id', callerProfile.school_id)
     .maybeSingle();
   if (!req) return { ok: false, message: 'Request not found.' };
 
   const schoolName = (req.schools && req.schools.name) || 'A school';
-  const message = `Shule Admin: ${schoolName} has requested ${req.requested_credits} SMS credits and submitted a payment confirmation. Please review and approve in the Admin Dashboard.`;
+  const amountLabel = req.amount_paid ? `, KES ${req.amount_paid}` : '';
+  const message = `Shule Admin: ${schoolName} has requested ${req.requested_credits} SMS credits${amountLabel} and submitted a payment confirmation. Please review and approve in the Admin Dashboard.`;
 
   const smsConfig = await loadSmsConfig(admin);
   const providerConfigured = isConfigured(smsConfig);

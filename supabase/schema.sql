@@ -4391,6 +4391,12 @@ create table public.sms_credit_requests (
 );
 create index idx_sms_credit_requests_school on public.sms_credit_requests(school_id);
 create index idx_sms_credit_requests_status on public.sms_credit_requests(status);
+-- Every other multi-tenant table's insert() relies on this trigger to stamp
+-- school_id from the caller's own profile (see public.set_school_id()) —
+-- this table was originally missing it (migrations/0044), which silently
+-- left school_id NULL and made every school-side insert fail RLS.
+create trigger trg_sms_credit_requests_school_id before insert on public.sms_credit_requests
+  for each row execute function public.set_school_id();
 
 -- Permanent record of every approved credit — amount, school, date,
 -- reference — kept even if the originating request row is ever removed, as
