@@ -4888,6 +4888,37 @@ create index idx_phone_otps_lookup on public.phone_otps(phone, purpose, created_
 alter table public.phone_otps enable row level security;
 
 -- ---------------------------------------------------------------------------
+-- 5b. SMS provider credentials (see migrations/0043_sms_platform_config.sql)
+--     — moved off Netlify env vars so this app's SMS sending isn't coupled
+--     to whichever host happens to run its server code. Single row (id=1),
+--     server-only (RLS enabled, zero policies) same as phone_otps above.
+-- ---------------------------------------------------------------------------
+create table public.sms_platform_config (
+  id integer primary key default 1,
+  provider text not null default 'africas_talking',
+  api_key text,
+  username text,
+  sender_id text,
+  cost_per_sms numeric not null default 0,
+  price_per_sms numeric not null default 0,
+  updated_at timestamptz not null default now(),
+  constraint sms_platform_config_single_row check (id = 1)
+);
+insert into public.sms_platform_config (id) values (1) on conflict (id) do nothing;
+
+create or replace function public.set_sms_platform_config_updated_at()
+returns trigger language plpgsql as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+create trigger trg_sms_platform_config_updated_at before update on public.sms_platform_config
+  for each row execute function public.set_sms_platform_config_updated_at();
+
+alter table public.sms_platform_config enable row level security;
+
+-- ---------------------------------------------------------------------------
 -- 6. Bootstrap the one designated Super Admin account
 --    (kinyuadavid2003@gmail.com — created here if it doesn't already exist
 --    as an auth user; password intentionally NOT set by SQL — Supabase Auth

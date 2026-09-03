@@ -1,12 +1,11 @@
 /**
  * Unit tests for netlify/functions/sms-credit-notify.js against a bespoke
- * mock Supabase admin client. No SMS provider is configured yet (SMS_
- * PROVIDER_API_KEY unset in this test env, same as production today — see
- * the file's header comment) — these tests check the "log every attempt,
- * never actually send, never fail the request" behaviour that stub state
- * requires, plus that a school can never notify on another school's request.
+ * mock Supabase admin client. No sms_platform_config row is seeded in these
+ * tests, so isConfigured() sees an empty config — these tests check the
+ * "log every attempt, never actually send, never fail the request"
+ * behaviour that unconfigured state requires, plus that a school can never
+ * notify on another school's request.
  */
-delete process.env.SMS_PROVIDER_API_KEY;
 const { notifyAdmin } = require('../netlify/functions/sms-credit-notify.js');
 
 let passed = 0, failed = 0;

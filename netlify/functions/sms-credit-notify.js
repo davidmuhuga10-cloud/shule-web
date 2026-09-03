@@ -18,7 +18,7 @@
  * ----------------------------------------------------------------------------
  */
 const { getAdminClient, requireStaff } = require('./_lib/supabaseAdmin');
-const { isProviderConfigured, sendSms } = require('./_lib/smsProvider');
+const { loadSmsConfig, isConfigured, sendSms } = require('./_lib/smsProvider');
 
 const ADMIN_PHONE = '0705041512';
 
@@ -74,11 +74,12 @@ async function notifyAdmin(admin, payload, callerProfile) {
   const schoolName = (req.schools && req.schools.name) || 'A school';
   const message = `Shule Admin: ${schoolName} has requested ${req.requested_credits} SMS credits and submitted a payment confirmation. Please review and approve in the Admin Dashboard.`;
 
-  const providerConfigured = isProviderConfigured();
+  const smsConfig = await loadSmsConfig(admin);
+  const providerConfigured = isConfigured(smsConfig);
   let delivered = false;
   let providerResponse = 'No SMS provider is connected yet — logged only, not actually sent.';
   if (providerConfigured) {
-    const result = await sendSms(ADMIN_PHONE, message);
+    const result = await sendSms(smsConfig, ADMIN_PHONE, message);
     delivered = result.status === 'sent';
     providerResponse = delivered ? `Sent (id: ${result.messageId || 'n/a'}).` : `Send failed: ${result.raw}`;
   }
@@ -98,4 +99,3 @@ async function notifyAdmin(admin, payload, callerProfile) {
 }
 
 module.exports.notifyAdmin = notifyAdmin;
-module.exports.isProviderConfigured = isProviderConfigured;

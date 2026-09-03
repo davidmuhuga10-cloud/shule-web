@@ -18,7 +18,7 @@
  */
 const { getAdminClient } = require('./_lib/supabaseAdmin');
 const { isValidPhone, normalize } = require('../../src/lib/phone.shared.js');
-const { isProviderConfigured, sendSms } = require('./_lib/smsProvider');
+const { loadSmsConfig, isConfigured, sendSms } = require('./_lib/smsProvider');
 const { CODE_TTL_MS, RESEND_COOLDOWN_MS, PURPOSES, generateCode, hashCode } = require('./_lib/otp');
 
 const MAX_SENDS_PER_WINDOW = 5;
@@ -61,7 +61,8 @@ async function sendOtp(admin, payload) {
   });
   if (insertErr) return { ok: false, message: insertErr.message };
 
-  if (!isProviderConfigured()) {
+  const smsConfig = await loadSmsConfig(admin);
+  if (!isConfigured(smsConfig)) {
     // Same "recorded, not actually deliverable" honesty as send-message.js
     // when no provider is configured — never silently pretend a code went
     // out. sent:false lets the frontend say so instead of telling someone
@@ -70,7 +71,7 @@ async function sendOtp(admin, payload) {
   }
 
   const message = `Your Shule verification code is ${code}. It expires in 5 minutes. Do not share this code.`;
-  const result = await sendSms(phone, message);
+  const result = await sendSms(smsConfig, phone, message);
   if (result.status !== 'sent') {
     return { ok: true, sent: false, message: `Could not deliver the code: ${result.raw}` };
   }

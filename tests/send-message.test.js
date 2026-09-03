@@ -176,12 +176,14 @@ function mockAdmin(opts) {
   function stubFetch(atResponse) {
     global.fetch = async () => ({ json: async () => atResponse, status: 200 });
   }
+  // Credentials now live in sms_platform_config (see smsProvider.js's own
+  // header for why it moved off env vars) — seeded directly into the mock's
+  // tables rather than via process.env.
+  const CONFIGURED_SMS_ROW = { id: 1, api_key: 'test-key', username: 'test-user', sender_id: 'TEST' };
   {
     const admin = mockAdmin({
-      tables: { staff: [{ id: 'st1', full_name: 'Mr T', school_id: SCHOOL_A, phone: '0711111111' }] }
+      tables: { staff: [{ id: 'st1', full_name: 'Mr T', school_id: SCHOOL_A, phone: '0711111111' }], sms_platform_config: [CONFIGURED_SMS_ROW] }
     });
-    process.env.SMS_PROVIDER_API_KEY = 'test-key';
-    process.env.SMS_PROVIDER_USERNAME = 'test-user';
     stubFetch({ SMSMessageData: { Recipients: [{ status: 'Success', messageId: 'AT-msg-1' }] } });
     const res = await sendMessage(admin, { scope: 'individual_staff', staff_id: 'st1', body: 'Staff meeting at 4pm' }, { school_id: SCHOOL_A });
     check('sendMessage marks a successfully-sent row "sent" once a provider is configured', admin._tables.message_logs[0].status === 'sent');
@@ -193,7 +195,7 @@ function mockAdmin(opts) {
     // rejection, etc.) — the row is marked "failed", not silently dropped,
     // and the send as a whole still reports ok (it was attempted).
     const admin = mockAdmin({
-      tables: { staff: [{ id: 'st1', full_name: 'Mr T', school_id: SCHOOL_A, phone: '0711111111' }] }
+      tables: { staff: [{ id: 'st1', full_name: 'Mr T', school_id: SCHOOL_A, phone: '0711111111' }], sms_platform_config: [CONFIGURED_SMS_ROW] }
     });
     stubFetch({ SMSMessageData: { Recipients: [{ status: 'InvalidPhoneNumber' }] } });
     const res = await sendMessage(admin, { scope: 'individual_staff', staff_id: 'st1', body: 'Hi' }, { school_id: SCHOOL_A });
@@ -206,7 +208,7 @@ function mockAdmin(opts) {
     // should be sent or logged at all — the whole batch stops up front.
     const admin = mockAdmin({
       forceDebitError: 'Not enough SMS credit — top up before sending.',
-      tables: { staff: [{ id: 'st1', full_name: 'Mr T', school_id: SCHOOL_A, phone: '0711111111' }] }
+      tables: { staff: [{ id: 'st1', full_name: 'Mr T', school_id: SCHOOL_A, phone: '0711111111' }], sms_platform_config: [CONFIGURED_SMS_ROW] }
     });
     stubFetch({ SMSMessageData: { Recipients: [{ status: 'Success', messageId: 'should-not-be-used' }] } });
     const res = await sendMessage(admin, { scope: 'individual_staff', staff_id: 'st1', body: 'Hi' }, { school_id: SCHOOL_A });
@@ -214,8 +216,6 @@ function mockAdmin(opts) {
     check('sendMessage never logs a message when the debit is refused', admin._tables.message_logs.length === 0);
   }
   global.fetch = realFetch;
-  delete process.env.SMS_PROVIDER_API_KEY;
-  delete process.env.SMS_PROVIDER_USERNAME;
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

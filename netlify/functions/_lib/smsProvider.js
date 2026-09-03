@@ -3,34 +3,48 @@
  * ----------------------------------------------------------------------------
  * The one place a real SMS actually leaves this app — shared by
  * send-message.js (guardian/staff messaging, billed against a school's own
- * sms_wallets balance) and sms-credit-notify.js (the Super Admin's own
- * "a school just requested credit" ping, not billed to anyone). Both used to
- * carry their own dead `sendViaProvider()` stub waiting on a sender ID
- * application — that application is done, so this replaces both stubs with
- * one real Africa's Talking integration instead of duplicating it twice.
+ * sms_wallets balance), sms-credit-notify.js (the Super Admin's own "a
+ * school just requested credit" ping, not billed to anyone), and
+ * send-otp.js (phone verification codes).
  *
- * Same shape as any other third-party SMS gateway would need: three env
- * vars, one outbound HTTPS POST, one response to interpret. Reads env vars
- * only — no credential ever lives in this file or in the database — set
- * these in the Netlify site's environment variables:
- *   SMS_PROVIDER_API_KEY       Africa's Talking "apiKey" for the account.
- *   SMS_PROVIDER_USERNAME      The AT account username (NOT "sandbox" for a
- *                              real send — "sandbox" automatically switches
- *                              this module to AT's sandbox endpoint, useful
- *                              for testing without spending real credit).
- *   SMS_PROVIDER_SENDER_ID     The already-approved alphanumeric Sender ID
- *                              (AT calls this the "from" / shortcode). Any
- *                              app sending through the SAME Africa's Talking
- *                              account can reuse the SAME approved Sender
- *                              ID — a Sender ID is approved once per AT
- *                              account, not once per app, so pointing this
- *                              at an already-live AT account+Sender ID skips
- *                              the whole application-and-wait process again.
+ * Credentials live in the `sms_platform_config` table (single row, id=1 —
+ * see migrations/0043_sms_platform_config.sql), NOT in Netlify environment
+ * variables. This was deliberately moved off env vars: this app already
+ * runs on Netlify Functions today, but the credential itself shouldn't be
+ * tied to whichever host happens to run the server code — a database row
+ * survives a move to a different hosting platform for free, an env var
+ * doesn't. The table is server-only (RLS enabled, zero policies) — never
+ * reachable by a browser session, only by the service_role key a Netlify
+ * Function already holds. Set it once via the SQL editor:
+ *
+ *   update public.sms_platform_config set
+ *     provider = 'africas_talking', username = 'your-at-username',
+ *     api_key = 'your-at-api-key', sender_id = 'YourSenderId'
+ *   where id = 1;
+ *
+ * Every caller loads the row ONCE per function invocation (loadSmsConfig)
+ * and passes the resulting `cfg` into isConfigured()/sendSms() rather than
+ * each one re-querying it — a batch of 200 guardian texts should cost 200
+ * Africa's Talking calls, not 201 Supabase calls too.
  * ----------------------------------------------------------------------------
  */
 
-function isProviderConfigured() {
-  return !!(process.env.SMS_PROVIDER_API_KEY && process.env.SMS_PROVIDER_USERNAME);
+/** Fetches the single sms_platform_config row. Returns `{}` (never throws,
+ *  never returns null) on a missing row or a read error, so a caller can
+ *  always safely pass the result straight into isConfigured()/sendSms()
+ *  without a separate null check. */
+async function loadSmsConfig(admin) {
+  try {
+    const { data, error } = await admin.from('sms_platform_config').select('*').eq('id', 1).maybeSingle();
+    if (error || !data) return {};
+    return data;
+  } catch (e) {
+    return {};
+  }
+}
+
+function isConfigured(cfg) {
+  return !!(cfg && cfg.api_key && cfg.username);
 }
 
 // Kenyan-number normalisation: 07XXXXXXXX / 7XXXXXXXX / 2547XXXXXXXX all
@@ -54,39 +68,36 @@ function smsUnits(body) {
   return Math.max(1, Math.ceil(len / 160));
 }
 
-/** Sends ONE message to ONE recipient. Returns
- *  { status: 'sent'|'failed', messageId, raw } — never throws for a normal
- *  provider-side failure (bad number, insufficient AT balance, etc.); it
- *  only throws if the provider couldn't be reached at all (network error),
- *  which the caller should treat the same as a failed send for that
- *  recipient rather than aborting the whole batch. */
-async function sendSms(phone, message) {
-  const apiKey = process.env.SMS_PROVIDER_API_KEY;
-  const username = process.env.SMS_PROVIDER_USERNAME;
-  const senderId = process.env.SMS_PROVIDER_SENDER_ID;
-  if (!apiKey || !username) throw new Error('SMS provider is not configured.');
+/** Sends ONE message to ONE recipient using an already-loaded `cfg` (see
+ *  loadSmsConfig above). Returns { status: 'sent'|'failed', messageId, raw }
+ *  — never throws for a normal provider-side failure (bad number,
+ *  insufficient AT balance, etc.); it only throws if `cfg` itself isn't
+ *  configured, which every caller should have already checked via
+ *  isConfigured() before looping over recipients. */
+async function sendSms(cfg, phone, message) {
+  if (!isConfigured(cfg)) throw new Error('SMS provider is not configured.');
 
   const e164 = toE164Phone(phone);
   if (!e164 || e164.length < 8) {
     return { status: 'failed', messageId: null, raw: 'No usable phone number on file.' };
   }
 
-  const base = String(username).toLowerCase() === 'sandbox'
+  const base = String(cfg.username).toLowerCase() === 'sandbox'
     ? 'https://api.sandbox.africastalking.com'
     : 'https://api.africastalking.com';
 
   const form = new URLSearchParams();
-  form.set('username', username);
+  form.set('username', cfg.username);
   form.set('to', e164);
   form.set('message', String(message || ''));
-  if (senderId) form.set('from', senderId);
+  if (cfg.sender_id) form.set('from', cfg.sender_id);
 
   let raw = '';
   try {
     const res = await fetch(base + '/version1/messaging', {
       method: 'POST',
       headers: {
-        apiKey,
+        apiKey: cfg.api_key,
         'Content-Type': 'application/x-www-form-urlencoded',
         Accept: 'application/json'
       },
@@ -105,4 +116,4 @@ async function sendSms(phone, message) {
   }
 }
 
-module.exports = { isProviderConfigured, toE164Phone, smsUnits, sendSms };
+module.exports = { loadSmsConfig, isConfigured, toE164Phone, smsUnits, sendSms };

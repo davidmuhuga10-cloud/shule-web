@@ -11,7 +11,9 @@
  * sending, so an under-funded school gets a clear "top up first" instead of
  * a partially-sent batch. If SMS_PROVIDER_API_KEY/USERNAME aren't set (e.g.
  * a dev environment), sends fall back to the original "logged only, not
- * sent" behavior — no wallet is touched in that case either.
+ * sent" behavior — no wallet is touched in that case either. Credentials
+ * come from the sms_platform_config table, not env vars — see
+ * smsProvider.js's own header for why.
  *
  * Uses requireStaff (admin OR teacher), not requireAdmin — messaging is a
  * day-to-day teacher action, not an admin-only one, matching Zeraki.
@@ -19,7 +21,7 @@
  */
 const crypto = require('crypto');
 const { getAdminClient, requireStaff } = require('./_lib/supabaseAdmin');
-const { isProviderConfigured, sendSms, smsUnits } = require('./_lib/smsProvider');
+const { loadSmsConfig, isConfigured, sendSms, smsUnits } = require('./_lib/smsProvider');
 
 function json(statusCode, body) {
   return { statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
@@ -108,7 +110,8 @@ async function sendMessage(admin, payload, callerProfile) {
   const { recipients, scopeLabel, error } = await resolveRecipients(admin, schoolId, payload);
   if (error) return { ok: false, message: error };
 
-  const providerConfigured = isProviderConfigured();
+  const smsConfig = await loadSmsConfig(admin);
+  const providerConfigured = isConfigured(smsConfig);
   const batchId = crypto.randomUUID();
   const unitsPerRecipient = smsUnits(body);
 
@@ -127,7 +130,7 @@ async function sendMessage(admin, payload, callerProfile) {
     let providerResponse = 'No SMS provider is connected yet — this message was recorded but not actually sent.';
     let providerMessageId = null;
     if (providerConfigured) {
-      const result = await sendSms(r.phone, body);
+      const result = await sendSms(smsConfig, r.phone, body);
       status = result.status; // 'sent' | 'failed'
       providerResponse = result.raw;
       providerMessageId = result.messageId;
