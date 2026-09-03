@@ -11,6 +11,15 @@
  * "Processed" the instant the batch is queued rather than waiting for
  * delivery. History (items 7 & 8) is a scannable table with a per-recipient
  * detail view and a resend action for anything that failed.
+ *
+ * Compose review round (design review, following the SMS Credits and SMS
+ * History redesign passes): no emoji on the "To" cards — plain text label,
+ * each with its own permanent accent border color (not just on selection —
+ * a color per recipient type, same hues used elsewhere in the app) so
+ * selection is shown by a heavier border only, never a fill/text change.
+ * No filler explanation text under "To" or under the message box. Real
+ * SMS-segment counting (160 chars/segment, the auto-added school-name
+ * header counted in) instead of a flat 1000-character cap.
  */
 import { esc, options, toast, renderPrereq, renderPrereqOrConnectivity, loader, fmtDate, modal, closeModal, withBusy, state } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
@@ -20,15 +29,30 @@ import { renderSmsCredits } from './smsCredits.mjs';
 
 // Item 5: one option per card — no "message type" vs "scope" split, no
 // dropdown. Exam Results lives here too (doc item 6, closing line: "Under
-// sms include also an option to send results from that point").
+// sms include also an option to send results from that point"). `color`
+// is a permanent border accent (not an emoji stand-in) — same hues the
+// rest of the app already uses for .tile-blue/green/amber/purple/teal.
 const RECIPIENT_TYPES = [
-  { scope: 'broadcast', icon: '👪', label: 'All Guardians' },
-  { scope: 'class', icon: '🏫', label: 'A Class' },
-  { scope: 'individual_student', icon: '🎓', label: 'One Student' },
-  { scope: 'individual_staff', icon: '🧑‍🏫', label: 'Staff Member' },
-  { scope: 'exam_results', icon: '📊', label: 'Exam Results' }
+  { scope: 'broadcast', label: 'All Guardians', color: '#127a6b' },
+  { scope: 'class', label: 'A Class', color: '#2563eb' },
+  { scope: 'individual_student', label: 'One Student Guardian', color: '#2f9e6f' },
+  { scope: 'individual_staff', label: 'Staff Member', color: '#c9860a' },
+  { scope: 'exam_results', label: 'Exam Results', color: '#7c3aed' }
 ];
 const STATUS_BADGE = { sent: 'green', queued: 'blue', logged: 'grey', failed: 'red' };
+
+/** Real SMS-segment count (160 chars/segment), counting the school-name
+ *  header line that send-message.js adds automatically — an admin should
+ *  see the actual number of SMS units a message will cost, not a flat
+ *  1000-character textarea limit that has nothing to do with what Africa's
+ *  Talking actually bills per segment. */
+function smsCount(bodyText) {
+  const schoolName = (state.settings && state.settings.school_name) || 'YOUR SCHOOL';
+  const header = `${schoolName.toUpperCase()}\n\n`;
+  const total = (header + (bodyText || '')).length;
+  const segments = Math.max(1, Math.ceil(total / 160));
+  return { total, budget: segments * 160, segments };
+}
 
 export async function viewMessaging(root) {
   const [classesRes, studentsRes, staffRes, examsRes] = await Promise.all([
@@ -53,13 +77,15 @@ export async function viewMessaging(root) {
     exam_id: intent.exam_id || (exams[0] ? exams[0].id : ''),
     resultsMode: 'class',
     body: '',
-    customNote: ''
+    customNote: '',
+    ccEnabled: false,
+    ccStaffIds: []
   });
 }
 
 function render(root, data, sel) {
   root.innerHTML = `
-    <div class="page-head"><div><h2>Messaging</h2><p>Send SMS-style messages to guardians and staff, and review what's been sent.</p></div></div>
+    <div class="page-head"><div><h2>Messaging</h2></div></div>
     <div class="fin-tabs">
       <button data-tab="compose" class="${sel.tab === 'compose' ? 'active' : ''}">Compose</button>
       <button data-tab="history" class="${sel.tab === 'history' ? 'active' : ''}">History</button>
@@ -87,8 +113,8 @@ function renderCompose(body, data, sel, root) {
       <div class="card-b">
         <h4>To</h4>
         <div class="rp-grid">
-          ${RECIPIENT_TYPES.map((t) => `<div class="rp-opt${sel.scope === t.scope ? ' sel' : ''}" data-scope="${t.scope}">
-            <span class="ic">${t.icon}</span><span class="lab">${esc(t.label)}</span>
+          ${RECIPIENT_TYPES.map((t) => `<div class="rp-opt${sel.scope === t.scope ? ' sel' : ''}" data-scope="${t.scope}" style="--c:${t.color}">
+            <span class="lab">${esc(t.label)}</span>
           </div>`).join('')}
         </div>
         <div id="msg-target" class="rp-inline"></div>
@@ -119,39 +145,79 @@ function renderCompose(body, data, sel, root) {
     <div class="card side-accent tile-indigo compose-block">
       <div class="card-b">
         <h4>Message</h4>
-        <textarea id="msg-body-text" rows="5" maxlength="1000" placeholder="Type your message…">${esc(sel.body)}</textarea>
-        <div class="charcount" id="msg-count">0 / 1000 characters</div>
-        <p class="hint" id="msg-preview" style="margin-top:10px"></p>
+        <textarea id="msg-body-text" rows="5" placeholder="Type your message…">${esc(sel.body)}</textarea>
+        <div class="charcount" id="msg-count"></div>
+        <p class="hint" id="msg-preview" style="margin-top:6px"></p>
       </div>
-      <div class="card-b" style="display:flex;justify-content:flex-end;border-top:1px solid var(--line)">
+      <div class="card-b send-row" style="border-top:1px solid var(--line)">
+        <div class="copy-to-wrap">
+          <div class="copy-to-top">
+            <input type="checkbox" id="msg-cc-check"${sel.ccEnabled ? ' checked' : ''}>
+            <label for="msg-cc-check">Send a copy to</label>
+            <select id="msg-cc-add"${sel.ccEnabled ? '' : ' disabled'}>
+              <option value="">+ Add someone…</option>
+              ${staff.map((s) => `<option value="${esc(s.id)}">${esc(s.full_name)}${s.phone ? '' : ' (no phone on file)'}</option>`).join('')}
+            </select>
+          </div>
+          <div class="chips" id="msg-cc-chips"></div>
+        </div>
         <button class="btn" id="msg-send">Send message</button>
       </div>
     </div>
   `;
 
+  // "Send a copy to" reuses the 'personalized' scope as a SECOND, separate
+  // batch fired after the main one — a real SMS to each picked staff
+  // member (their own message_logs rows, own SMS-credit cost), not a
+  // silent bcc. Picking a name ADDS them; each chip removes only itself,
+  // so a second pick never drops the first one by mistake.
+  const ccChipsEl = body.querySelector('#msg-cc-chips');
+  function renderCcChips() {
+    ccChipsEl.innerHTML = sel.ccStaffIds.map((id) => {
+      const s = staff.find((x) => x.id === id);
+      return `<span class="chip">${esc(s ? s.full_name : 'Unknown')}<button type="button" data-cc-id="${esc(id)}" title="Remove">×</button></span>`;
+    }).join('');
+    ccChipsEl.querySelectorAll('button').forEach((b) => b.onclick = () => {
+      sel.ccStaffIds = sel.ccStaffIds.filter((id) => id !== b.dataset.ccId);
+      renderCcChips();
+    });
+  }
+  renderCcChips();
+  body.querySelector('#msg-cc-check').onchange = (e) => {
+    sel.ccEnabled = e.target.checked;
+    body.querySelector('#msg-cc-add').disabled = !sel.ccEnabled;
+  };
+  body.querySelector('#msg-cc-add').onchange = (e) => {
+    if (e.target.value && !sel.ccStaffIds.includes(e.target.value)) { sel.ccStaffIds.push(e.target.value); renderCcChips(); }
+    e.target.value = '';
+  };
+
+  // Only ever shows an actual problem (no contact on file) or an unmade
+  // choice — never a plain restating of what the "To" selection already
+  // says (e.g. "will reach N guardians"), which was unneeded explanation.
   function updatePreview() {
     const previewEl = body.querySelector('#msg-preview');
     if (!previewEl) return;
-    if (sel.scope === 'class') {
-      const cls = classes.find((c) => c.id === sel.class_id);
-      const count = students.filter((s) => s.class_id === sel.class_id && s.guardian_contact).length;
-      previewEl.textContent = cls ? `Will reach ${count} guardian(s) in ${cls.name}.` : '';
-    } else if (sel.scope === 'individual_student') {
+    if (sel.scope === 'individual_student') {
       const s = students.find((x) => x.id === sel.student_id);
-      previewEl.textContent = s ? (s.guardian_contact ? `Will reach ${s.full_name}'s guardian.` : `${s.full_name} has no guardian contact on file.`) : 'Choose a student.';
+      previewEl.textContent = s ? (s.guardian_contact ? '' : `${s.full_name} has no guardian contact on file.`) : 'Choose a student.';
     } else if (sel.scope === 'individual_staff') {
       const s = staff.find((x) => x.id === sel.staff_id);
-      previewEl.textContent = s ? (s.phone ? `Will reach ${s.full_name}.` : `${s.full_name} has no phone on file.`) : 'Choose a staff member.';
+      previewEl.textContent = s ? (s.phone ? '' : `${s.full_name} has no phone on file.`) : 'Choose a staff member.';
     } else {
-      const count = students.filter((s) => s.guardian_contact).length;
-      previewEl.textContent = `Will reach ${count} guardian(s) across the whole school.`;
+      previewEl.textContent = '';
     }
   }
   updatePreview();
 
   const textEl = body.querySelector('#msg-body-text');
   const countEl = body.querySelector('#msg-count');
-  const updateCount = () => { sel.body = textEl.value; countEl.textContent = `${textEl.value.length} / 1000 characters`; };
+  const updateCount = () => {
+    sel.body = textEl.value;
+    const { total, budget, segments } = smsCount(textEl.value);
+    countEl.classList.toggle('over', segments > 1);
+    countEl.innerHTML = `Count ${segments} SMS (<b>${total}</b>/${budget} characters)`;
+  };
   textEl.oninput = updateCount;
   updateCount();
 
@@ -160,10 +226,26 @@ function renderCompose(body, data, sel, root) {
     btn.disabled = true; btn.textContent = 'Sending…';
     const payload = { scope: sel.scope, body: textEl.value, class_id: sel.class_id, student_id: sel.student_id, staff_id: sel.staff_id };
     const r = await Db.messaging.send(payload);
+
+    let ccResult = null;
+    if (r.ok && sel.ccEnabled && sel.ccStaffIds.length) {
+      const ccRecipients = sel.ccStaffIds
+        .map((id) => staff.find((s) => s.id === id))
+        .filter((s) => s && s.phone)
+        .map((s) => ({ staff_id: s.id, phone: s.phone, body: textEl.value }));
+      if (ccRecipients.length) {
+        ccResult = await Db.messaging.send({ scope: 'personalized', scope_label: 'Copy of a message', recipients: ccRecipients });
+      }
+    }
+
     btn.disabled = false; btn.textContent = 'Send message';
     if (!r.ok) { toast(r.message, 'err'); return; }
-    toast(r.message || `Sent to ${r.recipients} recipient(s).`, r.delivered ? 'ok' : 'warn');
+    let msg = r.message || `Sent to ${r.recipients} recipient(s).`;
+    if (ccResult) msg += ccResult.ok ? ` Copy sent to ${sel.ccStaffIds.length} staff.` : ` (Copy failed: ${ccResult.message})`;
+    toast(msg, r.delivered ? 'ok' : 'warn');
     sel.body = ''; textEl.value = ''; updateCount();
+    sel.ccEnabled = false; sel.ccStaffIds = [];
+    renderCompose(body, data, sel, root);
   };
 }
 
@@ -179,7 +261,10 @@ function renderPlainTarget(targetEl, data, sel, onChange) {
     targetEl.innerHTML = `<label class="f-lab">Staff member</label><select id="msg-staff">${options(staff, 'id', 'full_name', sel.staff_id, 'Choose a staff member')}</select>`;
     targetEl.querySelector('#msg-staff').onchange = (e) => { sel.staff_id = e.target.value; onChange(); };
   } else {
-    targetEl.innerHTML = `<p class="hint" style="margin:0">This will message every guardian phone number on file across the whole school.</p>`;
+    // Broadcast needs no target picker — and no explanation either, per
+    // direct feedback that the old restating-the-obvious hint here
+    // ("This will message every guardian...") wasn't needed.
+    targetEl.innerHTML = '';
   }
 }
 
@@ -257,7 +342,7 @@ function renderResultsSendCard(el, data, sel, root, body) {
     <div class="card side-accent tile-indigo compose-block">
       <div class="card-b" id="msg-results-preview-box">${loader()}</div>
       <div class="card-b" style="border-top:1px solid var(--line)">
-        <label class="f-lab">Add a note to every message in this batch <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></label>
+        <label class="f-lab">Optional message <span class="muted" style="text-transform:none;font-weight:500">(added to every message in this batch)</span></label>
         <textarea id="msg-results-note" rows="2" placeholder="e.g. Opening date 14th, please come accompanied by your parent.">${esc(sel.customNote || '')}</textarea>
       </div>
       <div class="card-b" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;border-top:1px solid var(--line)">
@@ -271,7 +356,14 @@ function renderResultsSendCard(el, data, sel, root, body) {
 
   const cls = data.classes.find((c) => c.id === sel.class_id);
   const exam = data.exams.find((e) => e.id === sel.exam_id);
-  if (!exam || !cls) return;
+  if (!exam || !cls) {
+    // Previously just `return` here, leaving the loader spinner from the
+    // markup above on screen forever with no way out — an admin picking an
+    // exam/class combo that doesn't resolve (e.g. stale selection) saw an
+    // endless spinner and no error at all.
+    el.querySelector('#msg-results-preview-box').innerHTML = `⚠️ Couldn't find that exam/class — pick them again above.`;
+    return;
+  }
   const examLabel = `${exam.name}${exam.term_name ? `, ${exam.term_name}` : ''}${exam.academic_year_name ? ` ${exam.academic_year_name}` : ''}`;
 
   Db.results.getBroadsheet({ exam_id: sel.exam_id, class_id: sel.class_id }).then((bsRes) => {
@@ -324,6 +416,14 @@ function renderResultsSendCard(el, data, sel, root, body) {
           Processed — ${withPhone.length} of ${rows.length} queued for sending${skipped ? ` (${skipped} have no guardian number on file)` : ''}. Check SMS History for delivery.
         </div>`;
     };
+  }).catch((e) => {
+    // A network hiccup, or a genuine bug in the block above, used to leave
+    // the loader spinner from the markup at the top of this function
+    // spinning forever with nothing in the console an admin could report
+    // back — this at least turns it into a visible, actionable error.
+    console.error('renderResultsSendCard: failed to load results for messaging', e);
+    const previewBox = el.querySelector('#msg-results-preview-box');
+    if (previewBox) previewBox.innerHTML = `⚠️ Something went wrong loading results for this class. Try again — if it keeps happening, note the exam and class and let support know.`;
   });
 }
 

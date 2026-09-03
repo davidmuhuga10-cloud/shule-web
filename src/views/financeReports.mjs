@@ -152,7 +152,7 @@ async function openSendBalancesModal(owingRows, sel) {
     body: `
       <p class="hint" style="margin-top:0">${owingRows.length} student(s) currently shown have an outstanding balance.
         ${withPhone.length} of them have a guardian phone number on file${owingRows.length > withPhone.length ? ` — the other ${owingRows.length - withPhone.length} will be skipped` : ''}.</p>
-      <div class="field"><label>Add a note to every message <span class="muted" style="font-weight:500">(optional)</span></label>
+      <div class="field"><label>Optional message <span class="muted" style="font-weight:500">(added to every message)</span></label>
         <textarea id="fb-msg-note" rows="2" placeholder="e.g. Kindly clear before the term ends."></textarea></div>
     `,
     onOk: async () => {

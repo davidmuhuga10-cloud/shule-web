@@ -416,6 +416,18 @@ table.data tbody tr:hover{background:#fafbfc}
 table.data td.num,table.data th.num{text-align:center}
 .row-actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
 
+/* SMS Credits redesign (design review "Option B"): balance + request
+   history as ONE plain card instead of two separately colored ones — see
+   smsCredits.mjs's header comment. No accent color anywhere; a single
+   plain rule is what separates the balance strip from the request list. */
+.sms-wallet-hero{display:flex;align-items:center;justify-content:space-between;padding:22px 20px;gap:16px;flex-wrap:wrap}
+.sms-wallet-div{border-top:1px solid var(--line)}
+.sms-wallet-subh{padding:12px 20px 0;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700}
+.sms-wallet-rows{padding:6px 20px 14px}
+.sms-wallet-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}
+.sms-wallet-row:last-child{border-bottom:none}
+.sms-wallet-row .d{color:var(--muted);font-size:12px}
+
 /* Mark List (feature brief "Merit List Design"): a real bordered grid —
    every cell boxed, not just a bottom rule per row — condensed enough to
    fit a class's full subject list on one printable page. */
@@ -1535,16 +1547,36 @@ table.data td.num,table.data th.num{text-align:center}
 .rp-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
 @media (max-width:760px){.rp-grid{grid-template-columns:repeat(3,1fr)}}
 @media (max-width:480px){.rp-grid{grid-template-columns:repeat(2,1fr)}}
-.rp-opt{border:1.5px solid var(--line);border-radius:var(--radius-sm);padding:14px 8px;text-align:center;
-  cursor:pointer;transition:.15s;background:#fff}
-.rp-opt:hover{border-color:var(--primary)}
-.rp-opt.sel{border-color:var(--primary);background:#effaf7;box-shadow:0 0 0 1px var(--primary) inset}
-.rp-opt .ic{font-size:20px;display:block;margin-bottom:7px}
+/* Compose review round: no emoji, each tile keeps its own accent color
+   (--c, set inline per RECIPIENT_TYPES entry) permanently, not just when
+   selected — selection is shown by thickening that SAME border only,
+   never by changing the fill or text color. */
+.rp-opt{border:1.5px solid var(--c, var(--line));border-radius:var(--radius-sm);padding:16px 8px;text-align:center;
+  cursor:pointer;transition:border-width .1s;background:#fff;display:flex;align-items:center;justify-content:center;min-height:52px}
+.rp-opt.sel{border-width:2.5px;padding:14.5px 8px}
 .rp-opt .lab{font-size:12px;font-weight:650;line-height:1.25}
 .rp-inline{margin-top:14px;border-top:1px dashed var(--line);padding-top:14px}
-.rp-inline:empty{display:none}
+.rp-inline:empty{display:none;margin-top:0;border-top:none;padding-top:0}
 
-.charcount{text-align:right;font-size:11.5px;color:var(--muted);margin-top:6px}
+.charcount{text-align:right;font-size:11.5px;color:var(--muted);margin-top:6px;font-variant-numeric:tabular-nums}
+.charcount b{color:var(--ink)}
+.charcount.over b{color:var(--danger)}
+
+/* Compose "send a copy to" — a real second SMS batch to picked staff, not
+   a silent bcc. Multi-select as chips: picking a name ADDS them below
+   without removing anyone already added; each chip's × removes only that
+   one person. */
+.send-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.copy-to-wrap{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.copy-to-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.copy-to-top label{font-size:12.5px;color:var(--ink);cursor:pointer}
+.copy-to-top input[type=checkbox]{width:15px;height:15px;accent-color:var(--primary)}
+.copy-to-top select{border:1px solid var(--line);border-radius:7px;padding:6px 8px;font-size:12.5px;font-family:inherit;color:var(--ink);background:#fff}
+.copy-to-top select:disabled{color:var(--muted);background:#f5f6f8}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:flex;align-items:center;gap:6px;background:#eef1f5;border:1px solid var(--line);border-radius:99px;padding:3px 6px 3px 10px;font-size:12px}
+.chip button{border:none;background:none;cursor:pointer;color:var(--muted);font-size:14px;line-height:1;padding:2px;border-radius:50%}
+.chip button:hover{color:var(--danger);background:#fdecec}
 
 .mode-toggle{display:flex;border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;width:fit-content}
 .mode-toggle button{border:none;background:#fff;padding:8px 14px;font-size:12.5px;font-weight:650;
