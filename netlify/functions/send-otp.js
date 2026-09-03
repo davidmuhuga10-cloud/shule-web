@@ -42,7 +42,10 @@ async function sendOtp(admin, payload) {
     .eq('phone', phone).eq('purpose', purpose)
     .gte('created_at', sinceWindow)
     .order('created_at', { ascending: false });
-  if (recentErr) return { ok: false, message: recentErr.message };
+  if (recentErr) {
+    console.error('send-otp: failed to check recent codes', recentErr.message);
+    return { ok: false, message: 'Could not send a code right now. Try again shortly.' };
+  }
 
   const rows = recent || [];
   if (rows.length && Date.now() - new Date(rows[0].created_at).getTime() < RESEND_COOLDOWN_MS) {
@@ -59,7 +62,10 @@ async function sendOtp(admin, payload) {
     code_hash: hashCode(phone, purpose, code),
     expires_at: new Date(Date.now() + CODE_TTL_MS).toISOString()
   });
-  if (insertErr) return { ok: false, message: insertErr.message };
+  if (insertErr) {
+    console.error('send-otp: failed to store code', insertErr.message);
+    return { ok: false, message: 'Could not send a code right now. Try again shortly.' };
+  }
 
   const smsConfig = await loadSmsConfig(admin);
   if (!isConfigured(smsConfig)) {

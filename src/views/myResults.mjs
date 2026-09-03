@@ -37,7 +37,11 @@ export async function viewMyResults(root) {
     renderReportCard(cardEl, cardRes.data, { settings: settingsRes.ok ? settingsRes.data : {}, bands: bands || [] });
     const printBtn = document.createElement('div');
     printBtn.className = 'no-print center'; printBtn.style.marginTop = '16px';
-    printBtn.innerHTML = '<button class="btn secondary" onclick="window.print()">🖨️ Print</button>';
+    // Security hardening pass: was a literal onclick="window.print()"
+    // attribute — inline event-handler attributes are what a strict
+    // script-src CSP blocks, so this is wired the normal way instead.
+    printBtn.innerHTML = '<button class="btn secondary" id="mr-print-btn">🖨️ Print</button>';
+    printBtn.querySelector('#mr-print-btn').onclick = () => window.print();
     cardEl.appendChild(printBtn);
   };
 

@@ -278,9 +278,14 @@ export function createAssignmentsApi(supabase) {
         );
         if (error) return err(error.message);
       }
-      for (const a of toRemove) {
-        await supabase.from('subject_class_assignments').delete().eq('id', a.id);
-        let teacherDel = supabase.from('subject_teacher_assignments').delete().eq('subject_id', a.subject_id);
+      if (toRemove.length) {
+        // Perf fix: this used to be 2 sequential round trips PER removed
+        // subject (unticking many subjects at once on a class setup screen
+        // meant 2×N awaited deletes, one after another). streamId/classId
+        // scope is the same for every row in this call, so only the id
+        // lists actually vary — both deletes batch into one call each.
+        await supabase.from('subject_class_assignments').delete().in('id', toRemove.map((a) => a.id));
+        let teacherDel = supabase.from('subject_teacher_assignments').delete().in('subject_id', toRemove.map((a) => a.subject_id));
         teacherDel = streamId ? teacherDel.eq('stream_id', streamId) : teacherDel.eq('class_id', classId).is('stream_id', null);
         await teacherDel;
       }

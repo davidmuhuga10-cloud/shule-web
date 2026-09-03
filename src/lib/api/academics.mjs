@@ -323,14 +323,22 @@ export function createAcademicsApi(supabase) {
         if (classId) q = q.eq('class_id', classId);
         const { data, error } = await q;
         if (error) return err(error.message);
-        const rows = (data || []).map((s) => ({ ...s, class_name: s.classes ? s.classes.name : '' }));
-        // System Fixes brief §13 (site-wide performance under load): one
-        // student-count round trip per stream, fired together instead of
-        // awaited one at a time — every stream's count is independent.
-        await Promise.all(rows.map(async (s) => {
-          const { count } = await supabase.from('students').select('id', { count: 'exact', head: true }).eq('stream_id', s.id);
-          s.student_count = count || 0;
-        }));
+        const rows = (data || []).map((s) => ({ ...s, class_name: s.classes ? s.classes.name : '', student_count: 0 }));
+        // System Fixes brief §13 (site-wide performance under load): this
+        // used to fire one student-count round trip per stream (even
+        // running them concurrently via Promise.all, a school with 20
+        // streams still meant 20 separate round trips on every Classes
+        // screen load). One query for every stream's students at once,
+        // counted client-side, does the same job in a single round trip.
+        if (rows.length) {
+          const { data: studentRows, error: countErr } = await supabase
+            .from('students').select('stream_id').in('stream_id', rows.map((s) => s.id));
+          if (!countErr) {
+            const counts = {};
+            (studentRows || []).forEach((r) => { counts[r.stream_id] = (counts[r.stream_id] || 0) + 1; });
+            rows.forEach((s) => { s.student_count = counts[s.id] || 0; });
+          }
+        }
         rows.sort((a, b) => a.class_name !== b.class_name
           ? String(a.class_name).localeCompare(String(b.class_name))
           : String(a.name).localeCompare(String(b.name)));

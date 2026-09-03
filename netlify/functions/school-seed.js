@@ -38,7 +38,11 @@ async function seedSchool(admin, payload) {
   const { error } = await admin.rpc('seed_school_defaults', { p_school_id: schoolId });
   if (error) {
     console.error('school-seed: seed_school_defaults failed for', schoolId, error.message);
-    return { ok: false, message: error.message };
+    // The raw Postgres error (schema/column/constraint names) is logged
+    // server-side above for debugging, but never sent to the client —
+    // this endpoint is unauthenticated by design (see header comment), so
+    // it's the last place that should leak schema details to whoever calls it.
+    return { ok: false, message: 'Could not finish setting up your school. Try again shortly.' };
   }
   return { ok: true };
 }

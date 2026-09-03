@@ -29,18 +29,18 @@
 
       <div class="main">
         <div class="topbar">
-          <button class="icon-btn menu-toggle" onclick="App.toggleSidebar()">☰</button>
+          <button class="icon-btn menu-toggle" id="menu-toggle-btn">☰</button>
           <div class="ctx" id="topctx"></div>
           <div class="spacer"></div>
           <div class="usermenu" id="usermenu-wrap">
-            <div class="avatar" id="avatar" onclick="App.toggleUserMenu()"></div>
+            <div class="avatar" id="avatar"></div>
             <div class="dropdown hidden" id="usermenu">
               <div class="u-name">
                 <div id="um-name" style="font-weight:650"></div>
                 <div id="um-role" class="muted" style="font-size:12px"></div>
               </div>
-              <a onclick="App.openChangePassword()">🔑 Change password</a>
-              <a onclick="App.logout()">↩️ Sign out</a>
+              <a id="um-change-password">🔑 Change password</a>
+              <a id="um-logout">↩️ Sign out</a>
             </div>
           </div>
         </div>
@@ -51,7 +51,6 @@
     </div>
   </div>
 
-  <script>document.getElementById('year').textContent = new Date().getFullYear();</script>
   <script src="src/lib/config.js"></script>
   <script src="src/lib/studentEmail.shared.js"></script>
   <script src="src/lib/phone.shared.js"></script>

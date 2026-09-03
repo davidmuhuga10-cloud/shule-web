@@ -47,6 +47,39 @@
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
+    # Security audit (penetration-test pass): this app has zero external
+    # CDN/font dependencies (everything is self-hosted/vendored — see
+    # src/vendor/) and, as of this same pass, zero inline <script> blocks
+    # and zero inline onclick=/onchange=/... HTML attributes anywhere in
+    # index.html/admin.html/every src/views/*.mjs file (every one of those
+    # was rewired to a normal .onclick = fn binding instead). That means
+    # script-src can be 'self' with NO 'unsafe-inline' — an actually
+    # meaningful defense: even if an XSS injection point were ever found
+    # despite the app's existing esc()-everywhere discipline, this blocks
+    # the injected payload from executing as a <script> tag or an inline
+    # event-handler attribute.
+    #
+    # style-src needs 'unsafe-inline': the app uses inline style="..."
+    # attributes pervasively (hundreds of call sites) — removing all of
+    # them is a much larger refactor than this pass, and inline CSS alone
+    # can't execute script in a modern browser, so this is a deliberate,
+    # low-risk trade-off, not an oversight.
+    #
+    # connect-src allows 'self' (this app's own Netlify functions) plus
+    # this project's own Supabase URL (src/lib/config.js) — every
+    # Supabase read/write goes there directly from the browser. img-src
+    # allows data: because the school-logo feature stores logos as base64
+    # data URLs (src/views/schoolSettings.mjs), not uploaded files.
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://tyycjuppsdqcbrzmlimf.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+    # Netlify may already add HSTS at the edge for its own domains — this
+    # makes it explicit regardless of platform/custom-domain setup. Every
+    # request here is already HTTPS-only (Netlify), so this has no
+    # functional downside.
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains"
+    # Costs nothing and shrinks the attack surface available to any
+    # future script that does run — this app uses none of these browser
+    # features anywhere.
+    Permissions-Policy = "geolocation=(), camera=(), microphone=(), payment=()"
 
 [[headers]]
   # The vendored supabase-js bundle is content-addressed only by this fixed
@@ -57,3 +90,13 @@
   for = "/src/vendor/*"
   [headers.values]
     Cache-Control = "public, max-age=3600, must-revalidate"
+
+[[headers]]
+  # sw.js's OWN bytes are what tells the browser "there's a new service
+  # worker" (a byte-for-byte diff on its next fetch) — see sw.js's own
+  # header comment for how the caching it does stays safe on its own, but
+  # this file itself must never be cached by the browser/CDN, or that
+  # update-check can be delayed far longer than it should be.
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"

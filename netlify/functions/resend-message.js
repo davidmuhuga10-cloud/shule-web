@@ -30,7 +30,10 @@ async function resendMessages(admin, payload, callerProfile, deliveryTrigger) {
     .select('id, batch_id, status')
     .in('id', ids)
     .eq('school_id', callerProfile.school_id);
-  if (error) return { ok: false, message: error.message };
+  if (error) {
+    console.error('resend-message: failed to load message_logs', error.message);
+    return { ok: false, message: 'Could not look up those messages. Try again.' };
+  }
 
   const failed = (rows || []).filter((r) => r.status === 'failed');
   if (!failed.length) return { ok: false, message: 'Nothing here has failed — only failed messages can be resent.' };
@@ -39,7 +42,10 @@ async function resendMessages(admin, payload, callerProfile, deliveryTrigger) {
   const { error: updErr } = await admin.from('message_logs')
     .update({ status: 'queued', provider_response: null })
     .in('id', failedIds);
-  if (updErr) return { ok: false, message: updErr.message };
+  if (updErr) {
+    console.error('resend-message: failed to requeue message_logs', updErr.message);
+    return { ok: false, message: 'Could not queue these for resend. Try again.' };
+  }
 
   const batchIds = [...new Set(failed.map((r) => r.batch_id))];
   for (const batchId of batchIds) {

@@ -49,7 +49,7 @@ export function addressLines(settings) {
 export function printHeaderHtml(settings) {
   settings = settings || {};
   const logoHtml = settings.logo
-    ? `<img class="logo-thumb ph-logo-img" src="${settings.logo}">`
+    ? `<img class="logo-thumb ph-logo-img" src="${esc(settings.logo)}">`
     : `<div class="logo-placeholder ph-logo-img">🏫</div>`;
   const lines = addressLines(settings);
   return `<div class="print-header">

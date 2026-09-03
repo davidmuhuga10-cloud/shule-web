@@ -1322,6 +1322,22 @@ async function exitImpersonation() {
   }, 300);
 }
 
+/* -------------------------- OFFLINE SUPPORT ------------------------------
+ * Registers sw.js (see its own header comment for the full caching design:
+ * static shell cached + auto-refreshing, real data never cached, no
+ * offline write-queueing) and gives a clear, immediate signal when the
+ * connection actually drops — rather than letting whatever's mid-request
+ * fail with a generic error and leaving someone guessing why. Deliberately
+ * doesn't try to be clever about it (no retry queue, no offline banner
+ * that lingers) — just names the actual problem the moment it happens. */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((e) => console.error('Service worker registration failed', e));
+  });
+}
+window.addEventListener('offline', () => toast("You're offline — actions like sending messages or saving marks won't go through until you're back online.", 'err'));
+window.addEventListener('online', () => toast('Back online.', 'ok'));
+
 /* ------------------------------- INIT ----------------------------------- */
 (async function init() {
   state.settings = {}; // no school context yet — the auth screen shows generic platform branding until sign-in
@@ -1333,6 +1349,18 @@ async function exitImpersonation() {
   // already gets shown/hidden in lockstep with the drawer (see
   // App.toggleSidebar) — it just had no click handler wired to it.
   $('#scrim').onclick = () => App.toggleSidebar(false);
+
+  // Security hardening pass: these 4 used to be literal onclick="..."
+  // attributes in index.html — inline event-handler attributes are exactly
+  // what a strict script-src Content-Security-Policy has to block, so
+  // they're wired here instead, the same way every other click handler in
+  // this codebase already is.
+  $('#menu-toggle-btn').onclick = () => App.toggleSidebar();
+  $('#avatar').onclick = () => App.toggleUserMenu();
+  $('#um-change-password').onclick = () => App.openChangePassword();
+  $('#um-logout').onclick = () => App.logout();
+  const yearEl = $('#year');
+  if (yearEl) yearEl.textContent = new Date().getFullYear();
 
   await consumePendingImpersonation();
 

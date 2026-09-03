@@ -152,11 +152,6 @@ h1,h2,h3,h4{margin:0;font-weight:650;color:var(--ink)}
 .tile-amber{border-color:var(--warn)}.tile-purple{border-color:#7c3aed}
 .tile-teal{border-color:var(--primary)}.tile-rose{border-color:#db2777}
 .tile-indigo{border-color:#4f46e5}
-/* Settings' top tab bar reuses the app's existing .tabs segmented control
-   (same one Students/Attendance/Messaging already use) rather than a new
-   green bar — see the hub-grid comment above re: theme consistency. */
-.settings-tabs{max-width:520px;margin-bottom:22px}
-
 /* ---------- Teachers module (card grid, Phase 2g / brief §6) ---------- */
 .teacher-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px}
 /* Design standard brief item 2: each teacher's card now carries the same
@@ -1142,12 +1137,6 @@ table.data td.num,table.data th.num{text-align:center}
 /* ---------- Finance module ---------- */
 .fin-progress{display:inline-block;width:100px;height:8px;border-radius:5px;background:var(--line);overflow:hidden;vertical-align:middle;margin-right:6px}
 .fin-progress-fill{height:100%;background:var(--primary);border-radius:5px}
-.fin-receipt{width:390px;max-width:100%;margin:0 auto;font-size:12.5px;border:1px solid var(--grid-ink)}
-.fin-receipt .fr-h{text-align:center;padding:10px;border-bottom:1px solid var(--grid-ink)}
-.fin-receipt .fr-row{display:flex;justify-content:space-between;padding:3px 10px}
-.fin-receipt table{width:100%;border-collapse:collapse;margin:8px 0}
-.fin-receipt table th,.fin-receipt table td{border:1px solid var(--grid-ink);padding:4px 6px;font-size:11.5px}
-.fin-receipt .fr-words{padding:6px 10px;font-style:italic;border-top:1px solid var(--grid-ink)}
 .fin-statement table{width:100%;border-collapse:collapse}
 .fin-statement th,.fin-statement td{border:1px solid var(--grid-ink);padding:5px 8px;font-size:12px}
 /* Next Sprint §Finance "Redesign the Student Statement": one boxed table
@@ -1165,7 +1154,6 @@ table.data td.num,table.data th.num{text-align:center}
 .fin-statement-term th,.fin-statement-term td{border:1px solid var(--grid-ink);padding:5px 8px;font-size:12px}
 .fin-statement-term thead th{background:#f0f2f5;color:var(--grid-text);font-weight:700}
 .fin-statement-term-close td{background:#eef1f5;font-weight:700}
-@media print{.fin-receipt{border-color:#000}.fin-receipt .fr-h,.fin-receipt .fr-words{border-color:#000}.fin-receipt table th,.fin-receipt table td{border-color:#000}}
 /* Design standard rollout round 2 item 1: the on-screen Statement view is
    simplified ONLY on narrow/phone screens (last 3 terms, one plain line
    per transaction with a running balance) — the desktop screen view and
@@ -1512,12 +1500,6 @@ table.data td.num,table.data th.num{text-align:center}
 .rp-m-strip a{font-weight:700;text-decoration:none;white-space:nowrap}
 .rp-m-strip.warn a{color:#b45309}
 .rp-m-strip.ok a{color:#15803d}
-.rp-m-section-label{padding:14px 14px 4px;font-size:11px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:var(--muted)}
-.rp-m-inline-row{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-top:1px solid var(--line)}
-.rp-m-inline-row .name{font-weight:700;font-size:13px}
-.rp-m-inline-row .meta{font-size:11px;color:var(--muted)}
-.rp-m-bottom{display:flex;gap:8px;padding:12px 14px;border-top:1px solid var(--line);background:#f8fafc}
-.rp-m-bottom .icon-chip{flex:1}
 
 /* Marks Entry — mobile-only view (approved "Design 3", compact two-line
    list): no Grade column (feedback: the grade is only meaningful once a
@@ -1602,6 +1584,7 @@ table.data td.num,table.data th.num{text-align:center}
 .mh-card{padding:14px 16px;border-bottom:1px solid var(--line);cursor:pointer}
 .mh-card:last-child{border-bottom:none}
 .mh-card:active{background:var(--bg)}
+.hist-pager{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;border-top:1px solid var(--line)}
 .mh-card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
 .mh-card-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:12px}
 .mh-card-stats div{text-align:center;background:var(--bg);border-radius:8px;padding:8px 4px}

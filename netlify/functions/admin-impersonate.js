@@ -151,7 +151,10 @@ async function endImpersonation(admin, payload, callerProfileId) {
 
   const { error } = await admin.from('admin_impersonation_sessions')
     .update({ ended_at: new Date().toISOString() }).eq('id', sessionId);
-  if (error) return { ok: false, message: error.message };
+  if (error) {
+    console.error('admin-impersonate: failed to end session', sessionId, error.message);
+    return { ok: false, message: 'Could not end the impersonation session. Try again.' };
+  }
 
   await admin.from('admin_audit_log').insert({
     actor: session.admin_id, action: 'impersonation_end', target_school_id: session.school_id,
