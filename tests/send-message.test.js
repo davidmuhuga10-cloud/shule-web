@@ -6,6 +6,7 @@
  */
 const { requireStaff } = require('../netlify/functions/_lib/supabaseAdmin.js');
 const { sendMessage, resolveRecipients } = require('../netlify/functions/send-message.js');
+const { deliverBatch } = require('../netlify/functions/deliver-sms-background.js');
 
 let passed = 0, failed = 0;
 function check(name, cond) { if (cond) passed++; else { failed++; console.error('FAIL:', name); } }
@@ -24,16 +25,30 @@ function mockAdmin(opts) {
   function builderFor(table) {
     return {
       _filters: [],
-      select() { return this; },
+      _mode: 'select',
+      _patch: null,
+      select() { this._mode = 'select'; return this; },
+      // deliver-sms-background.js updates message_logs rows by batch_id+status
+      // (bulk) and by id (one row at a time) — both are just "apply _patch to
+      // every row matching every accumulated .eq() filter" once awaited.
+      update(patch) { this._mode = 'update'; this._patch = patch; return this; },
       eq(col, val) { this._filters.push([col, val]); return this; },
       async maybeSingle() {
         const rows = tables[table] || [];
         const hit = rows.find((r) => this._filters.every(([c, v]) => String(r[c]) === String(v)));
         return { data: hit || null, error: null };
       },
-      // Non-.maybeSingle() selects (e.g. lists of students) resolve here —
-      // `await q.eq(...).eq(...)` needs the chain itself to be awaitable.
+      // Non-.maybeSingle() selects (e.g. lists of students) and updates both
+      // resolve here — `await q.eq(...).eq(...)` needs the chain itself to
+      // be awaitable.
       then(resolve) {
+        if (this._mode === 'update') {
+          tables[table] = (tables[table] || []).map((r) =>
+            this._filters.every(([c, v]) => String(r[c]) === String(v)) ? { ...r, ...this._patch } : r
+          );
+          resolve({ error: null });
+          return;
+        }
         const rows = (tables[table] || []).filter((r) => this._filters.every(([c, v]) => String(r[c]) === String(v)));
         resolve({ data: rows, error: null });
       },
@@ -180,28 +195,51 @@ function mockAdmin(opts) {
   // header for why it moved off env vars) — seeded directly into the mock's
   // tables rather than via process.env.
   const CONFIGURED_SMS_ROW = { id: 1, api_key: 'test-key', username: 'test-user', sender_id: 'TEST' };
+  // sendMessage no longer sends anything itself once a provider is
+  // configured — it hands the batch to a background function instead and
+  // returns right away. A no-op stand-in for that trigger is enough to
+  // exercise sendMessage's own behaviour; a separate block below exercises
+  // deliverBatch (the background function's real work) directly.
+  let triggeredBatches;
+  async function recordingTrigger(batchId) { triggeredBatches.push(batchId); }
   {
+    triggeredBatches = [];
     const admin = mockAdmin({
       tables: { staff: [{ id: 'st1', full_name: 'Mr T', school_id: SCHOOL_A, phone: '0711111111' }], sms_platform_config: [CONFIGURED_SMS_ROW] }
     });
-    stubFetch({ SMSMessageData: { Recipients: [{ status: 'Success', messageId: 'AT-msg-1' }] } });
-    const res = await sendMessage(admin, { scope: 'individual_staff', staff_id: 'st1', body: 'Staff meeting at 4pm' }, { school_id: SCHOOL_A });
-    check('sendMessage marks a successfully-sent row "sent" once a provider is configured', admin._tables.message_logs[0].status === 'sent');
-    check('sendMessage records the provider\'s own message id', admin._tables.message_logs[0].provider_response.indexOf('AT-msg-1') !== -1);
-    check('sendMessage reports delivered=true once a provider is configured', res.delivered === true);
+    const res = await sendMessage(admin, { scope: 'individual_staff', staff_id: 'st1', body: 'Staff meeting at 4pm' }, { school_id: SCHOOL_A }, recordingTrigger);
+    check('sendMessage queues a row immediately once a provider is configured, without sending it', admin._tables.message_logs[0].status === 'queued');
+    check('sendMessage reports delivered=true (accepted for delivery) as soon as it queues', res.delivered === true);
+    check('sendMessage\'s response never waits on the actual send — no per-recipient outcome yet', /Sent to 1 recipient/.test(res.message));
+    check('sendMessage hands the batch to the delivery trigger exactly once', triggeredBatches.length === 1 && triggeredBatches[0] === res.batch_id);
+  }
+  {
+    // The actual Africa's Talking round trip and per-row status update now
+    // happen in deliver-sms-background.js's deliverBatch(), against the
+    // 'queued' rows sendMessage already wrote.
+    triggeredBatches = [];
+    const admin = mockAdmin({
+      tables: { staff: [{ id: 'st1', full_name: 'Mr T', school_id: SCHOOL_A, phone: '0711111111' }], sms_platform_config: [CONFIGURED_SMS_ROW] }
+    });
+    stubFetch({ SMSMessageData: { Recipients: [{ number: '+254711111111', status: 'Success', messageId: 'AT-msg-1' }] } });
+    const res = await sendMessage(admin, { scope: 'individual_staff', staff_id: 'st1', body: 'Staff meeting at 4pm' }, { school_id: SCHOOL_A }, recordingTrigger);
+    await deliverBatch(admin, res.batch_id);
+    check('deliverBatch marks a successfully-sent row "sent"', admin._tables.message_logs[0].status === 'sent');
+    check('deliverBatch records the provider\'s own message id', admin._tables.message_logs[0].provider_response.indexOf('AT-msg-1') !== -1);
   }
   {
     // A provider that reports failure for the recipient (bad number, AT-side
-    // rejection, etc.) — the row is marked "failed", not silently dropped,
-    // and the send as a whole still reports ok (it was attempted).
+    // rejection, etc.) — deliverBatch marks the row "failed", not silently
+    // dropped — this is exactly what SMS History is for.
+    triggeredBatches = [];
     const admin = mockAdmin({
       tables: { staff: [{ id: 'st1', full_name: 'Mr T', school_id: SCHOOL_A, phone: '0711111111' }], sms_platform_config: [CONFIGURED_SMS_ROW] }
     });
-    stubFetch({ SMSMessageData: { Recipients: [{ status: 'InvalidPhoneNumber' }] } });
-    const res = await sendMessage(admin, { scope: 'individual_staff', staff_id: 'st1', body: 'Hi' }, { school_id: SCHOOL_A });
-    check('sendMessage marks a provider-rejected row "failed"', admin._tables.message_logs[0].status === 'failed');
-    check('sendMessage still reports ok:true (it logged the attempt)', res.ok === true);
-    check('sendMessage\'s summary message says how many of the batch actually sent', /Sent 0 of 1/.test(res.message));
+    const res = await sendMessage(admin, { scope: 'individual_staff', staff_id: 'st1', body: 'Hi' }, { school_id: SCHOOL_A }, recordingTrigger);
+    stubFetch({ SMSMessageData: { Recipients: [{ number: '+254711111111', status: 'InvalidPhoneNumber' }] } });
+    await deliverBatch(admin, res.batch_id);
+    check('deliverBatch marks a provider-rejected row "failed"', admin._tables.message_logs[0].status === 'failed');
+    check('sendMessage still reported ok:true up front (it queued the attempt)', res.ok === true);
   }
   {
     // Not enough SMS credit: debit_sms_wallet() raises, and NO messages
@@ -210,7 +248,7 @@ function mockAdmin(opts) {
       forceDebitError: 'Not enough SMS credit — top up before sending.',
       tables: { staff: [{ id: 'st1', full_name: 'Mr T', school_id: SCHOOL_A, phone: '0711111111' }], sms_platform_config: [CONFIGURED_SMS_ROW] }
     });
-    stubFetch({ SMSMessageData: { Recipients: [{ status: 'Success', messageId: 'should-not-be-used' }] } });
+    stubFetch({ SMSMessageData: { Recipients: [{ number: '+254711111111', status: 'Success', messageId: 'should-not-be-used' }] } });
     const res = await sendMessage(admin, { scope: 'individual_staff', staff_id: 'st1', body: 'Hi' }, { school_id: SCHOOL_A });
     check('sendMessage refuses the whole batch when the wallet has insufficient credit', res.ok === false);
     check('sendMessage never logs a message when the debit is refused', admin._tables.message_logs.length === 0);

@@ -2,18 +2,25 @@
  * send-message.js
  * ----------------------------------------------------------------------------
  * Fans a "send to a class / a student's guardian / a staff member / everyone"
- * request out into one message_logs row per actual recipient, and — now that
- * a Sender ID is live on the connected Africa's Talking account (see
- * netlify/functions/_lib/smsProvider.js) — actually hands each one to that
- * provider, charging the school's own sms_wallets balance for what it costs
- * (1 credit per 160-character segment, per recipient) via the
- * debit_sms_wallet() RPC (migrations/0041_sms_wallet_debit_rpc.sql) BEFORE
- * sending, so an under-funded school gets a clear "top up first" instead of
- * a partially-sent batch. If SMS_PROVIDER_API_KEY/USERNAME aren't set (e.g.
- * a dev environment), sends fall back to the original "logged only, not
- * sent" behavior — no wallet is touched in that case either. Credentials
- * come from the sms_platform_config table, not env vars — see
- * smsProvider.js's own header for why.
+ * request out into one message_logs row per actual recipient, charging the
+ * school's own sms_wallets balance for what it costs (1 credit per
+ * 160-character segment, per recipient) via the debit_sms_wallet() RPC
+ * (migrations/0041_sms_wallet_debit_rpc.sql) BEFORE sending, so an
+ * under-funded school gets a clear "top up first" instead of a
+ * partially-sent batch. If no sms_platform_config row is set (e.g. a dev
+ * environment), sends fall back to the original "logged only, not sent"
+ * behavior — no wallet is touched in that case either.
+ *
+ * The actual Africa's Talking round trips do NOT happen in this function.
+ * Rows are written as status 'queued' and this handler returns right away —
+ * the person who clicked "Send" sees "Sent" immediately, even for a
+ * school-wide broadcast to hundreds of guardians, instead of watching a
+ * spinner while each one is dialed out one at a time. The real sending
+ * happens in deliver-sms-background.js, handed the batch via a short-lived
+ * signed internal token (see _lib/internalToken.js) so this function's own
+ * response never has to wait on it. Any recipient that fails only shows up
+ * later in SMS History (status flips 'queued' -> 'sent'/'failed') — exactly
+ * what was asked for: no waiting up front, failures discoverable after.
  *
  * Uses requireStaff (admin OR teacher), not requireAdmin — messaging is a
  * day-to-day teacher action, not an admin-only one, matching Zeraki.
@@ -21,7 +28,33 @@
  */
 const crypto = require('crypto');
 const { getAdminClient, requireStaff } = require('./_lib/supabaseAdmin');
-const { loadSmsConfig, isConfigured, sendSms, smsUnits } = require('./_lib/smsProvider');
+const { loadSmsConfig, isConfigured, smsUnits } = require('./_lib/smsProvider');
+const { sign } = require('./_lib/internalToken');
+
+/** Hands a queued batch off to deliver-sms-background.js and returns as soon
+ *  as that request is ACCEPTED (Netlify background functions answer 202
+ *  immediately, before doing any real work) — never waits for the actual
+ *  SMS sending to finish. Failure to even reach the trigger (e.g. no site
+ *  URL available, which can happen when running the functions bundle
+ *  somewhere unusual) is logged, not thrown: the batch simply stays
+ *  'queued' until something retries it, which is safer than failing the
+ *  whole "Send" action after the wallet has already been debited. */
+async function triggerBackgroundDelivery(batchId) {
+  const base = process.env.URL || process.env.DEPLOY_URL || process.env.DEPLOY_PRIME_URL;
+  if (!base) {
+    console.error('send-message: no site URL env var set — cannot trigger deliver-sms-background; batch', batchId, 'will stay queued.');
+    return;
+  }
+  try {
+    await fetch(base + '/.netlify/functions/deliver-sms-background', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: sign({ batch_id: batchId }) })
+    });
+  } catch (e) {
+    console.error('send-message: background trigger failed for batch', batchId, e);
+  }
+}
 
 function json(statusCode, body) {
   return { statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
@@ -54,7 +87,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    return json(200, await sendMessage(admin, payload, caller.profile));
+    return json(200, await sendMessage(admin, payload, caller.profile, triggerBackgroundDelivery));
   } catch (e) {
     console.error('send-message error:', e);
     return json(500, { ok: false, message: e.message || 'Unexpected server error.' });
@@ -101,7 +134,7 @@ async function resolveRecipients(admin, schoolId, payload) {
   return { error: 'Unknown recipient scope: ' + scope };
 }
 
-async function sendMessage(admin, payload, callerProfile) {
+async function sendMessage(admin, payload, callerProfile, deliveryTrigger) {
   const body = String(payload.body || '').trim();
   if (!body) return { ok: false, message: 'Message cannot be empty.' };
   if (body.length > 1000) return { ok: false, message: 'Message is too long (max 1000 characters).' };
@@ -124,44 +157,43 @@ async function sendMessage(admin, payload, callerProfile) {
     if (debitErr) return { ok: false, message: debitErr.message };
   }
 
-  const rows = [];
-  for (const r of recipients) {
-    let status = 'logged';
-    let providerResponse = 'No SMS provider is connected yet — this message was recorded but not actually sent.';
-    let providerMessageId = null;
-    if (providerConfigured) {
-      const result = await sendSms(smsConfig, r.phone, body);
-      status = result.status; // 'sent' | 'failed'
-      providerResponse = result.raw;
-      providerMessageId = result.messageId;
-    }
-    rows.push({
-      school_id: schoolId,
-      batch_id: batchId,
-      sent_by: callerProfile.staff_id || null,
-      recipient_scope: payload.scope,
-      scope_label: scopeLabel,
-      student_id: r.student_id || null,
-      staff_id: r.staff_id || null,
-      phone: r.phone,
-      body,
-      channel: 'sms',
-      status,
-      provider_response: providerConfigured ? `${providerResponse}${providerMessageId ? ` (id: ${providerMessageId})` : ''}` : providerResponse
-    });
-  }
+  // Every row starts 'queued' — even when a provider IS configured — because
+  // the actual send happens later, off this request, in
+  // deliver-sms-background.js. Only the "no provider at all" case gets a
+  // final status right here, since there is nothing left to do for it.
+  const rows = recipients.map((r) => ({
+    school_id: schoolId,
+    batch_id: batchId,
+    sent_by: callerProfile.staff_id || null,
+    recipient_scope: payload.scope,
+    scope_label: scopeLabel,
+    student_id: r.student_id || null,
+    staff_id: r.staff_id || null,
+    phone: r.phone,
+    body,
+    channel: 'sms',
+    status: providerConfigured ? 'queued' : 'logged',
+    provider_response: providerConfigured ? null : 'No SMS provider is connected yet — this message was recorded but not actually sent.'
+  }));
 
   const { error: insertErr } = await admin.from('message_logs').insert(rows);
   if (insertErr) return { ok: false, message: 'Could not save the message log: ' + insertErr.message };
 
-  const sentCount = rows.filter((r) => r.status === 'sent').length;
+  if (providerConfigured) {
+    // Not awaited by the CALLER of sendMessage in spirit — deliveryTrigger
+    // itself only waits for the background function to ACCEPT the batch
+    // (an instant 202), never for the sends themselves. See
+    // triggerBackgroundDelivery's own comment above.
+    await (deliveryTrigger || (() => {}))(batchId);
+  }
+
   return {
     ok: true,
     batch_id: batchId,
     recipients: rows.length,
     delivered: providerConfigured,
     message: providerConfigured
-      ? (sentCount < rows.length ? `Sent ${sentCount} of ${rows.length} — see SMS history for which failed.` : undefined)
+      ? `Sent to ${rows.length} recipient(s).`
       : `Logged for ${rows.length} recipient(s), but not actually sent — no SMS provider is connected yet.`
   };
 }

@@ -68,33 +68,38 @@ function smsUnits(body) {
   return Math.max(1, Math.ceil(len / 160));
 }
 
-/** Sends ONE message to ONE recipient using an already-loaded `cfg` (see
- *  loadSmsConfig above). Returns { status: 'sent'|'failed', messageId, raw }
- *  — never throws for a normal provider-side failure (bad number,
- *  insufficient AT balance, etc.); it only throws if `cfg` itself isn't
- *  configured, which every caller should have already checked via
- *  isConfigured() before looping over recipients. */
-async function sendSms(cfg, phone, message) {
-  if (!isConfigured(cfg)) throw new Error('SMS provider is not configured.');
-
-  const e164 = toE164Phone(phone);
-  if (!e164 || e164.length < 8) {
-    return { status: 'failed', messageId: null, raw: 'No usable phone number on file.' };
-  }
-
-  const base = String(cfg.username).toLowerCase() === 'sandbox'
+function apiBase(cfg) {
+  return String(cfg.username).toLowerCase() === 'sandbox'
     ? 'https://api.sandbox.africastalking.com'
     : 'https://api.africastalking.com';
+}
+
+// Africa's Talking accepts a comma-separated `to` list in ONE call — a
+// school-wide broadcast to 300 guardians used to be 300 outbound HTTP
+// requests (the actual reason a big send used to take a while); chunked
+// into groups this size it's ~3. Kept comfortably under any practical
+// request-size limit while still cutting round trips by ~100x.
+const BULK_CHUNK_SIZE = 100;
+
+/** Sends ONE chunk (already ≤ BULK_CHUNK_SIZE) to Africa's Talking and
+ *  matches its response back to each input phone by number — not by
+ *  response order, since that's not a documented guarantee. Returns an
+ *  array the same length/order as `phones`. Internal to this module; call
+ *  sendBulkSms (any size) or sendSms (one recipient) instead. */
+async function sendChunk(cfg, phones, message) {
+  const e164List = phones.map(toE164Phone);
+  const valid = e164List.map((e, i) => ({ e, i })).filter((x) => x.e && x.e.length >= 8);
+  const results = e164List.map((e) => (e && e.length >= 8 ? null : { status: 'failed', messageId: null, raw: 'No usable phone number on file.' }));
+  if (!valid.length) return results;
 
   const form = new URLSearchParams();
   form.set('username', cfg.username);
-  form.set('to', e164);
+  form.set('to', valid.map((v) => v.e).join(','));
   form.set('message', String(message || ''));
   if (cfg.sender_id) form.set('from', cfg.sender_id);
 
-  let raw = '';
   try {
-    const res = await fetch(base + '/version1/messaging', {
+    const res = await fetch(apiBase(cfg) + '/version1/messaging', {
       method: 'POST',
       headers: {
         apiKey: cfg.api_key,
@@ -104,16 +109,52 @@ async function sendSms(cfg, phone, message) {
       body: form.toString()
     });
     const resJson = await res.json().catch(() => null);
-    raw = resJson ? JSON.stringify(resJson) : `HTTP ${res.status}`;
-    const recipient = resJson && resJson.SMSMessageData && resJson.SMSMessageData.Recipients
-      && resJson.SMSMessageData.Recipients[0];
-    if (recipient && String(recipient.status).toLowerCase() === 'success') {
-      return { status: 'sent', messageId: recipient.messageId || null, raw };
-    }
-    return { status: 'failed', messageId: null, raw };
+    const wholeResponseRaw = resJson ? JSON.stringify(resJson) : `HTTP ${res.status}`;
+    const recipients = (resJson && resJson.SMSMessageData && resJson.SMSMessageData.Recipients) || [];
+
+    // AT can return more than one entry for the same number (shouldn't for
+    // this app's use, since a batch never intentionally dupes a recipient,
+    // but defend against it anyway) — queue per number, consumed in order.
+    const queueByNumber = {};
+    recipients.forEach((r) => { (queueByNumber[r.number] = queueByNumber[r.number] || []).push(r); });
+
+    valid.forEach(({ e, i }) => {
+      const queue = queueByNumber[e];
+      const r = queue && queue.length ? queue.shift() : null;
+      results[i] = r && String(r.status).toLowerCase() === 'success'
+        ? { status: 'sent', messageId: r.messageId || null, raw: JSON.stringify(r) }
+        : { status: 'failed', messageId: null, raw: r ? JSON.stringify(r) : wholeResponseRaw };
+    });
   } catch (e) {
-    return { status: 'failed', messageId: null, raw: String((e && e.message) || e) };
+    const raw = String((e && e.message) || e);
+    valid.forEach(({ i }) => { results[i] = { status: 'failed', messageId: null, raw }; });
   }
+  return results;
 }
 
-module.exports = { loadSmsConfig, isConfigured, toE164Phone, smsUnits, sendSms };
+/** Sends the SAME message to many recipients using an already-loaded `cfg`
+ *  (see loadSmsConfig above), chunked into as few Africa's Talking calls as
+ *  possible. Returns an array of { status: 'sent'|'failed', messageId, raw }
+ *  the same length and order as `phones` — never throws for a normal
+ *  provider-side failure, only if `cfg` itself isn't configured (callers
+ *  should already have checked isConfigured() before calling this). */
+async function sendBulkSms(cfg, phones, message) {
+  if (!isConfigured(cfg)) throw new Error('SMS provider is not configured.');
+  const list = phones || [];
+  const results = [];
+  for (let i = 0; i < list.length; i += BULK_CHUNK_SIZE) {
+    const chunk = await sendChunk(cfg, list.slice(i, i + BULK_CHUNK_SIZE), message);
+    results.push(...chunk);
+  }
+  return results;
+}
+
+/** Sends ONE message to ONE recipient — a thin convenience wrapper over
+ *  sendBulkSms for the single-recipient callers (send-otp.js,
+ *  sms-credit-notify.js) that don't need chunking at all. */
+async function sendSms(cfg, phone, message) {
+  const [result] = await sendBulkSms(cfg, [phone], message);
+  return result;
+}
+
+module.exports = { loadSmsConfig, isConfigured, toE164Phone, smsUnits, sendSms, sendBulkSms, BULK_CHUNK_SIZE };
