@@ -20,6 +20,16 @@
  * doesn't get a different response to learn anything from, and the schools
  * whose batch is actually pending just see it stay 'queued' (visible in SMS
  * history) rather than any 500 that would hint the endpoint exists.
+ *
+ * A batch's rows do NOT all necessarily share one message body any more —
+ * Messaging_Overhaul.docx's 'personalized' scope (exam results, fee
+ * balances) gives every recipient their own text. Africa's Talking's bulk
+ * endpoint can only apply ONE message to a whole `to` list in one call, so
+ * rows are grouped by their exact body text first; a plain broadcast is
+ * still just one group (and so still just one/few Africa's Talking calls),
+ * while a personalized batch of 40 guardians becomes 40 single-recipient
+ * groups — more calls, but each one still only ever waits on this
+ * background function, never on whoever clicked "Send".
  * ----------------------------------------------------------------------------
  */
 const { getAdminClient } = require('./_lib/supabaseAdmin');
@@ -45,17 +55,28 @@ async function deliverBatch(admin, batchId) {
     return;
   }
 
-  // Every row in one batch shares the same message body (one "Send" click),
-  // so one bulk call — chunked internally by sendBulkSms — covers the lot.
-  const body = rows[0].body;
-  const results = await sendBulkSms(smsConfig, rows.map((r) => r.phone), body);
+  // Group by exact body text — see header comment. A Map preserves each
+  // group's first-seen order, though order across groups doesn't matter
+  // since every row gets updated by its own id regardless.
+  const groups = new Map();
+  for (const r of rows) {
+    if (!groups.has(r.body)) groups.set(r.body, []);
+    groups.get(r.body).push(r);
+  }
 
-  for (let i = 0; i < rows.length; i++) {
-    const r = results[i] || { status: 'failed', messageId: null, raw: 'No result returned.' };
-    await admin.from('message_logs').update({
-      status: r.status,
-      provider_response: `${r.raw}${r.messageId ? ` (id: ${r.messageId})` : ''}`
-    }).eq('id', rows[i].id);
+  for (const [body, groupRows] of groups) {
+    const results = await sendBulkSms(smsConfig, groupRows.map((r) => r.phone), body);
+    for (let i = 0; i < groupRows.length; i++) {
+      const r = results[i] || { status: 'failed', messageId: null, raw: 'No result returned.' };
+      // r.raw is already plain English (see smsProvider.js's
+      // friendlyDeliveryText) — SMS History shows this straight to an
+      // admin/teacher, so no provider message id or raw JSON belongs in
+      // it; messageId is intentionally dropped here, not stored anywhere.
+      await admin.from('message_logs').update({
+        status: r.status,
+        provider_response: r.raw
+      }).eq('id', groupRows[i].id);
+    }
   }
 }
 

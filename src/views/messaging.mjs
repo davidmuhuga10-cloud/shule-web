@@ -1,34 +1,39 @@
 /**
- * messaging.mjs (view) — compose a message to a class's guardians, a single
- * guardian, a single staff member, every guardian in the school, or (brief
- * G1) exam/term results per guardian; a history of past sends grouped by
- * batch (see groupMessagesByBatch); and an "SMS Credits" tab (moved here
- * per direct request — this used to be its own top-level sidebar item, and
- * before that, a placeholder "Buy Bulk SMS" tab that just hand-edited a
- * settings balance with no real request/approval flow behind it. The real
- * SMS Credits submodule (submit a payment confirmation, see its status,
- * reviewed by the Super Admin dashboard) lives in smsCredits.mjs and is
- * just hosted inside this tab bar now).
+ * messaging.mjs (view) — Messaging_Overhaul.docx rewrite of Compose, exam
+ * results sending, and SMS History. Compose recipient selection (item 5) is
+ * now a single grid of tappable cards instead of a dropdown + checkbox
+ * wizard — no "Next" step, nothing hidden behind a menu. Recipient details
+ * and the message text sit in their own bordered cards (item 10), not one
+ * mixed block. Exam results (items 3 & 6) support sending to a whole class
+ * OR one student, build the brief's exact template client-side (the
+ * school-name-in-caps line itself is added server-side, once, for every
+ * message this app sends — see send-message.js item 2), and confirm
+ * "Processed" the instant the batch is queued rather than waiting for
+ * delivery. History (items 7 & 8) is a scannable table with a per-recipient
+ * detail view and a resend action for anything that failed.
  */
-import { esc, options, toast, renderPrereq, renderPrereqOrConnectivity, loader, fmtDate } from '../app.js';
+import { esc, options, toast, renderPrereq, renderPrereqOrConnectivity, loader, fmtDate, modal, closeModal, withBusy, state } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { groupMessagesByBatch } from '../lib/api/messaging.mjs';
 import { takeNavIntent } from '../lib/navIntent.mjs';
 import { renderSmsCredits } from './smsCredits.mjs';
 
-const SCOPE_LABELS = {
-  class: 'A whole class (guardians)',
-  individual_student: 'One student\'s guardian',
-  individual_staff: 'One staff member',
-  broadcast: 'Every guardian in the school',
-  exam_results: 'Exam/term results (per guardian)'
-};
+// Item 5: one option per card — no "message type" vs "scope" split, no
+// dropdown. Exam Results lives here too (doc item 6, closing line: "Under
+// sms include also an option to send results from that point").
+const RECIPIENT_TYPES = [
+  { scope: 'broadcast', icon: '👪', label: 'All Guardians' },
+  { scope: 'class', icon: '🏫', label: 'A Class' },
+  { scope: 'individual_student', icon: '🎓', label: 'One Student' },
+  { scope: 'individual_staff', icon: '🧑‍🏫', label: 'Staff Member' },
+  { scope: 'exam_results', icon: '📊', label: 'Exam Results' }
+];
+const STATUS_BADGE = { sent: 'green', queued: 'blue', logged: 'grey', failed: 'red' };
 
 export async function viewMessaging(root) {
   const [classesRes, studentsRes, staffRes, examsRes] = await Promise.all([
     Db.classes.list(), Db.students.list({}), Db.staff.list(), Db.results.listExams()
   ]);
-  // Round 6 §5 (recurring BUG): see examAnalysis.mjs for the full story.
   if (!classesRes.ok || !studentsRes.ok || !staffRes.ok || !examsRes.ok) {
     renderPrereqOrConnectivity(root, { ok: false, onRetry: () => viewMessaging(root) });
     return;
@@ -38,16 +43,17 @@ export async function viewMessaging(root) {
   const staff = staffRes.data;
   const exams = examsRes.data;
   if (!classes.length) { renderPrereq(root, 'No classes found', 'Please create a class first.', 'classes', 'Go to Classes'); return; }
-  // A "📨 Send Results" click from the Manage Exams board (brief Step 13)
-  // hands off straight to the exam_results scope, pre-filled with exactly
-  // which exam+class to send — see navIntent.mjs.
+  // A "📨 Send Results" click from the Manage Exams board hands off straight
+  // to the exam_results scope, pre-filled with exactly which exam+class.
   const intent = takeNavIntent('messaging') || {};
   render(root, { classes, students, staff, exams }, {
     tab: 'compose',
-    scope: intent.scope || 'class',
+    scope: intent.scope || 'broadcast',
     class_id: intent.class_id || classes[0].id,
     exam_id: intent.exam_id || (exams[0] ? exams[0].id : ''),
-    body: ''
+    resultsMode: 'class',
+    body: '',
+    customNote: ''
   });
 }
 
@@ -66,106 +72,92 @@ function render(root, data, sel) {
   const body = root.querySelector('#msg-body');
   if (sel.tab === 'compose') renderCompose(body, data, sel, root);
   else if (sel.tab === 'sms-credits') renderSmsCredits(body);
-  else renderHistory(body);
+  else renderHistory(body, data);
 }
 
+// ===========================================================================
+// COMPOSE (items 5 & 10)
+// ===========================================================================
 function renderCompose(body, data, sel, root) {
   const { classes, students, staff, exams } = data;
   const isResults = sel.scope === 'exam_results';
+
   body.innerHTML = `
-    <div class="card side-accent tile-indigo">
+    <div class="card side-accent tile-indigo compose-block">
       <div class="card-b">
-        <div class="field">
-          <label>Send to</label>
-          <select id="msg-scope">${Object.entries(SCOPE_LABELS).map(([k, l]) => `<option value="${k}" ${sel.scope === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
+        <h4>To</h4>
+        <div class="rp-grid">
+          ${RECIPIENT_TYPES.map((t) => `<div class="rp-opt${sel.scope === t.scope ? ' sel' : ''}" data-scope="${t.scope}">
+            <span class="ic">${t.icon}</span><span class="lab">${esc(t.label)}</span>
+          </div>`).join('')}
         </div>
-        <div id="msg-target" class="field"></div>
-        ${isResults ? '' : `<div class="field">
-          <label>Message</label>
-          <textarea id="msg-body-text" rows="5" maxlength="1000" placeholder="Type your message…">${esc(sel.body)}</textarea>
-          <div class="hint" id="msg-count">0 / 1000 characters</div>
-        </div>`}
+        <div id="msg-target" class="rp-inline"></div>
       </div>
-      <div class="card-b" style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line)">
-        <div class="muted" id="msg-preview" style="font-size:13px"></div>
-        <button class="btn" id="msg-send">${isResults ? 'Send results' : 'Send message'}</button>
+    </div>
+    <div id="msg-second-block"></div>
+  `;
+
+  body.querySelectorAll('[data-scope]').forEach((el) => {
+    el.onclick = () => {
+      if (sel.scope === el.dataset.scope) return;
+      renderCompose(body, data, { ...sel, scope: el.dataset.scope }, root);
+    };
+  });
+
+  const targetEl = body.querySelector('#msg-target');
+  const secondBlock = body.querySelector('#msg-second-block');
+
+  if (isResults) {
+    renderResultsTarget(targetEl, data, sel, root, body);
+    if (exams.length) renderResultsSendCard(secondBlock, data, sel, root, body);
+    else secondBlock.innerHTML = '';
+    return;
+  }
+
+  renderPlainTarget(targetEl, data, sel, () => updatePreview());
+  secondBlock.innerHTML = `
+    <div class="card side-accent tile-indigo compose-block">
+      <div class="card-b">
+        <h4>Message</h4>
+        <textarea id="msg-body-text" rows="5" maxlength="1000" placeholder="Type your message…">${esc(sel.body)}</textarea>
+        <div class="charcount" id="msg-count">0 / 1000 characters</div>
+        <p class="hint" id="msg-preview" style="margin-top:10px"></p>
+      </div>
+      <div class="card-b" style="display:flex;justify-content:flex-end;border-top:1px solid var(--line)">
+        <button class="btn" id="msg-send">Send message</button>
       </div>
     </div>
   `;
 
-  function renderTarget() {
-    const targetEl = body.querySelector('#msg-target');
-    if (sel.scope === 'class') {
-      targetEl.innerHTML = `<label>Class</label><select id="msg-class">${options(classes, 'id', 'name', sel.class_id)}</select>`;
-      targetEl.querySelector('#msg-class').onchange = (e) => { sel.class_id = e.target.value; updatePreview(); };
-    } else if (sel.scope === 'individual_student') {
-      targetEl.innerHTML = `<label>Student</label><select id="msg-student">${options(students, 'id', 'full_name', sel.student_id, 'Choose a student')}</select>`;
-      targetEl.querySelector('#msg-student').onchange = (e) => { sel.student_id = e.target.value; updatePreview(); };
-    } else if (sel.scope === 'individual_staff') {
-      targetEl.innerHTML = `<label>Staff member</label><select id="msg-staff">${options(staff, 'id', 'full_name', sel.staff_id, 'Choose a staff member')}</select>`;
-      targetEl.querySelector('#msg-staff').onchange = (e) => { sel.staff_id = e.target.value; updatePreview(); };
-    } else if (sel.scope === 'exam_results') {
-      if (!exams.length) {
-        targetEl.innerHTML = `<div class="hint">No exams found — create one under Exams first.</div>`;
-        return;
-      }
-      targetEl.innerHTML = `
-        <label>Exam</label><select id="msg-exam">${options(exams, 'id', 'name', sel.exam_id)}</select>
-        <label style="margin-top:10px;display:block">Class</label><select id="msg-class">${options(classes, 'id', 'name', sel.class_id)}</select>
-        <p class="hint">Each guardian gets their own child's total, average, grade and position — not a shared message.</p>`;
-      targetEl.querySelector('#msg-exam').onchange = (e) => { sel.exam_id = e.target.value; updatePreview(); };
-      targetEl.querySelector('#msg-class').onchange = (e) => { sel.class_id = e.target.value; updatePreview(); };
-    } else {
-      targetEl.innerHTML = `<div class="hint">This will message every guardian phone number on file across the whole school.</div>`;
-    }
-  }
-
   function updatePreview() {
     const previewEl = body.querySelector('#msg-preview');
+    if (!previewEl) return;
     if (sel.scope === 'class') {
       const cls = classes.find((c) => c.id === sel.class_id);
       const count = students.filter((s) => s.class_id === sel.class_id && s.guardian_contact).length;
       previewEl.textContent = cls ? `Will reach ${count} guardian(s) in ${cls.name}.` : '';
     } else if (sel.scope === 'individual_student') {
       const s = students.find((x) => x.id === sel.student_id);
-      previewEl.textContent = s ? (s.guardian_contact ? `Will reach ${s.full_name}'s guardian.` : `${s.full_name} has no guardian contact on file.`) : '';
+      previewEl.textContent = s ? (s.guardian_contact ? `Will reach ${s.full_name}'s guardian.` : `${s.full_name} has no guardian contact on file.`) : 'Choose a student.';
     } else if (sel.scope === 'individual_staff') {
       const s = staff.find((x) => x.id === sel.staff_id);
-      previewEl.textContent = s ? (s.phone ? `Will reach ${s.full_name}.` : `${s.full_name} has no phone on file.`) : '';
-    } else if (sel.scope === 'exam_results') {
-      const cls = classes.find((c) => c.id === sel.class_id);
-      const count = students.filter((s) => s.class_id === sel.class_id && s.guardian_contact).length;
-      previewEl.textContent = cls ? `Up to ${count} guardian(s) in ${cls.name} with a phone number on file.` : '';
+      previewEl.textContent = s ? (s.phone ? `Will reach ${s.full_name}.` : `${s.full_name} has no phone on file.`) : 'Choose a staff member.';
     } else {
       const count = students.filter((s) => s.guardian_contact).length;
       previewEl.textContent = `Will reach ${count} guardian(s) across the whole school.`;
     }
   }
-
-  body.querySelector('#msg-scope').onchange = (e) => { sel.scope = e.target.value; renderCompose(body, data, sel, root); };
-  renderTarget();
   updatePreview();
 
   const textEl = body.querySelector('#msg-body-text');
-  if (textEl) {
-    const countEl = body.querySelector('#msg-count');
-    const updateCount = () => { sel.body = textEl.value; countEl.textContent = `${textEl.value.length} / 1000 characters`; };
-    textEl.oninput = updateCount;
-    updateCount();
-  }
+  const countEl = body.querySelector('#msg-count');
+  const updateCount = () => { sel.body = textEl.value; countEl.textContent = `${textEl.value.length} / 1000 characters`; };
+  textEl.oninput = updateCount;
+  updateCount();
 
   body.querySelector('#msg-send').onclick = async () => {
     const btn = body.querySelector('#msg-send');
-    btn.disabled = true;
-    if (sel.scope === 'exam_results') {
-      btn.textContent = 'Sending…';
-      const r = await sendExamResults(sel.exam_id, sel.class_id, classes, students);
-      btn.disabled = false; btn.textContent = 'Send results';
-      if (!r.ok) { toast(r.message, 'err'); return; }
-      toast(`Sent results to ${r.sent} of ${r.eligible} guardian(s).${r.failed ? ` ${r.failed} failed.` : ''}`, r.failed ? 'warn' : 'ok');
-      return;
-    }
-    btn.textContent = 'Sending…';
+    btn.disabled = true; btn.textContent = 'Sending…';
     const payload = { scope: sel.scope, body: textEl.value, class_id: sel.class_id, student_id: sel.student_id, staff_id: sel.staff_id };
     const r = await Db.messaging.send(payload);
     btn.disabled = false; btn.textContent = 'Send message';
@@ -175,40 +167,171 @@ function renderCompose(body, data, sel, root) {
   };
 }
 
-/** Brief G1: "Add an option to send exam/term results directly through the
- *  messaging module." Each guardian gets a PERSONALIZED summary for their
- *  own child — total, average, grade, position — built from the same
- *  aggregated numbers the Mark List/Report Form already show (getBroadsheet)
- *  joined against the students already loaded for this screen (for
- *  guardian_contact/name). Sent as individual per-student messages through
- *  the existing send-message pipeline — no schema or backend changes needed
- *  — rather than one shared broadcast body. */
-async function sendExamResults(examId, classId, classes, students) {
-  if (!examId) return { ok: false, message: 'Choose an exam.' };
-  if (!classId) return { ok: false, message: 'Choose a class.' };
-  const bsRes = await Db.results.getBroadsheet({ exam_id: examId, class_id: classId });
-  if (!bsRes.ok) return { ok: false, message: bsRes.message };
-
-  const cls = classes.find((c) => c.id === classId);
-  const examName = bsRes.data.exam.name;
-  const totalInClass = bsRes.data.students.length;
-  const withScores = bsRes.data.students.filter((r) => r.counted > 0);
-
-  let attempted = 0, sent = 0, failed = 0;
-  for (const r of withScores) {
-    const student = students.find((s) => s.id === r.student_id);
-    if (!student || !student.guardian_contact) continue;
-    attempted++;
-    const posLabel = r.position ? `${r.position} of ${totalInClass}` : 'not ranked';
-    const messageBody = `${examName} RESULTS for ${r.full_name}${cls ? ` (${cls.name})` : ''}: `
-      + `Total ${r.total}, Average ${r.average}%, Grade ${r.overall_grade || '—'}, Position ${posLabel}.`;
-    const res = await Db.messaging.send({ scope: 'individual_student', student_id: r.student_id, body: messageBody });
-    if (res.ok) sent++; else failed++;
+function renderPlainTarget(targetEl, data, sel, onChange) {
+  const { classes, students, staff } = data;
+  if (sel.scope === 'class') {
+    targetEl.innerHTML = `<label class="f-lab">Class</label><select id="msg-class">${options(classes, 'id', 'name', sel.class_id)}</select>`;
+    targetEl.querySelector('#msg-class').onchange = (e) => { sel.class_id = e.target.value; onChange(); };
+  } else if (sel.scope === 'individual_student') {
+    targetEl.innerHTML = `<label class="f-lab">Student</label><select id="msg-student">${options(students, 'id', 'full_name', sel.student_id, 'Choose a student')}</select>`;
+    targetEl.querySelector('#msg-student').onchange = (e) => { sel.student_id = e.target.value; onChange(); };
+  } else if (sel.scope === 'individual_staff') {
+    targetEl.innerHTML = `<label class="f-lab">Staff member</label><select id="msg-staff">${options(staff, 'id', 'full_name', sel.staff_id, 'Choose a staff member')}</select>`;
+    targetEl.querySelector('#msg-staff').onchange = (e) => { sel.staff_id = e.target.value; onChange(); };
+  } else {
+    targetEl.innerHTML = `<p class="hint" style="margin:0">This will message every guardian phone number on file across the whole school.</p>`;
   }
-  return { ok: true, sent, failed, eligible: attempted };
 }
 
-async function renderHistory(body) {
+// ===========================================================================
+// EXAM RESULTS (items 2, 3 & 6) — the standard template, an optional custom
+// note, whole-class OR one-student sending, and an instant "Processed"
+// confirmation with no navigation away and no waiting on real delivery.
+// ===========================================================================
+function renderResultsTarget(targetEl, data, sel, root, body) {
+  const { classes, exams } = data;
+  if (!exams.length) {
+    targetEl.innerHTML = `<p class="hint" style="margin:0">No exams found — create one under Exams first.</p>`;
+    return;
+  }
+  targetEl.innerHTML = `
+    <label class="f-lab">Exam</label><select id="msg-exam">${options(exams, 'id', 'name', sel.exam_id)}</select>
+    <label class="f-lab" style="margin-top:10px;display:block">Class</label><select id="msg-class">${options(classes, 'id', 'name', sel.class_id)}</select>
+    <label class="f-lab" style="margin-top:10px;display:block">Send to</label>
+    <div class="mode-toggle">
+      <button data-mode="class" class="${sel.resultsMode !== 'student' ? 'on' : ''}">Whole class</button>
+      <button data-mode="student" class="${sel.resultsMode === 'student' ? 'on' : ''}">One student</button>
+    </div>
+    <div id="msg-results-student" style="margin-top:10px"></div>
+  `;
+  targetEl.querySelector('#msg-exam').onchange = (e) => { sel.exam_id = e.target.value; renderCompose(body, data, sel, root); };
+  targetEl.querySelector('#msg-class').onchange = (e) => { sel.class_id = e.target.value; sel.resultsStudentId = ''; renderCompose(body, data, sel, root); };
+  targetEl.querySelectorAll('[data-mode]').forEach((b) => b.onclick = () => {
+    sel.resultsMode = b.dataset.mode;
+    renderCompose(body, data, sel, root);
+  });
+
+  const studentEl = targetEl.querySelector('#msg-results-student');
+  if (sel.resultsMode === 'student') {
+    const classStudents = data.students.filter((s) => s.class_id === sel.class_id);
+    studentEl.innerHTML = `<select id="msg-results-student-sel">${options(classStudents, 'id', 'full_name', sel.resultsStudentId, 'Choose a student')}</select>`;
+    studentEl.querySelector('#msg-results-student-sel').onchange = (e) => { sel.resultsStudentId = e.target.value; renderResultsSendCard(body.querySelector('#msg-second-block'), data, sel, root, body); };
+  }
+}
+
+/** Builds the exact per-student template from Messaging_Overhaul.docx item
+ *  3, from one getBroadsheet() row — everything BUT the school-name header
+ *  line (send-message.js adds that itself, once, for every message — item
+ *  2). `customNote` is appended as its own trailing line when given. */
+function buildResultsMessage(bs, row, examLabel, className, customNote) {
+  const posLabel = row.position ? `${row.position} of ${bs.students.length}` : 'not ranked';
+  const totalPossible = (Number(bs.exam.out_of) || 100) * (row.counted || 0);
+  const lines = [
+    'Dear Parent,',
+    '',
+    examLabel,
+    '',
+    `NAME: ${row.full_name}`,
+    `FORM: ${className}`,
+    `GRADE: ${row.overall_grade || '—'}`,
+    `MN MKS: ${row.average}`,
+    `TT MKS: ${Math.round(row.total)} / ${totalPossible}`,
+    ''
+  ];
+  bs.subjects.forEach((s) => {
+    const score = row.scores[s.id];
+    if (score === null || score === undefined) return;
+    const g = row.grades[s.id];
+    lines.push(`${(s.code || s.name).toUpperCase()}: ${Math.round(score)} ${(g && g.grade_label) || ''}`.trim());
+  });
+  if (String(customNote || '').trim()) { lines.push(''); lines.push(String(customNote).trim()); }
+  // Position isn't part of the brief's field list verbatim, but it's the
+  // one thing the OLD per-guardian summary had that's genuinely worth
+  // keeping — tacked on as its own trailing context line, after the note.
+  lines.push('', `Position: ${posLabel}.`);
+  return lines.join('\n');
+}
+
+function renderResultsSendCard(el, data, sel, root, body) {
+  el.innerHTML = `
+    <div class="card side-accent tile-indigo compose-block">
+      <div class="card-b" id="msg-results-preview-box">${loader()}</div>
+      <div class="card-b" style="border-top:1px solid var(--line)">
+        <label class="f-lab">Add a note to every message in this batch <span class="muted" style="text-transform:none;font-weight:500">(optional)</span></label>
+        <textarea id="msg-results-note" rows="2" placeholder="e.g. Opening date 14th, please come accompanied by your parent.">${esc(sel.customNote || '')}</textarea>
+      </div>
+      <div class="card-b" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;border-top:1px solid var(--line)">
+        <div class="muted" style="font-size:13px" id="msg-results-count"></div>
+        <button class="btn" id="msg-results-send">Send results</button>
+      </div>
+      <div id="msg-results-processed"></div>
+    </div>
+  `;
+  el.querySelector('#msg-results-note').oninput = (e) => { sel.customNote = e.target.value; };
+
+  const cls = data.classes.find((c) => c.id === sel.class_id);
+  const exam = data.exams.find((e) => e.id === sel.exam_id);
+  if (!exam || !cls) return;
+  const examLabel = `${exam.name}${exam.term_name ? `, ${exam.term_name}` : ''}${exam.academic_year_name ? ` ${exam.academic_year_name}` : ''}`;
+
+  Db.results.getBroadsheet({ exam_id: sel.exam_id, class_id: sel.class_id }).then((bsRes) => {
+    const previewBox = el.querySelector('#msg-results-preview-box');
+    const countEl = el.querySelector('#msg-results-count');
+    if (!bsRes.ok) { previewBox.innerHTML = `⚠️ ${esc(bsRes.message)}`; return; }
+    const bs = bsRes.data;
+    let rows = bs.students.filter((r) => r.counted > 0);
+    if (sel.resultsMode === 'student') rows = rows.filter((r) => r.student_id === sel.resultsStudentId);
+    const withPhone = rows.filter((r) => {
+      const s = data.students.find((x) => x.id === r.student_id);
+      return s && s.guardian_contact;
+    });
+
+    if (!rows.length) {
+      previewBox.innerHTML = sel.resultsMode === 'student'
+        ? `<p class="hint" style="margin:0">Choose a student above — this one has no marks recorded for this exam yet.</p>`
+        : `<p class="hint" style="margin:0">No students in this class have marks recorded for this exam yet.</p>`;
+      countEl.textContent = '';
+      el.querySelector('#msg-results-send').disabled = true;
+      return;
+    }
+
+    const previewRow = rows[0];
+    const previewMsg = buildResultsMessage(bs, previewRow, examLabel, cls.name, sel.customNote);
+    const schoolName = (state.settings && state.settings.school_name) || 'Your School';
+    previewBox.innerHTML = `
+      <label class="f-lab">Preview — ${esc(previewRow.full_name)}</label>
+      <div class="sms-preview"><b>${esc(schoolName.toUpperCase())}</b>\n\n${esc(previewMsg)}</div>
+    `;
+    countEl.textContent = `${withPhone.length} of ${rows.length} ${sel.resultsMode === 'student' ? 'student' : 'students'} with a guardian number on file will be sent.`;
+
+    el.querySelector('#msg-results-send').onclick = async () => {
+      const btn = el.querySelector('#msg-results-send');
+      btn.disabled = true; btn.textContent = 'Processing…';
+      const recipients = withPhone.map((r) => {
+        const s = data.students.find((x) => x.id === r.student_id);
+        return { student_id: r.student_id, phone: s.guardian_contact, body: buildResultsMessage(bs, r, examLabel, cls.name, sel.customNote) };
+      });
+      const res = await Db.messaging.send({
+        scope: 'personalized',
+        scope_label: `${exam.name} Results — ${cls.name}`,
+        recipients
+      });
+      btn.disabled = false; btn.textContent = 'Send results';
+      if (!res.ok) { toast(res.message, 'err'); return; }
+      const skipped = rows.length - withPhone.length;
+      el.querySelector('#msg-results-processed').innerHTML = `
+        <div class="card-b processed-toast"><span class="ico">✓</span>
+          Processed — ${withPhone.length} of ${rows.length} queued for sending${skipped ? ` (${skipped} have no guardian number on file)` : ''}. Check SMS History for delivery.
+        </div>`;
+    };
+  });
+}
+
+// ===========================================================================
+// SMS HISTORY (items 7 & 8) — a scannable table, and a per-recipient batch
+// detail view with a resend action for anything that failed.
+// ===========================================================================
+async function renderHistory(body, data) {
   body.innerHTML = `<div class="card side-accent tile-indigo"><div id="msg-hist-list">${loader()}</div></div>`;
   const listEl = body.querySelector('#msg-hist-list');
   const res = await Db.messaging.history(200);
@@ -216,21 +339,90 @@ async function renderHistory(body) {
   const batches = groupMessagesByBatch(res.data);
   if (!batches.length) { listEl.innerHTML = `<div class="card-b"><div class="empty"><div class="e-ico">💬</div><h3>No messages sent yet</h3><p>Sends will show up here once you compose one.</p></div></div>`; return; }
 
-  listEl.innerHTML = batches.map((b) => `
-    <div class="card-b" style="border-bottom:1px solid var(--line)">
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
-        <div>
-          <div style="font-weight:650">${esc(b.scope_label || b.recipient_scope)}</div>
-          <div class="muted" style="font-size:12.5px;margin-top:2px">${fmtDate(b.created_at)}</div>
+  const staffById = {}; (data.staff || []).forEach((s) => { staffById[s.id] = s.full_name; });
+  const senderOf = (b) => staffById[b.sent_by] || '—';
+  const typeLabelOf = (b) => (b.recipient_scope === 'personalized' ? 'Personalized' : 'SMS');
+
+  listEl.innerHTML = `
+    <div class="mh-desktop-view"><div class="table-wrap"><table class="data compact">
+      <thead><tr><th>Title</th><th>Sender</th><th>Type</th><th class="num">Recipients</th><th class="num">Delivered</th><th class="num">Failed</th><th class="num">Credits</th><th>Date</th><th></th></tr></thead>
+      <tbody>${batches.map((b, i) => `<tr>
+        <td>${esc(b.scope_label || b.recipient_scope)}</td>
+        <td class="muted">${esc(senderOf(b))}</td>
+        <td><span class="badge blue">${esc(typeLabelOf(b))}</span></td>
+        <td class="num">${b.recipients.length}</td>
+        <td class="num">${b.counts.sent}</td>
+        <td class="num">${b.counts.failed ? `<span style="color:var(--danger);font-weight:650">${b.counts.failed}</span>` : '0'}</td>
+        <td class="num">${b.credits}</td>
+        <td class="muted" style="font-size:12px;white-space:nowrap">${fmtDate(b.created_at)}</td>
+        <td><button class="btn ghost sm" data-view="${i}">View</button></td>
+      </tr>`).join('')}</tbody>
+    </table></div></div>
+    <div class="mh-mobile-view">${batches.map((b, i) => `
+      <div class="mh-card" data-view="${i}">
+        <div class="mh-card-top">
+          <div>
+            <div style="font-weight:650">${esc(b.scope_label || b.recipient_scope)}</div>
+            <div class="muted" style="font-size:12px;margin-top:2px">${esc(senderOf(b))} · ${fmtDate(b.created_at)}</div>
+          </div>
+          <span class="badge blue">${esc(typeLabelOf(b))}</span>
         </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
-          ${b.counts.sent ? `<span class="badge green">${b.counts.sent} sent</span>` : ''}
-          ${b.counts.queued ? `<span class="badge blue">${b.counts.queued} queued</span>` : ''}
-          ${b.counts.logged ? `<span class="badge grey">${b.counts.logged} logged only</span>` : ''}
-          ${b.counts.failed ? `<span class="badge red">${b.counts.failed} failed</span>` : ''}
+        <div class="mh-card-stats">
+          <div><b>${b.recipients.length}</b><span>Recipients</span></div>
+          <div><b style="color:var(--ok)">${b.counts.sent}</b><span>Delivered</span></div>
+          <div><b style="color:${b.counts.failed ? 'var(--danger)' : 'var(--muted)'}">${b.counts.failed}</b><span>Failed</span></div>
+          <div><b>${b.credits}</b><span>Credits</span></div>
         </div>
-      </div>
-      <p style="margin:10px 0 0;font-size:13.5px">${esc(b.body)}</p>
+      </div>`).join('')}
     </div>
-  `).join('');
+  `;
+  listEl.querySelectorAll('[data-view]').forEach((el) => el.onclick = () => openBatchDetail(batches[Number(el.dataset.view)], body, data));
+}
+
+/** Item 8 — clicking View opens this: individual delivery status, credits
+ *  per message, delivery info, and a resend option for anything failed. */
+function openBatchDetail(batch, body, data) {
+  // provider_response is already plain English by the time it reaches here
+  // (see smsProvider.js's friendlyDeliveryText) — no ids, no raw JSON. A
+  // failed delivery's reason is shown in red so it reads as a problem at a
+  // glance, not just more grey text next to everything that succeeded.
+  const rowHtml = (r) => `<tr data-row-id="${esc(r.id)}">
+      <td style="white-space:nowrap">${esc(r.phone || '—')}</td>
+      <td><span class="badge ${STATUS_BADGE[r.status] || 'grey'}">${esc(r.status)}</span></td>
+      <td class="num">${esc(String(r.credits ?? 1))}</td>
+      <td style="font-size:12.5px;max-width:260px${r.status === 'failed' ? ';color:var(--danger);font-weight:600' : ''}" class="${r.status === 'failed' ? '' : 'muted'}">${esc(r.provider_response || (r.status === 'queued' ? 'Waiting to send…' : '—'))}</td>
+      <td>${r.status === 'failed' ? `<button class="btn ghost sm" data-resend="${esc(r.id)}">Resend</button>` : ''}</td>
+    </tr>`;
+
+  modal({
+    title: batch.scope_label || batch.recipient_scope,
+    wide: true,
+    footer: false,
+    body: `
+      <div class="mh-detail-meta">
+        <div><span class="muted">Recipients</span><b>${batch.recipients.length}</b></div>
+        <div><span class="muted">Delivered</span><b style="color:var(--ok)">${batch.counts.sent}</b></div>
+        <div><span class="muted">Failed</span><b style="color:${batch.counts.failed ? 'var(--danger)' : 'var(--ink)'}">${batch.counts.failed}</b></div>
+        <div><span class="muted">Credits used</span><b>${batch.credits}</b></div>
+      </div>
+      ${batch.counts.failed ? `<div style="text-align:right;margin-bottom:10px"><button class="btn sm" id="mh-resend-all">Resend all failed (${batch.counts.failed})</button></div>` : ''}
+      <div class="table-wrap"><table class="data compact">
+        <thead><tr><th>Phone</th><th>Status</th><th class="num">Credits</th><th>Delivery info</th><th></th></tr></thead>
+        <tbody>${batch.recipients.map(rowHtml).join('')}</tbody>
+      </table></div>
+    `
+  });
+
+  const doResend = async (ids, btn) => {
+    await withBusy(btn, async () => {
+      const res = await Db.messaging.resend(ids);
+      if (!res.ok) { toast(res.message, 'err'); return; }
+      toast(`Resent ${res.resent} message(s) — check back shortly for the outcome.`, 'ok');
+      closeModal();
+      renderHistory(body, data);
+    }, 'Resending…');
+  };
+  document.querySelectorAll('[data-resend]').forEach((btn) => btn.onclick = () => doResend([btn.dataset.resend], btn));
+  const resendAll = document.getElementById('mh-resend-all');
+  if (resendAll) resendAll.onclick = () => doResend(batch.recipients.filter((r) => r.status === 'failed').map((r) => r.id), resendAll);
 }

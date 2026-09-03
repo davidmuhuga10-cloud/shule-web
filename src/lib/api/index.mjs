@@ -39,13 +39,15 @@ async function callAdminFunction(action, payload) {
   }
 }
 
-/** Same shape as callAdminFunction, but for the staff-level send-message
- *  function (admin OR teacher) — kept separate so a caller can never
- *  accidentally hit the admin-only endpoint with a messaging payload. */
-async function callSendMessage(payload) {
+/** Same shape as callAdminFunction, but for staff-level (admin OR teacher)
+ *  Netlify functions — kept separate from callAdminFunction so a caller can
+ *  never accidentally hit an admin-only endpoint with a messaging payload.
+ *  Shared by send-message.js and resend-message.js (Messaging_Overhaul.docx
+ *  item 8's resend action). */
+async function callStaffFunction(fnName, payload) {
   const token = await getAccessToken();
   if (!token) return { ok: false, message: 'Not signed in.' };
-  const res = await fetch('/.netlify/functions/send-message', {
+  const res = await fetch(`/.netlify/functions/${fnName}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify(payload)
@@ -56,6 +58,8 @@ async function callSendMessage(payload) {
     return { ok: false, message: 'Unexpected response from the server (' + res.status + ').' };
   }
 }
+const callSendMessage = (payload) => callStaffFunction('send-message', payload);
+const callResendMessage = (payload) => callStaffFunction('resend-message', payload);
 
 const academics = createAcademicsApi(supabase);
 const grading = createGradingApi(supabase);
@@ -78,7 +82,7 @@ export const Db = {
   settings,
   users: createUsersApi(supabase, callAdminFunction),
   attendance: createAttendanceApi(supabase),
-  messaging: createMessagingApi(supabase, callSendMessage),
+  messaging: createMessagingApi(supabase, callSendMessage, callResendMessage),
   parents: createParentsApi(supabase, callAdminFunction),
   capabilities: createCapabilitiesApi(supabase),
   // Round 4 §7: the Timetable module. settings is injected (see

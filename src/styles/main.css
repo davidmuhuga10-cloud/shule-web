@@ -405,6 +405,13 @@ table.data thead tr:first-child th:first-child{border-top-left-radius:var(--radi
 table.data thead tr:first-child th:last-child{border-top-right-radius:var(--radius)}
 table.data td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
 table.data tr:last-child td{border-bottom:none}
+/* .compact — SMS History (Messaging_Overhaul.docx item 7) feedback: rows
+   read as too tall, more like a spread-out list than a table you can scan
+   — thinner rows, closer to the density of Finance's own Balances table
+   (.print-grid), so more of the batch fits on screen without scrolling. */
+table.data.compact{font-size:12.5px}
+table.data.compact th{padding:7px 10px;font-size:10.5px}
+table.data.compact td{padding:7px 10px}
 table.data tbody tr:hover{background:#fafbfc}
 table.data td.num,table.data th.num{text-align:center}
 .row-actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
@@ -1512,3 +1519,65 @@ table.data td.num,table.data th.num{text-align:center}
 .mk-m-info .name{font-weight:700;font-size:13px}
 .mk-m-info .adm{font-size:11px;color:var(--muted)}
 .mk-m-score{width:72px;padding:9px 4px;border:1.5px solid var(--line);border-radius:8px;text-align:center;font-weight:700;font-size:15px;flex:0 0 auto}
+
+/* ===========================================================================
+   Messaging_Overhaul.docx — Compose recipient picker (item 5), separated
+   To/Message blocks (item 10), exam-results template + toggle (items 3 & 6),
+   and the redesigned SMS History table + detail view (items 7 & 8). Mobile
+   treatment (item 11) reuses Exam Desk's own .ed-desktop-view/.ed-mobile-view
+   breakpoint pattern under new .mh-* names, so History collapses to cards at
+   the same width Exam Desk already does.
+   =========================================================================== */
+.compose-block{margin-bottom:14px}
+.compose-block h4{margin:0 0 12px;font-size:12.5px;font-weight:700;text-transform:uppercase;
+  letter-spacing:.04em;color:var(--muted)}
+
+.rp-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+@media (max-width:760px){.rp-grid{grid-template-columns:repeat(3,1fr)}}
+@media (max-width:480px){.rp-grid{grid-template-columns:repeat(2,1fr)}}
+.rp-opt{border:1.5px solid var(--line);border-radius:var(--radius-sm);padding:14px 8px;text-align:center;
+  cursor:pointer;transition:.15s;background:#fff}
+.rp-opt:hover{border-color:var(--primary)}
+.rp-opt.sel{border-color:var(--primary);background:#effaf7;box-shadow:0 0 0 1px var(--primary) inset}
+.rp-opt .ic{font-size:20px;display:block;margin-bottom:7px}
+.rp-opt .lab{font-size:12px;font-weight:650;line-height:1.25}
+.rp-inline{margin-top:14px;border-top:1px dashed var(--line);padding-top:14px}
+.rp-inline:empty{display:none}
+
+.charcount{text-align:right;font-size:11.5px;color:var(--muted);margin-top:6px}
+
+.mode-toggle{display:flex;border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;width:fit-content}
+.mode-toggle button{border:none;background:#fff;padding:8px 14px;font-size:12.5px;font-weight:650;
+  color:var(--muted);cursor:pointer;font-family:inherit}
+.mode-toggle button.on{background:var(--primary);color:#fff}
+
+.sms-preview{background:#0b1013;border-radius:12px;padding:14px 16px;color:#e9f3ef;font-size:12.5px;
+  line-height:1.55;font-family:ui-monospace,'SFMono-Regular',Menlo,monospace;max-width:360px;white-space:pre-wrap}
+.sms-preview b{color:#7fd9b6;letter-spacing:.02em}
+
+.processed-toast{display:flex;align-items:center;gap:10px;background:var(--ok-bg);color:#1c7a52;
+  font-size:13px;font-weight:600}
+.processed-toast .ico{width:20px;height:20px;border-radius:50%;background:var(--ok);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0}
+
+/* ---- SMS History (items 7 & 8) ---- */
+.mh-desktop-view{display:block}
+.mh-mobile-view{display:none}
+@media screen and (max-width:860px){
+  .mh-desktop-view{display:none}
+  .mh-mobile-view{display:block}
+}
+.mh-card{padding:14px 16px;border-bottom:1px solid var(--line);cursor:pointer}
+.mh-card:last-child{border-bottom:none}
+.mh-card:active{background:var(--bg)}
+.mh-card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.mh-card-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:12px}
+.mh-card-stats div{text-align:center;background:var(--bg);border-radius:8px;padding:8px 4px}
+.mh-card-stats b{display:block;font-size:15px}
+.mh-card-stats span{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin-top:2px}
+
+.mh-detail-meta{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+.mh-detail-meta div{background:var(--bg);border-radius:var(--radius-sm);padding:10px 12px}
+.mh-detail-meta span{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+.mh-detail-meta b{font-size:17px}
+@media (max-width:560px){.mh-detail-meta{grid-template-columns:repeat(2,1fr)}}

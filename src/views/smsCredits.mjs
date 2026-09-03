@@ -1,59 +1,48 @@
 /**
  * smsCredits.mjs — the "SMS Credits" submodule under Messaging (moved here
  * per direct request — this used to be its own top-level sidebar item, and
- * before that, messaging.mjs's placeholder "Buy Bulk SMS" tab). Shows this
- * school's SMS wallet balance, lets an admin/bursar submit a purchase
- * request (instructed to pay 0705041512 and paste the confirmation
- * message), and shows the status/history of past requests. The Super Admin
- * reviews and approves from the separate /admin dashboard — see admin.js's
- * SMS Requests screen.
+ * before that, messaging.mjs's placeholder "Buy Bulk SMS" tab). The Super
+ * Admin reviews and approves purchase requests from the separate /admin
+ * dashboard — see admin.js's SMS Requests screen.
+ *
+ * Messaging_Overhaul.docx item 9: "Keep this screen simple: just the
+ * remaining balance and a clear way to buy more." The purchase-request
+ * form (pay 0705041512, paste the confirmation message) used to sit open
+ * on the page at all times, with its own request history below it — moved
+ * the form into a modal behind one "Buy SMS Credits" button so the screen
+ * itself is just the balance and that button; past requests stay one tap
+ * away underneath, for the rare time someone needs to check on one.
  *
  * Exported as renderSmsCredits(body) — a plain tab-body renderer, not a
  * full view — so messaging.mjs can host it inside its own tab bar/page-head
  * exactly the way it already hosts Compose/History.
  */
-import { esc, toast, loader, withBusy } from '../app.js';
+import { esc, toast, loader, withBusy, modal, closeModal, fmtDate } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 
 const ADMIN_PAY_PHONE = '0705041512';
 
 export async function renderSmsCredits(body) {
   body.innerHTML = `
-    <div class="card side-accent tile-teal"><div class="card-b" id="sms-wallet-box">${loader()}</div></div>
-    <div class="card side-accent tile-teal" style="margin-top:16px"><div class="card-h">Request more credits</div>
-      <div class="card-b">
-        <p class="hint" style="margin-top:0">Send your payment to <b>${ADMIN_PAY_PHONE}</b>, then paste the payment confirmation message below. The platform administrator reviews and approves requests from the Admin Dashboard.</p>
-        <div class="field"><label>Credits requested</label><input id="sms-req-credits" type="number" min="1" placeholder="e.g. 1000"></div>
-        <div class="field"><label>Amount paid (optional)</label><input id="sms-req-amount" type="number" min="0" step="0.01" placeholder="e.g. 1500"></div>
-        <div class="field"><label>Payment confirmation message</label><textarea id="sms-req-message" rows="3" placeholder="Paste the M-Pesa/other confirmation message here…"></textarea></div>
-        <button class="btn" id="sms-req-submit">Submit request</button>
+    <div class="card side-accent tile-teal">
+      <div class="card-b" style="text-align:center;padding:34px 20px">
+        <div class="muted" style="font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;font-weight:650">SMS credits remaining</div>
+        <div id="sms-balance" style="font-size:40px;font-weight:700;margin:8px 0 20px">${loader()}</div>
+        <button class="btn" id="sms-buy-btn">Buy SMS Credits</button>
       </div>
     </div>
-    <div class="card side-accent tile-teal" style="margin-top:16px"><div class="card-h">Your requests</div>
+    <div class="card side-accent tile-amber" style="margin-top:16px">
+      <div class="card-h">Your requests</div>
       <div class="card-b" id="sms-req-list">${loader()}</div>
     </div>
   `;
 
-  const walletBox = body.querySelector('#sms-wallet-box');
+  const balanceEl = body.querySelector('#sms-balance');
   const walletRes = await Db.smsCredits.wallet();
-  walletBox.innerHTML = walletRes.ok
-    ? `<div style="font-size:28px;font-weight:700">${esc(String((walletRes.data && walletRes.data.balance) || 0))}</div><div class="muted">SMS credits remaining</div>`
-    : `⚠️ ${esc(walletRes.message)}`;
+  balanceEl.textContent = walletRes.ok ? String((walletRes.data && walletRes.data.balance) || 0) : '—';
+  if (!walletRes.ok) toast(walletRes.message, 'err');
 
-  const submitBtn = body.querySelector('#sms-req-submit');
-  submitBtn.onclick = () => withBusy(submitBtn, async () => {
-    const credits = parseInt(body.querySelector('#sms-req-credits').value, 10);
-    const amount = parseFloat(body.querySelector('#sms-req-amount').value);
-    const messageText = body.querySelector('#sms-req-message').value;
-    const res = await Db.smsCredits.submitRequest({
-      requested_credits: credits,
-      amount_paid: isNaN(amount) ? null : amount,
-      payment_message: messageText
-    });
-    if (!res.ok) { toast(res.message, 'err'); return; }
-    toast('Request submitted — the platform administrator has been notified.', 'ok');
-    renderSmsCredits(body);
-  }, 'Submitting…');
+  body.querySelector('#sms-buy-btn').onclick = () => openBuyModal(body);
 
   const listEl = body.querySelector('#sms-req-list');
   const reqRes = await Db.smsCredits.requests();
@@ -74,7 +63,30 @@ export async function renderSmsCredits(body) {
   </table></div>`;
 }
 
-function fmtDate(iso) {
-  if (!iso) return '';
-  try { return new Date(iso).toLocaleString(); } catch (e) { return iso; }
+function openBuyModal(body) {
+  modal({
+    title: 'Buy SMS Credits',
+    okLabel: 'Submit request',
+    busyLabel: 'Submitting…',
+    body: `
+      <p class="hint" style="margin-top:0">Send your payment to <b>${ADMIN_PAY_PHONE}</b>, then paste the payment confirmation message below. The platform administrator reviews and approves requests from the Admin Dashboard.</p>
+      <div class="field"><label>Credits requested</label><input id="sms-req-credits" type="number" min="1" placeholder="e.g. 1000"></div>
+      <div class="field"><label>Amount paid (optional)</label><input id="sms-req-amount" type="number" min="0" step="0.01" placeholder="e.g. 1500"></div>
+      <div class="field"><label>Payment confirmation message</label><textarea id="sms-req-message" rows="3" placeholder="Paste the M-Pesa/other confirmation message here…"></textarea></div>
+    `,
+    onOk: async () => {
+      const credits = parseInt(document.getElementById('sms-req-credits').value, 10);
+      const amount = parseFloat(document.getElementById('sms-req-amount').value);
+      const messageText = document.getElementById('sms-req-message').value;
+      const res = await Db.smsCredits.submitRequest({
+        requested_credits: credits,
+        amount_paid: isNaN(amount) ? null : amount,
+        payment_message: messageText
+      });
+      if (!res.ok) { toast(res.message, 'err'); return; }
+      closeModal();
+      toast('Request submitted — the platform administrator has been notified.', 'ok');
+      renderSmsCredits(body);
+    }
+  });
 }

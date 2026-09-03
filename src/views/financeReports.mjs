@@ -5,7 +5,7 @@
  * range) and Trial Balance (scenario #18) — each with a print + Excel
  * export, reusing the read-heavy cached RPCs in the API layer.
  */
-import { esc, options, toast, loader, printOptionsHtml, wirePrintOptions, state, go } from '../app.js';
+import { esc, options, toast, loader, printOptionsHtml, wirePrintOptions, state, go, modal, closeModal, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { downloadXlsx, downloadXlsxAOA, readXlsxFile } from '../lib/xlsxUtil.mjs';
 import { buildBalancesAoa, buildVoteHeadCollectionsAoa, buildCashbookAoa, buildTrialBalanceAoa } from '../lib/finance/financeXlsx.mjs';
@@ -85,6 +85,7 @@ async function loadBalances(root, settings, classes, sel) {
       </div>
       <div class="spacer"></div>
       <div class="fin-report-actions">
+        <button class="btn secondary" id="fb-send-balances">📨 Send balance messages</button>
         <button class="btn secondary" id="fb-xlsx">⬇️ Excel</button>
         ${printOptionsHtml('fb', 'landscape', { simple: true })}
       </div>
@@ -101,7 +102,11 @@ async function loadBalances(root, settings, classes, sel) {
   };
 
   const tableEl = root.querySelector('#fb-table');
-  if (!isContactInfoComplete(settings)) { tableEl.innerHTML = missingContactInfoHtml(); wireGotoSettings(tableEl); return; }
+  if (!isContactInfoComplete(settings)) {
+    tableEl.innerHTML = missingContactInfoHtml(); wireGotoSettings(tableEl);
+    root.querySelector('#fb-send-balances').disabled = true;
+    return;
+  }
 
   const res = await Db.finance.reports.classBalances(sel.class_id || null, sel.min_balance || null);
   const allRows = res.ok ? res.data : [];
@@ -120,6 +125,68 @@ async function loadBalances(root, settings, classes, sel) {
     </table></div>`;
   tableEl.innerHTML = reportSheetHtml('fb-sheet', settings, 'Balances', `${desktopTable}<div class="frb-mobile-view no-print">${rows.length ? rows.map(balanceCardHtml).join('') : '<p class="muted center" style="margin:20px 0">No students match this filter.</p>'}</div>`);
   wirePrintOptions(root, 'fb', 'Balances');
+
+  // Messaging_Overhaul.docx item 4 — "Add the ability to send fee balance
+  // messages under Finance." Only the students CURRENTLY on screen (this
+  // filter's own class/stream/min-balance selection) with a balance
+  // actually owing are eligible — "a student with a zero balance or an
+  // overpayment/credit should not receive a balance message" is enforced
+  // here (owingRows), not just left to the min-balance filter someone may
+  // not have set.
+  const owingRows = rows.filter((r) => Number(r.balance || 0) > 0);
+  root.querySelector('#fb-send-balances').onclick = () => openSendBalancesModal(owingRows, sel);
+}
+
+async function openSendBalancesModal(owingRows, sel) {
+  if (!owingRows.length) { toast('No students with an outstanding balance match this filter.', 'warn'); return; }
+  const studentsRes = await Db.students.list({});
+  const students = studentsRes.ok ? studentsRes.data : [];
+  const phoneById = {}; students.forEach((s) => { phoneById[s.id] = s.guardian_contact; });
+  const withPhone = owingRows.filter((r) => phoneById[r.student_id]);
+  const today = new Date().toLocaleDateString();
+
+  modal({
+    title: 'Send balance messages',
+    okLabel: `Send to ${withPhone.length}`,
+    busyLabel: 'Processing…',
+    body: `
+      <p class="hint" style="margin-top:0">${owingRows.length} student(s) currently shown have an outstanding balance.
+        ${withPhone.length} of them have a guardian phone number on file${owingRows.length > withPhone.length ? ` — the other ${owingRows.length - withPhone.length} will be skipped` : ''}.</p>
+      <div class="field"><label>Add a note to every message <span class="muted" style="font-weight:500">(optional)</span></label>
+        <textarea id="fb-msg-note" rows="2" placeholder="e.g. Kindly clear before the term ends."></textarea></div>
+    `,
+    onOk: async () => {
+      const customNote = document.getElementById('fb-msg-note').value;
+      const recipients = withPhone.map((r) => ({
+        student_id: r.student_id,
+        phone: phoneById[r.student_id],
+        body: buildBalanceMessage(r, today, customNote)
+      }));
+      const res = await Db.messaging.send({
+        scope: 'personalized',
+        scope_label: `Fee Balances — ${sel.class_id ? 'one class' : 'all classes'}${sel.stream_name ? ' ' + sel.stream_name : ''}`,
+        recipients
+      });
+      if (!res.ok) { toast(res.message, 'err'); return; }
+      closeModal();
+      toast(`Processed — ${withPhone.length} balance message(s) queued for sending. Check SMS History for delivery.`, 'ok');
+    }
+  });
+}
+
+/** Messaging_Overhaul.docx item 4's exact template — everything but the
+ *  school-name header line, which send-message.js adds itself for every
+ *  message this app sends (item 2). */
+function buildBalanceMessage(row, dateLabel, customNote) {
+  const lines = [
+    'Dear Parent,',
+    '',
+    `${row.full_name}'s fee balance as of ${dateLabel} is:`,
+    '',
+    `BALANCE: KSH ${Number(row.balance || 0).toLocaleString()}`
+  ];
+  if (String(customNote || '').trim()) { lines.push(''); lines.push(String(customNote).trim()); }
+  return lines.join('\n');
 }
 
 /** Balances mobile view (approved "Style 3") — one card per student, a

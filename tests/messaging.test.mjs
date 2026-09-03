@@ -52,12 +52,35 @@ async function run() {
     check('a valid payload delegates to the injected sender', good.ok === true && called === true);
   }
 
+  // ---- send: scope 'personalized' (Messaging_Overhaul.docx items 4 & 6) -------
+  {
+    let called = false;
+    const sb = createMockSupabase({});
+    const api = createMessagingApi(sb, async () => { called = true; return { ok: true }; });
+    check('send(personalized) rejects an empty/missing recipients array', (await api.send({ scope: 'personalized' })).ok === false);
+    check('send(personalized) rejects an empty recipients array', (await api.send({ scope: 'personalized', recipients: [] })).ok === false);
+    check('none of the invalid personalized payloads reached the injected sender', called === false);
+    const good = await api.send({ scope: 'personalized', recipients: [{ phone: '0700000001', body: 'Hi Amos' }] });
+    check('a valid personalized payload delegates to the injected sender', good.ok === true && called === true);
+  }
+
+  // ---- resend (Messaging_Overhaul.docx item 8) ---------------------------------
+  {
+    let resendPayload = null;
+    const sb = createMockSupabase({});
+    const api = createMessagingApi(sb, async () => ({ ok: true }), async (payload) => { resendPayload = payload; return { ok: true, resent: 1 }; });
+    check('resend requires at least one id', (await api.resend([])).ok === false);
+    const res = await api.resend('m1');
+    check('resend wraps a single id into an array for the function call', resendPayload && Array.isArray(resendPayload.ids) && resendPayload.ids[0] === 'm1');
+    check('resend succeeds and passes through the count', res.ok === true && res.resent === 1);
+  }
+
   // ---- groupMessagesByBatch: pure grouping function ----------------------------
   {
     const rows = [
-      { batch_id: 'b1', scope_label: 'Grade 7', recipient_scope: 'class', body: 'Reminder', channel: 'sms', created_at: 't1', status: 'sent' },
-      { batch_id: 'b1', scope_label: 'Grade 7', recipient_scope: 'class', body: 'Reminder', channel: 'sms', created_at: 't1', status: 'failed' },
-      { batch_id: 'b2', scope_label: 'Amos', recipient_scope: 'individual_student', body: 'Fees due', channel: 'sms', created_at: 't2', status: 'logged' }
+      { batch_id: 'b1', scope_label: 'Grade 7', recipient_scope: 'class', body: 'Reminder', channel: 'sms', created_at: 't1', status: 'sent', credits: 1, sent_by: 'staff-1' },
+      { batch_id: 'b1', scope_label: 'Grade 7', recipient_scope: 'class', body: 'Reminder', channel: 'sms', created_at: 't1', status: 'failed', credits: 1, sent_by: 'staff-1' },
+      { batch_id: 'b2', scope_label: 'Amos', recipient_scope: 'individual_student', body: 'Fees due', channel: 'sms', created_at: 't2', status: 'logged', credits: 2 }
     ];
     const batches = groupMessagesByBatch(rows);
     check('groupMessagesByBatch groups by batch_id', batches.length === 2);
@@ -65,6 +88,8 @@ async function run() {
     check('groupMessagesByBatch attaches every recipient row to its batch', batches[0].recipients.length === 2);
     check('groupMessagesByBatch tallies status counts per batch', batches[0].counts.sent === 1 && batches[0].counts.failed === 1);
     check('groupMessagesByBatch handles a single-recipient batch', batches[1].recipients.length === 1 && batches[1].counts.logged === 1);
+    check('groupMessagesByBatch totals credits used across the batch', batches[0].credits === 2 && batches[1].credits === 2);
+    check('groupMessagesByBatch keeps who sent it', batches[0].sent_by === 'staff-1');
   }
   {
     check('groupMessagesByBatch handles an empty/undefined input', groupMessagesByBatch(undefined).length === 0);
