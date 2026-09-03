@@ -98,6 +98,65 @@ async function setSubmissionStatus(supabase, examId, classId, subjectId, nextSta
   return ok(data);
 }
 
+/** Shared by saveResultsEntry() and recomputeConsolidated() below — same
+ *  "plain module-level helper, not `this.`" convention as every other
+ *  cross-method helper in this file (setSubmissionStatus, purgeExpired,
+ *  computeClassAverage), so a consolidated exam's recompute can call the
+ *  exact same save_results_batch() RPC path Marks Entry/Bulk Upload use
+ *  without depending on method-call `this` binding. */
+async function saveResultsEntryImpl(supabase, clearCache, payload) {
+  payload = payload || {};
+  if (!payload.exam_id) return err('Missing exam.');
+  if (!payload.subject_id) return err('Missing subject.');
+  if (!payload.class_id) return err('Missing class.');
+
+  const scores = (payload.scores || []).map((s) => ({
+    student_id: s.student_id,
+    score: s.score === null || s.score === undefined ? '' : String(s.score)
+  }));
+
+  const { data, error } = await supabase.rpc('save_results_batch', {
+    p_exam_id: payload.exam_id, p_class_id: payload.class_id, p_subject_id: payload.subject_id,
+    p_paper_id: payload.paper_id || null, p_scores: scores
+  });
+  if (error) return err(error.message || 'Could not save marks.');
+  const row = Array.isArray(data) ? data[0] : data;
+  clearCache();
+  return ok(null, { saved: (row && row.saved) || 0, cleared: (row && row.cleared) || 0 });
+}
+
+/** Shared by recomputeConsolidated() below — every (student, subject)
+ *  effective score for one exam+class, papers already rolled up into one
+ *  subject-level number (the same weighted-sum-of-papers math get_report_
+ *  card()'s per_row/per_subject CTEs do server-side, just done here in JS
+ *  since this is only ever an intermediate value for averaging component
+ *  exams together, not rendering anything a student/parent could see
+ *  directly). Returns { [studentId]: { [subjectId]: effectiveScore } } via
+ *  ok()'s meta, alongside the exam's own out_of so a caller can express
+ *  each score as a 0..1 fraction. */
+async function effectiveSubjectScores(supabase, examId, classId) {
+  const { data: exam } = await supabase.from('exams').select('*').eq('id', examId).maybeSingle();
+  if (!exam) return err('Exam not found.');
+  const [{ data: results }, { data: papers }] = await Promise.all([
+    supabase.from('results').select('student_id, subject_id, paper_id, score').eq('exam_id', examId).eq('class_id', classId),
+    supabase.from('subject_papers').select('id, weight, out_of').eq('exam_id', examId).eq('class_id', classId)
+  ]);
+  const paperById = indexById(papers || []);
+  const examOutOf = Number(exam.out_of) || 100;
+
+  const bySubject = {}; // studentId -> subjectId -> summed effective score
+  (results || []).forEach((r) => {
+    if (r.score === null || r.score === undefined || r.score === '') return;
+    const paper = r.paper_id ? paperById[r.paper_id] : null;
+    const weight = paper && paper.weight !== null && paper.weight !== undefined ? Number(paper.weight) : 1;
+    const rowOutOf = (paper && Number(paper.out_of)) || examOutOf || 100;
+    const effective = (Number(r.score) * weight / (rowOutOf || 100)) * examOutOf;
+    bySubject[r.student_id] = bySubject[r.student_id] || {};
+    bySubject[r.student_id][r.subject_id] = (bySubject[r.student_id][r.subject_id] || 0) + effective;
+  });
+  return ok(bySubject, { out_of: examOutOf });
+}
+
 /** Shared by listDeletedExams()/purgeExpiredDeletedExams() below — a plain
  *  module-level helper (not `this.`) so it works the same whether called as
  *  a method or destructured, matching every other cross-method helper in
@@ -376,6 +435,163 @@ export function createResultsApi(supabase, gradingApi) {
       return purgeExpired(supabase);
     },
 
+    // ==========================================================================
+    // Consolidated Exam — combine 2+ existing exams (e.g. Opener, Midterm,
+    // Endterm) into one weighted-average result, the feature explicitly put
+    // on hold when the exam_type vocabulary was introduced (see the comment
+    // on EXAM_TYPES above). Deliberately built on TOP of the existing marks
+    // pipeline rather than a parallel one: recomputeConsolidated() below
+    // computes each student's per-subject average across the component
+    // exams and writes it straight into this exam's own `results` rows via
+    // saveResultsEntry() (the same save_results_batch() RPC Marks Entry and
+    // Bulk Upload already call) — so Review & Publish, report cards,
+    // broadsheets and exam analysis need ZERO changes to work with a
+    // consolidated exam; they already just read `results` by exam_id.
+    // ==========================================================================
+
+    /** The exam picker for "which exams should this combine?" — every
+     *  exam in the school that could validly be a component: not deleted,
+     *  not itself a consolidated exam (see 0040_consolidated_exams.sql's
+     *  no-nesting guard), and not the consolidated exam being edited. */
+    async listConsolidatableExams(excludeExamId) {
+      const { data, error } = await supabase.from('exams').select('*, academic_years(name), terms(name)')
+        .is('deleted_at', null).neq('exam_type', 'consolidated');
+      if (error) return err(error.message);
+      const rows = (data || [])
+        .filter((e) => String(e.id) !== String(excludeExamId || ''))
+        .map((e) => ({ ...e, academic_year_name: e.academic_years ? e.academic_years.name : '', term_name: e.terms ? e.terms.name : '' }));
+      rows.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+      return ok(rows);
+    },
+
+    /** Which exams a consolidated exam currently combines, with their
+     *  weight and enough of their own details (name/type/term) to show in
+     *  the picker/summary without a second round trip. */
+    async getExamComponents(examId) {
+      if (!examId) return ok([]);
+      const { data, error } = await supabase.from('exam_components').select('*, exams:component_exam_id(name, exam_type, academic_year_id, term_id)').eq('exam_id', examId);
+      if (error) return err(error.message);
+      const rows = (data || []).map((c) => ({
+        id: c.id, exam_id: c.exam_id, component_exam_id: c.component_exam_id, weight: Number(c.weight) || 1,
+        component_name: c.exams ? c.exams.name : '(deleted exam)'
+      }));
+      rows.sort((a, b) => a.component_name.localeCompare(b.component_name));
+      return ok(rows);
+    },
+
+    /** Full replace-the-set save, same convention as saveExam()'s class_ids
+     *  sync and Subject Combination's member list — components =
+     *  [{exam_id, weight}]. Requires at least 2 (the whole point of
+     *  "consolidated" is combining more than one exam; a single component
+     *  is just that exam, not a consolidation of anything). */
+    async saveExamComponents(examId, components) {
+      if (!examId) return err('Missing exam.');
+      const list = (Array.isArray(components) ? components : [])
+        .map((c) => ({ exam_id: String(c.exam_id || c.id || ''), weight: Number(c.weight) > 0 ? Number(c.weight) : 1 }))
+        .filter((c) => c.exam_id && c.exam_id !== String(examId));
+      const deduped = [...new Map(list.map((c) => [c.exam_id, c])).values()];
+      if (deduped.length < 2) return err('Choose at least 2 exams to combine.');
+
+      const { data: existing, error: readErr } = await supabase.from('exam_components').select('id, component_exam_id').eq('exam_id', examId);
+      if (readErr) return err(readErr.message);
+      const existingIds = (existing || []).map((r) => String(r.component_exam_id));
+      const wantedIds = deduped.map((c) => c.exam_id);
+      const toRemove = (existing || []).filter((r) => wantedIds.indexOf(String(r.component_exam_id)) === -1);
+      const toAdd = deduped.filter((c) => existingIds.indexOf(c.exam_id) === -1);
+      const toUpdate = deduped.filter((c) => existingIds.indexOf(c.exam_id) !== -1);
+
+      for (const r of toRemove) {
+        const { error } = await supabase.from('exam_components').delete().eq('id', r.id);
+        if (error) return err(error.message);
+      }
+      if (toAdd.length) {
+        const { error } = await supabase.from('exam_components').insert(toAdd.map((c) => ({ exam_id: examId, component_exam_id: c.exam_id, weight: c.weight })));
+        if (error) return err(error.message);
+      }
+      for (const c of toUpdate) {
+        const row = (existing || []).find((r) => String(r.component_exam_id) === c.exam_id);
+        if (!row) continue;
+        const { error } = await supabase.from('exam_components').update({ weight: c.weight }).eq('id', row.id);
+        if (error) return err(error.message);
+      }
+      clearCache();
+      return ok(true);
+    },
+
+    /** The heart of the feature: fold every component exam's per-subject
+     *  score into ONE weighted average per student, expressed out of THIS
+     *  (consolidated) exam's own out_of, then write it in via the exact
+     *  same saveResultsEntry() path Marks Entry uses — one subject at a
+     *  time, exactly like Bulk Upload already does per column. Safe to run
+     *  more than once (e.g. after a component's marks get corrected): each
+     *  run fully recomputes and overwrites this exam's own results for this
+     *  class, it never accumulates.
+     *
+     *  A student/subject combination only gets a score if at least one
+     *  component has one recorded for them — components missing that
+     *  subject (or missing that student's score) are simply left out of
+     *  THAT student's average rather than pulling it down, so e.g. a
+     *  subject only tested in 2 of 3 terms still averages fairly across
+     *  the 2 that actually have it. */
+    async recomputeConsolidated(examId, classId) {
+      if (!examId) return err('Missing exam.');
+      if (!classId) return err('Missing class.');
+      const { data: exam } = await supabase.from('exams').select('*').eq('id', examId).maybeSingle();
+      if (!exam) return err('Exam not found.');
+      if (exam.exam_type !== 'consolidated') return err('This action is only for a Consolidated Exam.');
+
+      const { data: components, error: compErr } = await supabase.from('exam_components').select('component_exam_id, weight').eq('exam_id', examId);
+      if (compErr) return err(compErr.message);
+      if (!components || components.length < 2) return err('Add at least 2 component exams first (Edit this exam).');
+
+      const examOutOf = Number(exam.out_of) || 100;
+      const perComponent = await Promise.all(components.map((c) => effectiveSubjectScores(supabase, c.component_exam_id, classId)));
+      const failed = perComponent.find((r) => !r.ok);
+      if (failed) return err(failed.message);
+
+      // fraction[studentId][subjectId] = { sum: Σ(fraction * weight), weight: Σ(weight actually used) }
+      const fraction = {};
+      perComponent.forEach((res, i) => {
+        const weight = Number(components[i].weight) || 1;
+        const compOutOf = res.out_of || 100;
+        Object.keys(res.data).forEach((studentId) => {
+          Object.keys(res.data[studentId]).forEach((subjectId) => {
+            const score = res.data[studentId][subjectId];
+            const f = compOutOf > 0 ? score / compOutOf : 0;
+            fraction[studentId] = fraction[studentId] || {};
+            fraction[studentId][subjectId] = fraction[studentId][subjectId] || { sum: 0, weight: 0 };
+            fraction[studentId][subjectId].sum += f * weight;
+            fraction[studentId][subjectId].weight += weight;
+          });
+        });
+      });
+
+      // Pivot studentId->subjectId->value into one score list per subject,
+      // then persist each subject exactly like the Marks Entry grid's own
+      // "Save marks" does — one saveResultsEntry() call per subject.
+      const subjectIds = new Set();
+      Object.values(fraction).forEach((bySubject) => Object.keys(bySubject).forEach((sid) => subjectIds.add(sid)));
+
+      let subjectsWritten = 0, studentsWritten = 0;
+      for (const subjectId of subjectIds) {
+        const scores = Object.keys(fraction)
+          .filter((studentId) => fraction[studentId][subjectId])
+          .map((studentId) => {
+            const { sum, weight } = fraction[studentId][subjectId];
+            const avgFraction = weight > 0 ? sum / weight : 0;
+            const score = Math.round(avgFraction * examOutOf * 100) / 100;
+            return { student_id: studentId, score };
+          });
+        if (!scores.length) continue;
+        const saveRes = await saveResultsEntryImpl(supabase, clearCache, { exam_id: examId, class_id: classId, subject_id: subjectId, scores });
+        if (!saveRes.ok) return err(`Saved ${subjectsWritten} subject(s) before failing on one: ${saveRes.message}`);
+        subjectsWritten += 1;
+        studentsWritten = Math.max(studentsWritten, scores.length);
+      }
+      clearCache();
+      return ok(true, { subjects: subjectsWritten, students: studentsWritten, components: components.length });
+    },
+
     /** Load the entry grid: every student in the chosen class(+stream), with
      *  any existing score. Pass paper_id when the subject has papers
      *  configured (see subject_papers in academics.mjs) to load/save that
@@ -482,24 +698,7 @@ export function createResultsApi(supabase, gradingApi) {
      *  migrations/0008_bulk_marks_rpc.sql) — same behaviour, just one
      *  request regardless of how many students are in the grid. */
     async saveResultsEntry(payload) {
-      payload = payload || {};
-      if (!payload.exam_id) return err('Missing exam.');
-      if (!payload.subject_id) return err('Missing subject.');
-      if (!payload.class_id) return err('Missing class.');
-
-      const scores = (payload.scores || []).map((s) => ({
-        student_id: s.student_id,
-        score: s.score === null || s.score === undefined ? '' : String(s.score)
-      }));
-
-      const { data, error } = await supabase.rpc('save_results_batch', {
-        p_exam_id: payload.exam_id, p_class_id: payload.class_id, p_subject_id: payload.subject_id,
-        p_paper_id: payload.paper_id || null, p_scores: scores
-      });
-      if (error) return err(error.message || 'Could not save marks.');
-      const row = Array.isArray(data) ? data[0] : data;
-      clearCache();
-      return ok(null, { saved: (row && row.saved) || 0, cleared: (row && row.cleared) || 0 });
+      return saveResultsEntryImpl(supabase, clearCache, payload);
     },
 
     /** Wipe every recorded mark for one (exam, class, subject) in one click —

@@ -515,12 +515,136 @@ function renderAccountPicker(accounts, phone, pw, opts) {
 }
 
 /* ----------------------------------------------------------------------
- * FORGOT PASSWORD (brief B2) — deliberately no OTP/email verification for
- * now (explicit ask: "Authentication required: NO... simple reset flow...
- * for now", with an upgrade to a verified reset noted as a later sprint).
- * Concretely: knowing an account's phone number is enough to set a new
- * password for it. That's a real, acknowledged tradeoff, not an oversight —
- * flagged again in the delivery notes, not just here.
+ * PHONE OTP VERIFICATION — shared by both signup and forgot-password (see
+ * their sections below). Security hardening: both flows used to trust a
+ * bare phone-number claim; both now require the caller to actually receive
+ * and enter a 6-digit code sent to that number before the account-affecting
+ * action (create account / reset password) is allowed to run — enforced
+ * server-side in school-signup.js/forgot-password.js via the token this
+ * screen collects, not just gated here in the UI.
+ * -------------------------------------------------------------------- */
+async function requestOtp(phone, purpose) {
+  try {
+    const res = await fetch('/.netlify/functions/send-otp', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone, purpose })
+    });
+    return await res.json();
+  } catch (err) {
+    return { ok: false, message: 'Something went wrong: ' + (err.message || err) };
+  }
+}
+
+async function submitOtpCode(phone, purpose, code) {
+  try {
+    const res = await fetch('/.netlify/functions/verify-otp', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone, purpose, code })
+    });
+    return await res.json();
+  } catch (err) {
+    return { ok: false, message: 'Something went wrong: ' + (err.message || err) };
+  }
+}
+
+/** opts: { phone, purpose, title, sub, onVerified(token), onBack() }.
+ *  Fires the initial send itself (the caller doesn't need to call
+ *  requestOtp before showing this) and offers a 30s-cooldown Resend link
+ *  after that, matching send-otp.js's own server-side cooldown. */
+function renderOtpVerify(opts) {
+  const RESEND_COOLDOWN_SEC = 30;
+  $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
+    <div class="promo"><div class="promo-inner">
+      <div class="logo">🎓</div>
+      <h1>Shule</h1>
+      <p>A clean, modern way to run your school — from enrollment to report forms.</p>
+    </div></div>
+    <div class="formside"><div class="formcard">
+      <h2 class="auth-center">${esc(opts.title || 'Verify your phone')}</h2>
+      <div class="sub auth-center">${esc(opts.sub || `Enter the 6-digit code sent to ${opts.phone}.`)}</div>
+      <div id="otp-status" class="hint auth-center">Sending code…</div>
+      <div id="otp-err"></div>
+      <form id="otp-form">
+        <div class="field"><label>Verification code</label>
+          <input id="otp-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="123456" autocomplete="one-time-code" required>
+        </div>
+        <button class="btn block" type="submit" id="otp-verify-btn" disabled>Verify</button>
+      </form>
+      <p class="hint auth-center"><a href="#" id="otp-resend">Resend code</a></p>
+      <p class="hint"><a href="#" id="otp-back">Back</a></p>
+    </div></div>
+  </div></div>`;
+  $('#auth-screen').classList.remove('hidden');
+  $('#app').classList.add('hidden');
+
+  const statusEl = $('#otp-status'), errEl = $('#otp-err'), verifyBtn = $('#otp-verify-btn'), resendLink = $('#otp-resend');
+  let cooldownTimer = null;
+
+  function startCooldown() {
+    let remaining = RESEND_COOLDOWN_SEC;
+    resendLink.textContent = `Resend code (${remaining}s)`;
+    resendLink.classList.add('disabled-link');
+    clearInterval(cooldownTimer);
+    cooldownTimer = setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        clearInterval(cooldownTimer);
+        resendLink.textContent = 'Resend code';
+        resendLink.classList.remove('disabled-link');
+      } else {
+        resendLink.textContent = `Resend code (${remaining}s)`;
+      }
+    }, 1000);
+  }
+
+  async function send() {
+    statusEl.textContent = 'Sending code…';
+    errEl.innerHTML = '';
+    verifyBtn.disabled = true;
+    const res = await requestOtp(opts.phone, opts.purpose);
+    if (!res.ok) {
+      statusEl.textContent = '';
+      errEl.innerHTML = `<div class="auth-err">${esc(res.message || 'Could not send a code.')}</div>`;
+      return;
+    }
+    verifyBtn.disabled = false;
+    statusEl.textContent = res.sent === false
+      ? (res.message || 'Code recorded, but could not be delivered.')
+      : `Code sent to ${opts.phone}.`;
+    startCooldown();
+  }
+
+  send();
+
+  $('#otp-back').onclick = (e) => { e.preventDefault(); clearInterval(cooldownTimer); opts.onBack(); };
+  resendLink.onclick = (e) => {
+    e.preventDefault();
+    if (resendLink.classList.contains('disabled-link')) return;
+    send();
+  };
+  $('#otp-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const code = $('#otp-code').value.trim();
+    if (!/^\d{6}$/.test(code)) { errEl.innerHTML = `<div class="auth-err">Enter the 6-digit code.</div>`; return false; }
+    verifyBtn.disabled = true; verifyBtn.textContent = 'Verifying…';
+    const res = await submitOtpCode(opts.phone, opts.purpose, code);
+    if (!res.ok) {
+      errEl.innerHTML = `<div class="auth-err">${esc(res.message || 'Incorrect code.')}</div>`;
+      verifyBtn.disabled = false; verifyBtn.textContent = 'Verify';
+      return false;
+    }
+    clearInterval(cooldownTimer);
+    verifyBtn.textContent = 'Please wait…';
+    opts.onVerified(res.verified_token);
+    return false;
+  };
+}
+
+/* ----------------------------------------------------------------------
+ * FORGOT PASSWORD (brief B2) — upgraded from its original "no OTP/email
+ * verification for now" ship (explicit ask at the time: "Authentication
+ * required: NO... simple reset flow... for now", with a verified reset
+ * flagged as a later sprint). That upgrade is renderOtpVerify() above: a
+ * phone number alone no longer resets anything, the caller must actually
+ * receive and enter the code first.
  * -------------------------------------------------------------------- */
 function renderForgotPassword(errorMsg, isFirstTime) {
   const heading = isFirstTime ? 'Set your password' : 'Reset your password';
@@ -543,7 +667,7 @@ function renderForgotPassword(errorMsg, isFirstTime) {
         <div class="field"><label>Confirm password</label>${passwordFieldHtml('<input id="fp-pw2" type="password" autocomplete="new-password" required>')}</div>
         <button class="btn block" type="submit" id="forgot-btn">${isFirstTime ? 'Set password' : 'Reset password'}</button>
       </form>
-      <p class="hint">⚠️ This doesn't verify it's really you yet — anyone who knows this phone number could set this password. A verified (OTP) reset is planned for a later update.</p>
+      <p class="hint">🔒 We'll text a 6-digit code to this number to confirm it's really you before changing anything.</p>
       <p class="hint"><a href="#" id="forgot-back">Back to sign in</a></p>
     </div></div>
   </div></div>`;
@@ -572,21 +696,33 @@ async function doForgotPassword(e, isFirstTime) {
     return false;
   }
   if (lookup.accounts.length === 1) {
-    await submitPasswordReset(lookup.accounts[0], phone, pw, isFirstTime);
+    verifyThenReset(lookup.accounts[0], phone, pw, isFirstTime);
   } else {
     renderAccountPicker(lookup.accounts, phone, pw, {
       onBack: () => renderForgotPassword(undefined, isFirstTime),
-      onChoose: (account, ph, newPw) => submitPasswordReset(account, ph, newPw, isFirstTime)
+      onChoose: (account, ph, newPw) => verifyThenReset(account, ph, newPw, isFirstTime)
     });
   }
   return false;
 }
 
-async function submitPasswordReset(account, phone, newPassword, isFirstTime) {
+/** The OTP gate between "we found your account" and actually resetting the
+ *  password — see renderOtpVerify() above. */
+function verifyThenReset(account, phone, newPassword, isFirstTime) {
+  renderOtpVerify({
+    phone, purpose: 'password_reset',
+    title: 'Confirm it\'s you',
+    sub: `Enter the 6-digit code sent to ${phone} to finish resetting your password.`,
+    onBack: () => renderForgotPassword(undefined, isFirstTime),
+    onVerified: (token) => submitPasswordReset(account, phone, newPassword, isFirstTime, token)
+  });
+}
+
+async function submitPasswordReset(account, phone, newPassword, isFirstTime, otpVerifiedToken) {
   try {
     const res = await fetch('/.netlify/functions/forgot-password', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phone, school_code: account.school_code, role: account.role, new_password: newPassword })
+      body: JSON.stringify({ phone, school_code: account.school_code, role: account.role, new_password: newPassword, otp_verified_token: otpVerifiedToken })
     });
     const result = await res.json();
     if (!result.ok) { renderForgotPassword(result.message || 'Could not reset that password.', isFirstTime); return; }
@@ -604,7 +740,8 @@ async function submitPasswordReset(account, phone, newPassword, isFirstTime) {
  * admin is in their dashboard before the slower "seed the school with
  * defaults" step even finishes (see showSetupToast below).
  * -------------------------------------------------------------------- */
-function renderSignup() {
+function renderSignup(prefill) {
+  prefill = prefill || {};
   $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
@@ -616,24 +753,24 @@ function renderSignup() {
       <div class="sub auth-center">You'll be the first administrator.</div>
       <div id="signup-err"></div>
       <form id="signup-form">
-        <div class="field"><label>School name</label><input id="su-name" placeholder="e.g. Greenhill Academy" required></div>
+        <div class="field"><label>School name</label><input id="su-name" placeholder="e.g. Greenhill Academy" value="${esc(prefill.school_name || '')}" required></div>
         <div class="field">
           <label>School Code <span class="muted">(used to sign in — letters, numbers, hyphens)</span></label>
-          <input id="su-code" placeholder="e.g. greenhill" required>
+          <input id="su-code" placeholder="e.g. greenhill" value="${esc(prefill.school_code || '')}" required>
         </div>
         <div class="field">
           <label>School type</label>
           <select id="su-category" required>
-            <option value="pri_jss">Pri &amp; Jss School (Pre-Primary through Grade 9)</option>
-            <option value="senior">Senior School (Grade 10-12, with optional Form 3/4)</option>
+            <option value="pri_jss" ${prefill.category !== 'senior' ? 'selected' : ''}>Pri &amp; Jss School (Pre-Primary through Grade 9)</option>
+            <option value="senior" ${prefill.category === 'senior' ? 'selected' : ''}>Senior School (Grade 10-12, with optional Form 3/4)</option>
           </select>
           <p class="hint">This decides which class levels and subjects your account is set up with — you won't need to change it later.</p>
         </div>
-        <div class="field"><label>Your full name</label><input id="su-admin-name" placeholder="e.g. Jane Wanjiru" required></div>
-        <div class="field"><label>Your phone number</label><input id="su-phone" type="tel" placeholder="e.g. 0712345678" required>
+        <div class="field"><label>Your full name</label><input id="su-admin-name" placeholder="e.g. Jane Wanjiru" value="${esc(prefill.admin_name || '')}" required></div>
+        <div class="field"><label>Your phone number</label><input id="su-phone" type="tel" placeholder="e.g. 0712345678" value="${esc(prefill.admin_phone || '')}" required>
           <div id="su-phone-err" class="field-err"></div>
         </div>
-        <div class="field"><label>Password</label>${passwordFieldHtml('<input id="su-pw" type="password" autocomplete="new-password" required>')}</div>
+        <div class="field"><label>Password</label>${passwordFieldHtml(`<input id="su-pw" type="password" autocomplete="new-password" value="${esc(prefill.password || '')}" required>`)}</div>
         <button class="btn block" type="submit" id="signup-btn">Create school account</button>
       </form>
       <p class="hint">Already have an account? <a href="#" id="go-login">Sign in instead</a></p>
@@ -643,7 +780,7 @@ function renderSignup() {
   $('#app').classList.add('hidden');
 
   const nameInput = $('#su-name'), codeInput = $('#su-code');
-  let codeTouched = false;
+  let codeTouched = !!prefill.school_code;
   codeInput.oninput = () => { codeTouched = true; };
   nameInput.oninput = () => {
     if (codeTouched) return;
@@ -678,7 +815,6 @@ async function doSignup(e) {
     $('#su-phone').focus();
     return false;
   }
-  const btn = $('#signup-btn'); btn.disabled = true; btn.textContent = 'Creating…';
   const body = {
     school_name: $('#su-name').value,
     school_code: $('#su-code').value,
@@ -687,15 +823,31 @@ async function doSignup(e) {
     admin_phone: $('#su-phone').value,
     password: $('#su-pw').value
   };
+  // Security hardening: the account isn't actually created yet — first
+  // prove admin_phone is real. renderOtpVerify() sends the code itself;
+  // this just gates createSchoolAccount() behind it, same pattern as
+  // verifyThenReset() does for forgot-password.
+  renderOtpVerify({
+    phone: body.admin_phone, purpose: 'signup',
+    title: 'Verify your phone',
+    sub: `Enter the 6-digit code sent to ${body.admin_phone} to finish creating your school's account.`,
+    onBack: () => renderSignup(body),
+    onVerified: (token) => createSchoolAccount(body, token)
+  });
+  return false;
+}
+
+async function createSchoolAccount(body, otpVerifiedToken) {
   try {
     const res = await fetch('/.netlify/functions/school-signup', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...body, otp_verified_token: otpVerifiedToken })
     });
     const result = await res.json();
     if (!result.ok) {
+      renderSignup(body);
       $('#signup-err').innerHTML = `<div class="auth-err">${esc(result.message || 'Could not create your school.')}</div>`;
-      btn.disabled = false; btn.textContent = 'Create school account';
-      return false;
+      return;
     }
     // Straight in — no need to make a brand-new admin re-type their own
     // credentials a second time.
@@ -707,14 +859,13 @@ async function doSignup(e) {
       // seeding (subjects, grading scale, academic year/terms) finishes in
       // the background instead of making them wait on a progress screen.
       showSetupToast(result.school_id);
-      return false;
+      return;
     }
     renderAuth(`School created! Sign in with your phone number to continue.`);
   } catch (err) {
+    renderSignup(body);
     $('#signup-err').innerHTML = `<div class="auth-err">Something went wrong: ${esc(err.message || err)}</div>`;
-    btn.disabled = false; btn.textContent = 'Create school account';
   }
-  return false;
 }
 
 /** Dismissible, non-blocking "still setting up" notice — separate from the

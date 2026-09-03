@@ -686,6 +686,10 @@ table.data td.num,table.data th.num{text-align:center}
 .field-err{color:var(--danger);font-size:12.5px;font-weight:600;margin-top:4px}
 .field-err:empty{display:none}
 
+/* Phone OTP verify screen (renderOtpVerify, app.js) — the Resend link
+   during its 30s cooldown, matching send-otp.js's own server-side cooldown. */
+.disabled-link{pointer-events:none;color:var(--muted);cursor:default;text-decoration:none}
+
 /* ---------- Checklist ---------- */
 .checklist{list-style:none;padding:0;margin:0}
 .checklist li{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);cursor:pointer}

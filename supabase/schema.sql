@@ -1074,6 +1074,84 @@ create policy exam_classes_admin_update on public.exam_classes for update
   using (public.is_admin() and school_id = public.current_school_id())
   with check (public.is_admin() and school_id = public.current_school_id());
 
+-- 0040_consolidated_exams.sql — "Consolidated Exam" (combine 2+ existing
+-- exams, e.g. Opener/Midterm/Endterm, into one weighted-average result). No
+-- new marks-entry path or RPC: an admin names this exam's component exams
+-- here, and recomputeConsolidated() (src/lib/api/results.mjs) averages each
+-- student's per-subject score across them and writes it into THIS exam's
+-- own `results` rows via the existing save_results_batch() RPC — so Review
+-- & Publish, report cards, broadsheets and exam analysis all work exactly
+-- as they already do, with zero changes, once those rows exist.
+create table public.exam_components (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  exam_id uuid not null references public.exams(id) on delete cascade,           -- the consolidated exam
+  component_exam_id uuid not null references public.exams(id) on delete cascade, -- one exam being folded into it
+  weight numeric not null default 1,
+  created_at timestamptz not null default now(),
+  unique (exam_id, component_exam_id),
+  check (exam_id <> component_exam_id),
+  check (weight > 0)
+);
+create index idx_exam_components_exam on public.exam_components(exam_id);
+create index idx_exam_components_component on public.exam_components(component_exam_id);
+create index idx_exam_components_school on public.exam_components(school_id);
+
+-- Guard rail: the exam being attached to must actually be a consolidated
+-- exam, and a component must be a real, non-consolidated exam in the same
+-- school — disallowing nesting keeps recomputeConsolidated()'s weighted
+-- average unambiguous (no tree of consolidations to flatten).
+create or replace function public.check_exam_component()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_component_type text;
+  v_component_school uuid;
+  v_exam_type text;
+  v_exam_school uuid;
+begin
+  select exam_type, school_id into v_exam_type, v_exam_school from public.exams where id = new.exam_id;
+  if v_exam_type is null then
+    raise exception 'Exam not found.';
+  end if;
+  if v_exam_type is distinct from 'consolidated' then
+    raise exception 'Only a Consolidated Exam can have component exams.';
+  end if;
+
+  select exam_type, school_id into v_component_type, v_component_school from public.exams where id = new.component_exam_id;
+  if v_component_type is null then
+    raise exception 'Component exam not found.';
+  end if;
+  if v_component_type = 'consolidated' then
+    raise exception 'A consolidated exam cannot combine another consolidated exam.';
+  end if;
+  if v_component_school is distinct from v_exam_school then
+    raise exception 'Component exam must belong to the same school.';
+  end if;
+  if new.school_id is distinct from v_exam_school then
+    raise exception 'Component exam must belong to the same school.';
+  end if;
+
+  return new;
+end;
+$$;
+create trigger trg_check_exam_component before insert or update on public.exam_components
+  for each row execute function public.check_exam_component();
+
+alter table public.exam_components enable row level security;
+create policy exam_components_read on public.exam_components for select
+  using (school_id = public.current_school_id());
+create policy exam_components_admin_write on public.exam_components for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy exam_components_admin_delete on public.exam_components for delete
+  using (public.is_admin() and school_id = public.current_school_id());
+create policy exam_components_admin_update on public.exam_components for update
+  using (public.is_admin() and school_id = public.current_school_id())
+  with check (public.is_admin() and school_id = public.current_school_id());
+
 -- results: staff (admin+teacher) can enter/edit and always read everything
 -- in their own school (published or not — they need to review before
 -- publishing); a student can read only their OWN rows, and only once the
@@ -4330,6 +4408,40 @@ create table public.sms_credit_ledger (
 );
 create index idx_sms_credit_ledger_school on public.sms_credit_ledger(school_id);
 
+-- Atomic wallet debit for an actual send (see
+-- netlify/functions/_lib/smsProvider.js + migrations/0041_sms_wallet_debit_rpc.sql
+-- for the full rationale) — a single conditional UPDATE so two simultaneous
+-- sends for the same school can never both succeed off the same balance.
+create or replace function public.debit_sms_wallet(p_school_id uuid, p_credits integer)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_balance integer;
+begin
+  if p_school_id is null then
+    raise exception 'Missing school.';
+  end if;
+  if p_credits is null or p_credits <= 0 then
+    raise exception 'Invalid credit amount.';
+  end if;
+
+  update public.sms_wallets
+    set balance = balance - p_credits, updated_at = now()
+    where school_id = p_school_id and balance >= p_credits
+    returning balance into v_balance;
+
+  if v_balance is null then
+    raise exception 'Not enough SMS credit — top up before sending.';
+  end if;
+
+  return v_balance;
+end;
+$$;
+grant execute on function public.debit_sms_wallet(uuid, integer) to authenticated, service_role;
+
 -- A school's own admin/teacher may submit a request and see their own
 -- wallet/requests — ordinary RLS, scoped by current_school_id() same as
 -- every other table. The Super Admin reaches ALL schools' rows only through
@@ -4755,6 +4867,56 @@ grant execute on function public.admin_review_sms_request(uuid, boolean, text, t
 grant execute on function public.admin_list_audit_log(integer) to authenticated;
 grant execute on function public.admin_record_impersonation_start(uuid, uuid) to authenticated;
 grant execute on function public.admin_record_impersonation_end(uuid) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 5. Phone OTP verification (signup + password reset) — see
+--    migrations/0042_phone_otps.sql for the full rationale. Server-only
+--    table: touched exclusively by send-otp.js/verify-otp.js via the
+--    service_role key, so RLS is enabled with zero policies (deny-all).
+-- ---------------------------------------------------------------------------
+create table public.phone_otps (
+  id uuid primary key default gen_random_uuid(),
+  phone text not null,
+  purpose text not null check (purpose in ('signup', 'password_reset')),
+  code_hash text not null,
+  expires_at timestamptz not null,
+  attempts integer not null default 0,
+  consumed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index idx_phone_otps_lookup on public.phone_otps(phone, purpose, created_at desc);
+alter table public.phone_otps enable row level security;
+
+-- ---------------------------------------------------------------------------
+-- 5b. SMS provider credentials (see migrations/0043_sms_platform_config.sql)
+--     — moved off Netlify env vars so this app's SMS sending isn't coupled
+--     to whichever host happens to run its server code. Single row (id=1),
+--     server-only (RLS enabled, zero policies) same as phone_otps above.
+-- ---------------------------------------------------------------------------
+create table public.sms_platform_config (
+  id integer primary key default 1,
+  provider text not null default 'africas_talking',
+  api_key text,
+  username text,
+  sender_id text,
+  cost_per_sms numeric not null default 0,
+  price_per_sms numeric not null default 0,
+  updated_at timestamptz not null default now(),
+  constraint sms_platform_config_single_row check (id = 1)
+);
+insert into public.sms_platform_config (id) values (1) on conflict (id) do nothing;
+
+create or replace function public.set_sms_platform_config_updated_at()
+returns trigger language plpgsql as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+create trigger trg_sms_platform_config_updated_at before update on public.sms_platform_config
+  for each row execute function public.set_sms_platform_config_updated_at();
+
+alter table public.sms_platform_config enable row level security;
 
 -- ---------------------------------------------------------------------------
 -- 6. Bootstrap the one designated Super Admin account

@@ -1,16 +1,13 @@
 /**
  * forgot-password.js
  * ----------------------------------------------------------------------------
- * Landing redesign brief B2 ("Forgot Password... Authentication required:
- * NO — implement a simple reset flow without OTP or email verification for
- * now"). This is an explicit, acknowledged tradeoff, not an oversight: given
- * only a phone number + school + role — the exact same triple the public
- * find_login_accounts_by_phone RPC already reveals to anyone at the login
- * screen — this endpoint lets the caller set a brand-new password for that
- * account. No proof of identity beyond knowing the phone number is required.
- * The brief itself flags this as temporary ("This can be upgraded to
- * verified reset in a future sprint") and the frontend repeats the warning
- * next to the form.
+ * Landing redesign brief B2 originally shipped this as a deliberately
+ * unverified reset ("Authentication required: NO... a simple reset flow
+ * without OTP... this can be upgraded to verified reset in a future
+ * sprint") — that upgrade is this file now. A caller must first prove they
+ * own `phone` via send-otp.js/verify-otp.js (purpose 'password_reset') and
+ * present the resulting short-lived token; without it, knowing the phone
+ * number alone is no longer enough to set a new password for the account.
  *
  * Deliberately narrow regardless: only admin/teacher/parent accounts are
  * reachable (students are untouched, same as everywhere else in this
@@ -20,6 +17,7 @@
  */
 
 const { getAdminClient } = require('./_lib/supabaseAdmin');
+const { verifyToken } = require('./_lib/otp');
 
 function json(statusCode, body) {
   return { statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
@@ -36,6 +34,9 @@ async function resetForgottenPassword(admin, payload) {
   if (!phone) return { ok: false, message: 'Phone number is required.' };
   if (!schoolCode || !role) return { ok: false, message: 'Choose an account to reset.' };
   if (RESETTABLE_ROLES.indexOf(role) === -1) return { ok: false, message: 'That account type cannot be reset here.' };
+  if (!verifyToken((payload || {}).otp_verified_token, phone, 'password_reset')) {
+    return { ok: false, message: 'Please verify your phone number first (the code may have expired — request a new one).' };
+  }
   if (newPassword.length < 6) return { ok: false, message: 'New password must be at least 6 characters.' };
 
   const { data: school } = await admin.from('schools').select('id, status').eq('code', schoolCode).maybeSingle();

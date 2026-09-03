@@ -153,6 +153,23 @@ async function renderBoard(root, exams, classes, years, terms) {
       },
       true
     ));
+    // Consolidated Exam: recompute every ticked class's results in one go
+    // (a class with no students/no subjects yet is skipped — nothing to
+    // average for it) by calling recomputeConsolidated() once per class,
+    // the same write path Marks Entry/Bulk Upload already use underneath.
+    card.querySelectorAll('[data-recompute-exam]').forEach((b) => b.onclick = () => withBusy(b, async () => {
+      const targets = classRows.filter((r) => r.status !== 'no_students' && r.status !== 'no_subjects');
+      if (!targets.length) { toast('No class is ready to recompute yet — add classes with students and subjects first.', 'err'); return; }
+      let okCount = 0;
+      const errors = [];
+      for (const r of targets) {
+        const res = await Db.results.recomputeConsolidated(e.id, r.class_id);
+        if (res.ok) okCount += 1; else errors.push(`${r.class_name}: ${res.message}`);
+      }
+      if (okCount) toast(`Recomputed ${okCount} of ${targets.length} class(es).${errors.length ? ' Some failed — see below.' : ''}`, errors.length ? 'err' : 'ok');
+      if (errors.length) toast(errors.join(' · '), 'err');
+      renderBoard(root, exams, classes, years, terms);
+    }, 'Recomputing…'));
   });
 }
 
@@ -242,6 +259,13 @@ function mobileClassAccordion(classRows) {
 
 function examCard(exam, classRows, i) {
   const accent = ACCENTS[i % ACCENTS.length];
+  const isConsolidated = exam.exam_type === 'consolidated';
+  // Recompute only makes sense for a class that's actually ticked onto this
+  // exam and has students to score — same set of classes the board already
+  // shows a row for, so no separate "which class?" picker is needed.
+  const recomputeBtn = (mobile) => isConsolidated
+    ? (mobile ? `<button data-recompute-exam="${exam.id}">🔄 Recompute results</button>` : `<button class="btn ghost sm" data-recompute-exam="${exam.id}">🔄 Recompute</button>`)
+    : '';
   const desktopRows = classRows.length ? `<div class="table-wrap"><table class="data">
     <thead><tr><th>Class</th><th>Subjects with marks</th><th>Status</th><th>Last published</th><th></th></tr></thead>
     <tbody>${classRows.map((r) => {
@@ -274,6 +298,7 @@ function examCard(exam, classRows, i) {
       </div>
       <div class="ed-toolbar">
         <button class="btn ghost sm" data-add-classes>+ Add classes</button>
+        ${recomputeBtn(false)}
         <button class="btn ghost sm" data-learning-area-papers>📄 Learning Area Papers</button>
         <button class="btn ghost sm" data-subject-combination>🧩 Subject Combination</button>
       </div>
@@ -294,6 +319,7 @@ function examCard(exam, classRows, i) {
       </div>
       <div class="ed-m-toolbar">
         <button data-add-classes>➕ Add classes</button>
+        ${recomputeBtn(true)}
         <button data-learning-area-papers>📄 Learning Areas</button>
         <button data-subject-combination>🧩 Combination</button>
       </div>
@@ -407,13 +433,50 @@ function classCardHtml(c, selectedIds, lockedIds, minByClass) {
     </div>`;
 }
 
-function openExamModal(root, years, terms, classes, existing, currentClassRows) {
+/** Consolidated Exam's component picker markup — a plain checklist (no
+ *  need for the class picker's search/level-grouping machinery, schools
+ *  rarely have more than a handful of exams per year) of every exam that
+ *  could validly be combined, each with a weight input that only matters
+ *  once ticked. `existingComponents` pre-ticks and pre-fills weight for an
+ *  exam already being edited. */
+function componentPickerHtml(candidates, existingComponents) {
+  const weightById = {};
+  const selected = new Set();
+  (existingComponents || []).forEach((c) => { selected.add(String(c.component_exam_id)); weightById[String(c.component_exam_id)] = c.weight; });
+  if (!candidates.length) return '<p class="muted" style="margin:0">No other exams yet to combine — create the exams you want to merge (e.g. Opener, Midterm, Endterm) first, then come back and edit this one.</p>';
+  return `<div class="ex-class-scroll" style="max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px">
+    ${candidates.map((e) => {
+      const isOn = selected.has(String(e.id));
+      const w = weightById[String(e.id)] !== undefined ? weightById[String(e.id)] : 1;
+      return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0" data-comp-row="${e.id}">
+        <label style="display:flex;align-items:center;gap:8px;flex:1;margin:0">
+          <input type="checkbox" data-comp-check value="${e.id}" ${isOn ? 'checked' : ''}>
+          <span>${esc(e.name)} <span class="muted" style="font-size:12px">(${esc(EXAM_TYPE_LABELS[e.exam_type] || e.exam_type)} · ${esc(e.academic_year_name)} ${esc(e.term_name)})</span></span>
+        </label>
+        <input type="number" min="0.01" step="0.01" data-comp-weight="${e.id}" value="${esc(String(w))}" placeholder="Weight" style="width:90px" ${isOn ? '' : 'disabled'}>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+async function openExamModal(root, years, terms, classes, existing, currentClassRows) {
   const selectedIds = new Set((currentClassRows || []).map((r) => r.class_id));
   const lockedIds = new Set((currentClassRows || []).filter((r) => r.subjects_with_marks > 0).map((r) => r.class_id));
   const minByClass = {};
   (currentClassRows || []).forEach((r) => { minByClass[r.class_id] = r.min_subjects; });
   const initialType = existing ? existing.exam_type : 'written';
   const groups = groupClassesByLevel(classes);
+
+  // Always fetched (cheap, one query each): the type dropdown can be
+  // switched to "Consolidated Exam" AFTER the modal is already open, so the
+  // picker section needs this data ready the instant that happens rather
+  // than showing a loader mid-modal.
+  const [candRes, compRes] = await Promise.all([
+    Db.results.listConsolidatableExams(existing ? existing.id : undefined),
+    existing ? Db.results.getExamComponents(existing.id) : Promise.resolve({ ok: true, data: [] })
+  ]);
+  const candidates = candRes.ok ? candRes.data : [];
+  const existingComponents = compRes.ok ? compRes.data : [];
 
   modal({
     title: existing ? 'Edit exam' : 'Add exam',
@@ -425,9 +488,11 @@ function openExamModal(root, years, terms, classes, existing, currentClassRows) 
         <div class="field"><label>Term</label><select id="ex-term">${options(terms, 'id', 'name', existing ? existing.term_id : '', 'Choose a term')}</select></div>
       </div>
       <div class="field"><label>Exam type</label><select id="ex-type">${options(EXAM_TYPE_CHOICES, 'id', 'name', initialType)}</select></div>
-      <p class="hint" id="ex-consolidated-note" style="display:${initialType === 'consolidated' ? '' : 'none'};color:var(--warn)">
-        ⚠️ Combining two or more exams together isn't built yet — this creates a normal single exam for now; the merge behaviour is being scoped separately.
-      </p>
+      <div class="field" id="ex-consolidated-section" style="display:${initialType === 'consolidated' ? '' : 'none'}">
+        <label>Which exams should this combine?</label>
+        <p class="hint" style="margin-top:0">Pick 2 or more exams (e.g. Opener, Midterm, Endterm) and, if some should count more than others, a weight for each (default 1 = equal weight). No marks are entered directly against a Consolidated Exam — instead, after saving, use "🔄 Recompute" on this exam's card to average every student's score across the exams you pick here and write it in.</p>
+        <div id="ex-consolidated-picker">${componentPickerHtml(candidates, existingComponents)}</div>
+      </div>
       <div class="field">
         <label>Which grades are sitting this exam?</label>
         <p class="hint" style="margin-top:0">Tap a class to include it, then set its minimum number of learning areas — required for every class you select. Anyone who sat fewer than this is marked "X" instead of skewing the class mean, and this class can't be published until at least this many subjects have had marks uploaded. You can add more classes later from the exam card.</p>
@@ -451,8 +516,17 @@ function openExamModal(root, years, terms, classes, existing, currentClassRows) 
     okLabel: 'Save',
     onOpen: () => {
       document.getElementById('ex-type').onchange = (e) => {
-        document.getElementById('ex-consolidated-note').style.display = e.target.value === 'consolidated' ? '' : 'none';
+        document.getElementById('ex-consolidated-section').style.display = e.target.value === 'consolidated' ? '' : 'none';
       };
+      // A component's weight input only makes sense once it's actually
+      // ticked — greyed out otherwise, same convention as the class
+      // picker's min-learning-areas field only appearing once selected.
+      document.querySelectorAll('[data-comp-check]').forEach((cb) => {
+        cb.onchange = () => {
+          const w = document.querySelector(`[data-comp-weight="${cb.value}"]`);
+          if (w) w.disabled = !cb.checked;
+        };
+      });
       if (!classes.length) return;
 
       const countEl = document.getElementById('ex-class-count');
@@ -539,16 +613,34 @@ function openExamModal(root, years, terms, classes, existing, currentClassRows) 
         return;
       }
 
+      const examType = document.getElementById('ex-type').value;
+      let components = null;
+      if (examType === 'consolidated') {
+        components = [...document.querySelectorAll('[data-comp-check]:checked')].map((cb) => ({
+          exam_id: cb.value,
+          weight: document.querySelector(`[data-comp-weight="${cb.value}"]`).value
+        }));
+        if (components.length < 2) {
+          toast('Choose at least 2 exams for this Consolidated Exam to combine.', 'err');
+          return;
+        }
+      }
+
       const res = await Db.results.saveExam({
         id: existing ? existing.id : undefined,
         name: document.getElementById('ex-name').value,
         academic_year_id: document.getElementById('ex-year').value,
         term_id: document.getElementById('ex-term').value,
-        exam_type: document.getElementById('ex-type').value,
+        exam_type: examType,
         class_ids: classIds,
         min_subjects_by_class: minSubjectsByClass
       });
       if (!res.ok) { toast(res.message, 'err'); return; }
+
+      if (components) {
+        const compRes = await Db.results.saveExamComponents(res.data ? res.data.id : existing.id, components);
+        if (!compRes.ok) { toast(`Exam saved, but the component exams couldn't be saved: ${compRes.message}`, 'err'); closeModal(); renderBoardScreen(root, years, terms); return; }
+      }
       closeModal();
       toast(existing ? 'Exam saved.' : 'Exam created.', 'ok');
       renderBoardScreen(root, years, terms);

@@ -11,7 +11,15 @@
  * staffUsernameFor/staffEmailFor). A brand-new school has no other profiles
  * yet, so the first-name-derived username can never collide at signup time.
  */
+process.env.OTP_TOKEN_SECRET = 'test-secret-do-not-use-in-prod';
 const { createSchoolAndAdmin, slugifyCode } = require('../netlify/functions/school-signup.js');
+const { signVerifiedToken } = require('../netlify/functions/_lib/otp.js');
+
+// Every test below that expects to reach account creation needs a real
+// verified-phone token for that exact phone number — school-signup.js now
+// checks this itself (see its own header comment) rather than trusting the
+// frontend to have run the OTP step.
+const OTP_TOKEN_0712345678 = signVerifiedToken('0712345678', 'signup');
 
 let passed = 0, failed = 0;
 function check(name, cond) {
@@ -142,12 +150,37 @@ function mockAdmin(opts) {
     check('rejects a too-short school code', res.ok === false);
   }
 
+  // ---- OTP verification is now required -------------------------------------
+  {
+    const admin = mockAdmin();
+    const res = await createSchoolAndAdmin(admin, {
+      school_name: 'Test School', school_code: 'otptest', admin_name: 'A', admin_phone: '0712345678', password: 'abcdef'
+    });
+    check('rejects signup with no otp_verified_token at all', res.ok === false && /verify your phone/i.test(res.message));
+  }
+  {
+    const admin = mockAdmin();
+    const res = await createSchoolAndAdmin(admin, {
+      school_name: 'Test School', school_code: 'otptest2', admin_name: 'A', admin_phone: '0712345678', password: 'abcdef',
+      otp_verified_token: signVerifiedToken('0700000000', 'signup') // verified for a DIFFERENT phone number
+    });
+    check('rejects a token that was verified for a different phone number', res.ok === false && /verify your phone/i.test(res.message));
+  }
+  {
+    const admin = mockAdmin();
+    const res = await createSchoolAndAdmin(admin, {
+      school_name: 'Test School', school_code: 'otptest3', admin_name: 'A', admin_phone: '0712345678', password: 'abcdef',
+      otp_verified_token: signVerifiedToken('0712345678', 'password_reset') // right phone, wrong purpose
+    });
+    check('rejects a token verified for a different purpose (password_reset, not signup)', res.ok === false && /verify your phone/i.test(res.message));
+  }
+
   // ---- happy path ----------------------------------------------------------
   {
     const admin = mockAdmin();
     const res = await createSchoolAndAdmin(admin, {
       school_name: 'Greenhill Academy', school_code: 'Greenhill', admin_name: 'Jane Wanjiru',
-      admin_phone: '0712345678', password: 'supersecret'
+      admin_phone: '0712345678', password: 'supersecret', otp_verified_token: OTP_TOKEN_0712345678
     });
     check('happy path succeeds', res.ok === true);
     check('school code is normalized to lowercase', res.school_code === 'greenhill');
@@ -170,7 +203,8 @@ function mockAdmin(opts) {
   {
     const admin = mockAdmin({ tables: { schools: [{ id: 'existing', code: 'taken', name: 'Existing School' }] } });
     const res = await createSchoolAndAdmin(admin, {
-      school_name: 'New School', school_code: 'taken', admin_name: 'A', admin_phone: '0712345678', password: 'abcdef'
+      school_name: 'New School', school_code: 'taken', admin_name: 'A', admin_phone: '0712345678', password: 'abcdef',
+      otp_verified_token: OTP_TOKEN_0712345678
     });
     check('rejects an already-taken school code', res.ok === false && /already taken/i.test(res.message));
     check('did not create a second school row for a rejected duplicate code', admin._tables.schools.length === 1);
@@ -180,7 +214,8 @@ function mockAdmin(opts) {
   {
     const admin = mockAdmin({ forceCreateUserError: 'some auth provisioning error' });
     const res = await createSchoolAndAdmin(admin, {
-      school_name: 'Rollback School', school_code: 'rollback1', admin_name: 'A', admin_phone: '0712345678', password: 'abcdef'
+      school_name: 'Rollback School', school_code: 'rollback1', admin_name: 'A', admin_phone: '0712345678', password: 'abcdef',
+      otp_verified_token: OTP_TOKEN_0712345678
     });
     check('reports failure when the admin auth user cannot be created', res.ok === false);
     check('the orphaned school row was rolled back', admin._deletedSchoolIds.includes('school-1'));
@@ -191,7 +226,8 @@ function mockAdmin(opts) {
   {
     const admin = mockAdmin({ forceProfileInsertError: 'forced failure' });
     const res = await createSchoolAndAdmin(admin, {
-      school_name: 'Rollback School 2', school_code: 'rollback2', admin_name: 'A', admin_phone: '0712345678', password: 'abcdef'
+      school_name: 'Rollback School 2', school_code: 'rollback2', admin_name: 'A', admin_phone: '0712345678', password: 'abcdef',
+      otp_verified_token: OTP_TOKEN_0712345678
     });
     check('reports failure when the profile insert fails', res.ok === false);
     check('the orphaned auth user was deleted', admin._deletedUserIds.length === 1);
