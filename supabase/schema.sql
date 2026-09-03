@@ -1933,7 +1933,8 @@ create table public.message_logs (
   status text not null default 'logged',
   provider_response text,
   created_at timestamptz not null default now(),
-  constraint message_logs_scope_check check (recipient_scope in ('class', 'individual_student', 'individual_staff', 'broadcast')),
+  credits integer not null default 1,
+  constraint message_logs_scope_check check (recipient_scope in ('class', 'individual_student', 'individual_staff', 'broadcast', 'personalized')),
   constraint message_logs_status_check check (status in ('logged', 'queued', 'sent', 'failed'))
 );
 create trigger trg_message_logs_school_id before insert on public.message_logs
