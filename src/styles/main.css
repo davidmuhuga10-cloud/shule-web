@@ -416,6 +416,18 @@ table.data tbody tr:hover{background:#fafbfc}
 table.data td.num,table.data th.num{text-align:center}
 .row-actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
 
+/* SMS Credits redesign (design review "Option B"): balance + request
+   history as ONE plain card instead of two separately colored ones — see
+   smsCredits.mjs's header comment. No accent color anywhere; a single
+   plain rule is what separates the balance strip from the request list. */
+.sms-wallet-hero{display:flex;align-items:center;justify-content:space-between;padding:22px 20px;gap:16px;flex-wrap:wrap}
+.sms-wallet-div{border-top:1px solid var(--line)}
+.sms-wallet-subh{padding:12px 20px 0;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700}
+.sms-wallet-rows{padding:6px 20px 14px}
+.sms-wallet-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}
+.sms-wallet-row:last-child{border-bottom:none}
+.sms-wallet-row .d{color:var(--muted);font-size:12px}
+
 /* Mark List (feature brief "Merit List Design"): a real bordered grid —
    every cell boxed, not just a bottom rule per row — condensed enough to
    fit a class's full subject list on one printable page. */

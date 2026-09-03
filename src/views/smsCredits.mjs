@@ -16,6 +16,15 @@
  * Exported as renderSmsCredits(body) — a plain tab-body renderer, not a
  * full view — so messaging.mjs can host it inside its own tab bar/page-head
  * exactly the way it already hosts Compose/History.
+ *
+ * Redesign (design review, "Option B" of three): balance and request
+ * history used to be two separate cards, each wrapped in a colored
+ * side-accent border (tile-teal / tile-amber) — direct feedback was that
+ * the two colored strips made a screen that's really just "one number and
+ * a button" look busier than it needed to. Now it's ONE plain card (no
+ * accent color at all): the balance/buy-button strip on top, a single
+ * plain rule, then requests listed underneath as simple rows instead of a
+ * table — one wallet, not two competing boxes.
  */
 import { esc, toast, loader, withBusy, modal, closeModal, fmtDate } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
@@ -24,16 +33,18 @@ const ADMIN_PAY_PHONE = '0705041512';
 
 export async function renderSmsCredits(body) {
   body.innerHTML = `
-    <div class="card side-accent tile-teal">
-      <div class="card-b" style="text-align:center;padding:34px 20px">
-        <div class="muted" style="font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;font-weight:650">SMS credits remaining</div>
-        <div id="sms-balance" style="font-size:40px;font-weight:700;margin:8px 0 20px">${loader()}</div>
+    <div class="card sms-wallet">
+      <div class="sms-wallet-hero">
+        <div>
+          <div class="muted" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;font-weight:650">SMS credits remaining</div>
+          <div id="sms-balance" style="font-size:34px;font-weight:700;font-variant-numeric:tabular-nums">${loader()}</div>
+        </div>
         <button class="btn" id="sms-buy-btn">Buy SMS Credits</button>
       </div>
-    </div>
-    <div class="card side-accent tile-amber" style="margin-top:16px">
-      <div class="card-h">Your requests</div>
-      <div class="card-b" id="sms-req-list">${loader()}</div>
+      <div class="sms-wallet-div">
+        <div class="sms-wallet-subh">Your requests</div>
+        <div id="sms-req-list" class="sms-wallet-rows">${loader()}</div>
+      </div>
     </div>
   `;
 
@@ -49,18 +60,13 @@ export async function renderSmsCredits(body) {
   if (!reqRes.ok) { listEl.innerHTML = `⚠️ ${esc(reqRes.message)}`; return; }
   const rows = reqRes.data || [];
   if (!rows.length) {
-    listEl.innerHTML = `<div class="empty"><div class="e-ico">📶</div><h3>No requests yet</h3><p>Requests you submit will show up here with their status.</p></div>`;
+    listEl.innerHTML = `<div class="empty" style="padding:20px 0"><div class="e-ico">📶</div><h3>No requests yet</h3><p>Requests you submit will show up here with their status.</p></div>`;
     return;
   }
-  listEl.innerHTML = `<div class="table-wrap"><table class="data">
-    <thead><tr><th>Date</th><th>Credits</th><th>Amount</th><th>Status</th></tr></thead>
-    <tbody>${rows.map((r) => `<tr>
-      <td class="muted" style="font-size:12px">${fmtDate(r.created_at)}</td>
-      <td>${esc(String(r.requested_credits))}</td>
-      <td>${r.amount_paid != null ? esc(String(r.amount_paid)) : '—'}</td>
-      <td><span class="badge ${r.status === 'approved' ? 'green' : r.status === 'rejected' ? 'red' : 'amber'}">${esc(r.status)}</span></td>
-    </tr>`).join('')}</tbody>
-  </table></div>`;
+  listEl.innerHTML = rows.map((r) => `<div class="sms-wallet-row">
+      <span>${esc(String(r.requested_credits))} credits <span class="d">— ${fmtDate(r.created_at)}${r.amount_paid != null ? ` · KSH ${esc(String(r.amount_paid))}` : ''}</span></span>
+      <span class="badge ${r.status === 'approved' ? 'green' : r.status === 'rejected' ? 'red' : 'amber'}">${esc(r.status)}</span>
+    </div>`).join('');
 }
 
 function openBuyModal(body) {
