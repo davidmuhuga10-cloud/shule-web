@@ -271,7 +271,14 @@ function renderResultsSendCard(el, data, sel, root, body) {
 
   const cls = data.classes.find((c) => c.id === sel.class_id);
   const exam = data.exams.find((e) => e.id === sel.exam_id);
-  if (!exam || !cls) return;
+  if (!exam || !cls) {
+    // Previously just `return` here, leaving the loader spinner from the
+    // markup above on screen forever with no way out — an admin picking an
+    // exam/class combo that doesn't resolve (e.g. stale selection) saw an
+    // endless spinner and no error at all.
+    el.querySelector('#msg-results-preview-box').innerHTML = `⚠️ Couldn't find that exam/class — pick them again above.`;
+    return;
+  }
   const examLabel = `${exam.name}${exam.term_name ? `, ${exam.term_name}` : ''}${exam.academic_year_name ? ` ${exam.academic_year_name}` : ''}`;
 
   Db.results.getBroadsheet({ exam_id: sel.exam_id, class_id: sel.class_id }).then((bsRes) => {
@@ -324,6 +331,14 @@ function renderResultsSendCard(el, data, sel, root, body) {
           Processed — ${withPhone.length} of ${rows.length} queued for sending${skipped ? ` (${skipped} have no guardian number on file)` : ''}. Check SMS History for delivery.
         </div>`;
     };
+  }).catch((e) => {
+    // A network hiccup, or a genuine bug in the block above, used to leave
+    // the loader spinner from the markup at the top of this function
+    // spinning forever with nothing in the console an admin could report
+    // back — this at least turns it into a visible, actionable error.
+    console.error('renderResultsSendCard: failed to load results for messaging', e);
+    const previewBox = el.querySelector('#msg-results-preview-box');
+    if (previewBox) previewBox.innerHTML = `⚠️ Something went wrong loading results for this class. Try again — if it keeps happening, note the exam and class and let support know.`;
   });
 }
 
