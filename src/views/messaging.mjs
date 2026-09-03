@@ -364,7 +364,12 @@ function buildResultsMessage(bs, row, examLabel, className, customNote) {
     const score = row.scores[s.id];
     if (score === null || score === undefined) return;
     const g = row.grades[s.id];
-    lines.push(`${(s.code || s.name).toUpperCase()}: ${Math.round(score)} ${(g && g.grade_label) || ''}`.trim());
+    // A malformed subject/subject-combination row can have BOTH code and
+    // name blank in real data (never modeled in the test fixtures) — that
+    // used to throw here on `.toUpperCase()` of undefined, which crashed
+    // the whole send flow with a generic, unhelpful error further up.
+    const subjLabel = (s && (s.code || s.name)) || 'SUBJECT';
+    lines.push(`${subjLabel.toUpperCase()}: ${Math.round(score)} ${(g && g.grade_label) || ''}`.trim());
   });
   if (String(customNote || '').trim()) { lines.push(''); lines.push(String(customNote).trim()); }
   // Position isn't part of the brief's field list verbatim, but it's the
@@ -460,7 +465,8 @@ function renderResultsSendCard(el, data, sel, root, body) {
     // back — this at least turns it into a visible, actionable error.
     console.error('renderResultsSendCard: failed to load results for messaging', e);
     const previewBox = el.querySelector('#msg-results-preview-box');
-    if (previewBox) previewBox.innerHTML = `⚠️ Something went wrong loading results for this class. Try again — if it keeps happening, note the exam and class and let support know.`;
+    const detail = (e && e.message) ? ` (${e.message})` : '';
+    if (previewBox) previewBox.innerHTML = `⚠️ Something went wrong loading results for this class${esc(detail)}. Try again — if it keeps happening, note the exam and class and let support know.`;
   });
 }
 
