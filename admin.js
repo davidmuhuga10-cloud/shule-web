@@ -22,6 +22,17 @@ const supabase = createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, { auth: {
 const root = document.getElementById('admin-root');
 let profile = null;
 
+// Same shared sw.js as the main app (see its own header comment) — harmless
+// and consistent to register here too, since someone could open /admin on a
+// browser that's never loaded the main app. Moved here from a literal
+// inline <script> in admin.html as part of the security hardening pass —
+// this file is already loaded as a real module, no reason to keep a
+// separate inline script around too (and a strict script-src CSP has to
+// block inline <script> blocks that aren't file-loaded).
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => {}); });
+}
+
 /* ------------------------------ helpers ---------------------------------- */
 function esc(s) {
   return String(s === undefined || s === null ? '' : s)

@@ -35,7 +35,10 @@ async function verifyOtp(admin, payload) {
     .is('consumed_at', null)
     .order('created_at', { ascending: false })
     .limit(1);
-  if (readErr) return { ok: false, message: readErr.message };
+  if (readErr) {
+    console.error('verify-otp: failed to read code', readErr.message);
+    return { ok: false, message: 'Could not verify that code right now. Try again shortly.' };
+  }
 
   const otpRow = (rows || [])[0];
   if (!otpRow) return { ok: false, message: 'No code was requested for this number — request a new one.' };

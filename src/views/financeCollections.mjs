@@ -290,7 +290,7 @@ async function printReceipt(collection) {
 
   const addrLines = addressLines(settings);
   const logoHtml = settings.logo
-    ? `<img src="${settings.logo}" style="width:64px;height:64px;border-radius:10px;object-fit:cover">`
+    ? `<img src="${esc(settings.logo)}" style="width:64px;height:64px;border-radius:10px;object-fit:cover">`
     : `<div style="width:64px;height:64px;border-radius:10px;border:1.5px dashed #ccc;display:flex;align-items:center;justify-content:center;font-size:26px;color:#999;background:#fafbfc">🏫</div>`;
 
   const total = allocations.reduce((a, x) => a + Number(x.amount || 0), 0) || Number(collection.amount || 0);

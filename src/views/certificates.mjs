@@ -78,7 +78,7 @@ async function loadForm(root, studentId) {
     const reason = document.getElementById('ct-reason').value;
     const dateLeft = document.getElementById('ct-date').value;
     const notes = document.getElementById('ct-notes').value;
-    const logoHtml = settings.logo ? `<img class="logo-thumb" src="${settings.logo}">` : `<div class="logo-placeholder">🏫</div>`;
+    const logoHtml = settings.logo ? `<img class="logo-thumb" src="${esc(settings.logo)}">` : `<div class="logo-placeholder">🏫</div>`;
 
     document.getElementById('ct-certificate').innerHTML = `
       <div class="card">
@@ -91,7 +91,7 @@ async function loadForm(root, studentId) {
             </div>
           </div>
           <div class="spacer"></div>
-          <button class="btn secondary no-print" onclick="window.print()">🖨️ Print</button>
+          <button class="btn secondary no-print" id="ct-print-btn">🖨️ Print</button>
         </div>
         <div class="card-b" style="max-width:640px;margin:0 auto;padding:32px 24px">
           <h2 style="text-align:center;letter-spacing:0.5px;margin-bottom:24px">CERTIFICATE OF LEAVING</h2>
@@ -111,6 +111,13 @@ async function loadForm(root, studentId) {
         </div>
       </div>
     `;
+    // Security hardening pass: was a literal onclick="window.print()" HTML
+    // attribute — inline event-handler attributes are exactly what a
+    // strict script-src Content-Security-Policy blocks, so this (like the
+    // other two print buttons in transcript.mjs/myResults.mjs) is now
+    // wired the same way every other click handler in this codebase
+    // already is.
+    document.getElementById('ct-print-btn').onclick = () => window.print();
   };
 
   ['ct-reason', 'ct-date', 'ct-notes'].forEach((id) => {

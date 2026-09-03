@@ -1350,6 +1350,18 @@ window.addEventListener('online', () => toast('Back online.', 'ok'));
   // App.toggleSidebar) — it just had no click handler wired to it.
   $('#scrim').onclick = () => App.toggleSidebar(false);
 
+  // Security hardening pass: these 4 used to be literal onclick="..."
+  // attributes in index.html — inline event-handler attributes are exactly
+  // what a strict script-src Content-Security-Policy has to block, so
+  // they're wired here instead, the same way every other click handler in
+  // this codebase already is.
+  $('#menu-toggle-btn').onclick = () => App.toggleSidebar();
+  $('#avatar').onclick = () => App.toggleUserMenu();
+  $('#um-change-password').onclick = () => App.openChangePassword();
+  $('#um-logout').onclick = () => App.logout();
+  const yearEl = $('#year');
+  if (yearEl) yearEl.textContent = new Date().getFullYear();
+
   await consumePendingImpersonation();
 
   const { data: { session } } = await supabase.auth.getSession();

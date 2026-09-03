@@ -73,7 +73,7 @@ async function load(root, studentId) {
     });
   }
 
-  const logoHtml = settings.logo ? `<img class="logo-thumb" src="${settings.logo}">` : `<div class="logo-placeholder">🏫</div>`;
+  const logoHtml = settings.logo ? `<img class="logo-thumb" src="${esc(settings.logo)}">` : `<div class="logo-placeholder">🏫</div>`;
 
   sheetEl.innerHTML = `
     <div class="card">
@@ -87,7 +87,7 @@ async function load(root, studentId) {
           <div style="font-weight:650;margin-top:4px">Academic Transcript</div>
         </div>
         <div class="spacer"></div>
-        <button class="btn secondary no-print" onclick="window.print()">🖨️ Print</button>
+        <button class="btn secondary no-print" id="tr-print-btn">🖨️ Print</button>
       </div>
       <div class="card-b" style="border-bottom:1px solid var(--line)">
         <div class="r-meta">
@@ -112,4 +112,8 @@ async function load(root, studentId) {
       </div>
     </div>
   `;
+  // Security hardening pass: was a literal onclick="window.print()"
+  // attribute — inline event-handler attributes are what a strict
+  // script-src CSP blocks, so this is wired the normal way instead.
+  sheetEl.querySelector('#tr-print-btn').onclick = () => window.print();
 }

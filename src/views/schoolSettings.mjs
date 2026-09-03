@@ -34,7 +34,7 @@ export async function viewSettings(root) {
 
 function render(root, settings) {
   const logoPreview = settings.logo
-    ? `<img class="logo-thumb" id="set-logo-preview" src="${settings.logo}">`
+    ? `<img class="logo-thumb" id="set-logo-preview" src="${esc(settings.logo)}">`
     : `<div class="logo-placeholder" id="set-logo-preview">🏫</div>`;
 
   // Feature brief §3: contact/address details are compulsory before
