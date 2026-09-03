@@ -81,11 +81,35 @@ function apiBase(cfg) {
 // request-size limit while still cutting round trips by ~100x.
 const BULK_CHUNK_SIZE = 100;
 
+// Africa's Talking's own per-recipient status codes, translated to plain
+// English — SMS History (Messaging_Overhaul.docx item 8) shows this text
+// directly to admins/teachers, not developers, so "InvalidPhoneNumber"
+// (or, worse, a raw JSON dump of AT's response) has no business appearing
+// on screen. Anything not in this map still gets a readable sentence
+// rather than a bare provider code.
+const AT_STATUS_LABELS = {
+  Success: 'Delivered successfully.',
+  InvalidPhoneNumber: 'This phone number is invalid.',
+  InsufficientBalance: "The provider account is out of balance — contact the platform administrator.",
+  InvalidSenderId: 'The sender ID is not approved.',
+  InvalidCostCenter: 'Delivery failed — invalid cost center.',
+  UserInBlacklist: 'This number has opted out of messages.',
+  CouldNotRoute: 'Could not be delivered to this network.',
+  InternalServerError: 'The provider had an error — try resending.',
+  GatewayError: 'The provider had an error — try resending.'
+};
+function friendlyDeliveryText(status) {
+  if (AT_STATUS_LABELS[status]) return AT_STATUS_LABELS[status];
+  return status ? `Delivery failed (${status}).` : 'Delivery failed.';
+}
+
 /** Sends ONE chunk (already ≤ BULK_CHUNK_SIZE) to Africa's Talking and
  *  matches its response back to each input phone by number — not by
  *  response order, since that's not a documented guarantee. Returns an
- *  array the same length/order as `phones`. Internal to this module; call
- *  sendBulkSms (any size) or sendSms (one recipient) instead. */
+ *  array the same length/order as `phones`, each entry's `raw` already
+ *  plain English (see friendlyDeliveryText above) — nothing downstream
+ *  needs to reformat it before showing it to a person. Internal to this
+ *  module; call sendBulkSms (any size) or sendSms (one recipient) instead. */
 async function sendChunk(cfg, phones, message) {
   const e164List = phones.map(toE164Phone);
   const valid = e164List.map((e, i) => ({ e, i })).filter((x) => x.e && x.e.length >= 8);
@@ -109,7 +133,6 @@ async function sendChunk(cfg, phones, message) {
       body: form.toString()
     });
     const resJson = await res.json().catch(() => null);
-    const wholeResponseRaw = resJson ? JSON.stringify(resJson) : `HTTP ${res.status}`;
     const recipients = (resJson && resJson.SMSMessageData && resJson.SMSMessageData.Recipients) || [];
 
     // AT can return more than one entry for the same number (shouldn't for
@@ -121,13 +144,15 @@ async function sendChunk(cfg, phones, message) {
     valid.forEach(({ e, i }) => {
       const queue = queueByNumber[e];
       const r = queue && queue.length ? queue.shift() : null;
-      results[i] = r && String(r.status).toLowerCase() === 'success'
-        ? { status: 'sent', messageId: r.messageId || null, raw: JSON.stringify(r) }
-        : { status: 'failed', messageId: null, raw: r ? JSON.stringify(r) : wholeResponseRaw };
+      const success = r && String(r.status).toLowerCase() === 'success';
+      results[i] = {
+        status: success ? 'sent' : 'failed',
+        messageId: success ? (r.messageId || null) : null,
+        raw: friendlyDeliveryText(r ? r.status : null)
+      };
     });
   } catch (e) {
-    const raw = String((e && e.message) || e);
-    valid.forEach(({ i }) => { results[i] = { status: 'failed', messageId: null, raw }; });
+    valid.forEach(({ i }) => { results[i] = { status: 'failed', messageId: null, raw: 'Could not reach the SMS provider — try resending.' }; });
   }
   return results;
 }

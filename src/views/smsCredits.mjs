@@ -31,7 +31,7 @@ export async function renderSmsCredits(body) {
         <button class="btn" id="sms-buy-btn">Buy SMS Credits</button>
       </div>
     </div>
-    <div class="card side-accent tile-teal" style="margin-top:16px">
+    <div class="card side-accent tile-amber" style="margin-top:16px">
       <div class="card-h">Your requests</div>
       <div class="card-b" id="sms-req-list">${loader()}</div>
     </div>

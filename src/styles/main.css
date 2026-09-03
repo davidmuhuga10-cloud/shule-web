@@ -405,6 +405,13 @@ table.data thead tr:first-child th:first-child{border-top-left-radius:var(--radi
 table.data thead tr:first-child th:last-child{border-top-right-radius:var(--radius)}
 table.data td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
 table.data tr:last-child td{border-bottom:none}
+/* .compact — SMS History (Messaging_Overhaul.docx item 7) feedback: rows
+   read as too tall, more like a spread-out list than a table you can scan
+   — thinner rows, closer to the density of Finance's own Balances table
+   (.print-grid), so more of the batch fits on screen without scrolling. */
+table.data.compact{font-size:12.5px}
+table.data.compact th{padding:7px 10px;font-size:10.5px}
+table.data.compact td{padding:7px 10px}
 table.data tbody tr:hover{background:#fafbfc}
 table.data td.num,table.data th.num{text-align:center}
 .row-actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}

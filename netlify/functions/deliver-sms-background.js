@@ -68,9 +68,13 @@ async function deliverBatch(admin, batchId) {
     const results = await sendBulkSms(smsConfig, groupRows.map((r) => r.phone), body);
     for (let i = 0; i < groupRows.length; i++) {
       const r = results[i] || { status: 'failed', messageId: null, raw: 'No result returned.' };
+      // r.raw is already plain English (see smsProvider.js's
+      // friendlyDeliveryText) — SMS History shows this straight to an
+      // admin/teacher, so no provider message id or raw JSON belongs in
+      // it; messageId is intentionally dropped here, not stored anywhere.
       await admin.from('message_logs').update({
         status: r.status,
-        provider_response: `${r.raw}${r.messageId ? ` (id: ${r.messageId})` : ''}`
+        provider_response: r.raw
       }).eq('id', groupRows[i].id);
     }
   }

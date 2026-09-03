@@ -344,7 +344,7 @@ async function renderHistory(body, data) {
   const typeLabelOf = (b) => (b.recipient_scope === 'personalized' ? 'Personalized' : 'SMS');
 
   listEl.innerHTML = `
-    <div class="mh-desktop-view"><div class="table-wrap"><table class="data">
+    <div class="mh-desktop-view"><div class="table-wrap"><table class="data compact">
       <thead><tr><th>Title</th><th>Sender</th><th>Type</th><th class="num">Recipients</th><th class="num">Delivered</th><th class="num">Failed</th><th class="num">Credits</th><th>Date</th><th></th></tr></thead>
       <tbody>${batches.map((b, i) => `<tr>
         <td>${esc(b.scope_label || b.recipient_scope)}</td>
@@ -382,11 +382,15 @@ async function renderHistory(body, data) {
 /** Item 8 — clicking View opens this: individual delivery status, credits
  *  per message, delivery info, and a resend option for anything failed. */
 function openBatchDetail(batch, body, data) {
+  // provider_response is already plain English by the time it reaches here
+  // (see smsProvider.js's friendlyDeliveryText) — no ids, no raw JSON. A
+  // failed delivery's reason is shown in red so it reads as a problem at a
+  // glance, not just more grey text next to everything that succeeded.
   const rowHtml = (r) => `<tr data-row-id="${esc(r.id)}">
-      <td>${esc(r.phone || '—')}</td>
+      <td style="white-space:nowrap">${esc(r.phone || '—')}</td>
       <td><span class="badge ${STATUS_BADGE[r.status] || 'grey'}">${esc(r.status)}</span></td>
       <td class="num">${esc(String(r.credits ?? 1))}</td>
-      <td class="muted" style="font-size:12px;max-width:260px">${esc(r.provider_response || (r.status === 'queued' ? 'Waiting to send…' : '—'))}</td>
+      <td style="font-size:12.5px;max-width:260px${r.status === 'failed' ? ';color:var(--danger);font-weight:600' : ''}" class="${r.status === 'failed' ? '' : 'muted'}">${esc(r.provider_response || (r.status === 'queued' ? 'Waiting to send…' : '—'))}</td>
       <td>${r.status === 'failed' ? `<button class="btn ghost sm" data-resend="${esc(r.id)}">Resend</button>` : ''}</td>
     </tr>`;
 
@@ -402,7 +406,7 @@ function openBatchDetail(batch, body, data) {
         <div><span class="muted">Credits used</span><b>${batch.credits}</b></div>
       </div>
       ${batch.counts.failed ? `<div style="text-align:right;margin-bottom:10px"><button class="btn sm" id="mh-resend-all">Resend all failed (${batch.counts.failed})</button></div>` : ''}
-      <div class="table-wrap"><table class="data">
+      <div class="table-wrap"><table class="data compact">
         <thead><tr><th>Phone</th><th>Status</th><th class="num">Credits</th><th>Delivery info</th><th></th></tr></thead>
         <tbody>${batch.recipients.map(rowHtml).join('')}</tbody>
       </table></div>

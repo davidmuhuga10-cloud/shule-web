@@ -313,7 +313,12 @@ function mockAdmin(opts) {
     const res = await sendMessage(admin, { scope: 'individual_staff', staff_id: 'st1', body: 'Staff meeting at 4pm' }, { school_id: SCHOOL_A }, recordingTrigger);
     await deliverBatch(admin, res.batch_id);
     check('deliverBatch marks a successfully-sent row "sent"', admin._tables.message_logs[0].status === 'sent');
-    check('deliverBatch records the provider\'s own message id', admin._tables.message_logs[0].provider_response.indexOf('AT-msg-1') !== -1);
+    // SMS History (Messaging_Overhaul.docx item 8) shows provider_response
+    // straight to an admin/teacher — it must read as plain English, never
+    // a provider message id or raw JSON (see smsProvider.js's
+    // friendlyDeliveryText).
+    check('deliverBatch stores a plain-English delivery message, not a provider id', admin._tables.message_logs[0].provider_response === 'Delivered successfully.');
+    check('deliverBatch never leaks the provider\'s internal message id into what a person sees', admin._tables.message_logs[0].provider_response.indexOf('AT-msg-1') === -1);
   }
   {
     // A provider that reports failure for the recipient (bad number, AT-side
@@ -353,13 +358,22 @@ function mockAdmin(opts) {
       fetchCalls++;
       const form = new URLSearchParams(init.body);
       const numbers = form.get('to').split(',');
-      return { json: async () => ({ SMSMessageData: { Recipients: numbers.map((n) => ({ number: n, status: 'Success', messageId: 'AT-' + n })) } }), status: 200 };
+      // Give the two groups DIFFERENT outcomes (rather than both 'Success')
+      // so a mixed-up match between Amos's and Jane's rows would actually
+      // show up as a wrong result, not just a coincidentally-right one.
+      return { json: async () => ({ SMSMessageData: { Recipients: numbers.map((n) => ({ number: n, status: n.endsWith('01') ? 'Success' : 'InvalidPhoneNumber', messageId: 'AT-' + n })) } }), status: 200 };
     };
     await deliverBatch(admin, res.batch_id);
     check('deliverBatch makes one Africa\'s Talking call PER DISTINCT personalized body', fetchCalls === 2);
-    check('deliverBatch marks every personalized row "sent" once each is dispatched in its own group', admin._tables.message_logs.every((r) => r.status === 'sent'));
     const amosRow = admin._tables.message_logs.find((r) => r.student_id === 's1');
-    check('each row is matched back to ITS OWN provider message id, not a mixed-up one', amosRow.provider_response.indexOf('+254700000001') !== -1);
+    const janeRow = admin._tables.message_logs.find((r) => r.student_id === 's2');
+    check('deliverBatch marks Amos\'s row "sent" via its own group\'s result', amosRow.status === 'sent');
+    check('deliverBatch marks Jane\'s row "failed" via its own group\'s result, not mixed up with Amos\'s', janeRow.status === 'failed');
+    // SMS History (Messaging_Overhaul.docx item 8) shows provider_response
+    // straight to a non-technical admin/teacher — plain English, never a
+    // provider message id — and this also proves per-row matching stayed
+    // correct across the two separate Africa's Talking calls.
+    check('each row is matched back to ITS OWN plain-English result, not a mixed-up one', amosRow.provider_response === 'Delivered successfully.' && janeRow.provider_response === 'This phone number is invalid.');
     check('sendMessage still reported ok:true up front (it queued the attempt)', res.ok === true);
   }
   {
