@@ -4408,6 +4408,40 @@ create table public.sms_credit_ledger (
 );
 create index idx_sms_credit_ledger_school on public.sms_credit_ledger(school_id);
 
+-- Atomic wallet debit for an actual send (see
+-- netlify/functions/_lib/smsProvider.js + migrations/0041_sms_wallet_debit_rpc.sql
+-- for the full rationale) — a single conditional UPDATE so two simultaneous
+-- sends for the same school can never both succeed off the same balance.
+create or replace function public.debit_sms_wallet(p_school_id uuid, p_credits integer)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_balance integer;
+begin
+  if p_school_id is null then
+    raise exception 'Missing school.';
+  end if;
+  if p_credits is null or p_credits <= 0 then
+    raise exception 'Invalid credit amount.';
+  end if;
+
+  update public.sms_wallets
+    set balance = balance - p_credits, updated_at = now()
+    where school_id = p_school_id and balance >= p_credits
+    returning balance into v_balance;
+
+  if v_balance is null then
+    raise exception 'Not enough SMS credit — top up before sending.';
+  end if;
+
+  return v_balance;
+end;
+$$;
+grant execute on function public.debit_sms_wallet(uuid, integer) to authenticated, service_role;
+
 -- A school's own admin/teacher may submit a request and see their own
 -- wallet/requests — ordinary RLS, scoped by current_school_id() same as
 -- every other table. The Super Admin reaches ALL schools' rows only through

@@ -49,6 +49,14 @@ function mockAdmin(opts) {
   return {
     _tables: tables,
     from(table) { return builderFor(table); },
+    // Stands in for the debit_sms_wallet() RPC (0041_sms_wallet_debit_rpc.sql)
+    // send-message.js calls once a provider is configured — a test that
+    // wants to exercise "not enough credit" passes opts.forceDebitError.
+    async rpc(name, args) {
+      if (name !== 'debit_sms_wallet') return { data: null, error: { message: `No mock handler for rpc ${name}` } };
+      if (opts.forceDebitError) return { data: null, error: { message: opts.forceDebitError } };
+      return { data: 0, error: null };
+    },
     auth: {
       async getUser(token) {
         const user = authUsers[token];
@@ -160,17 +168,54 @@ function mockAdmin(opts) {
     const res = await sendMessage(admin, { scope: 'broadcast', body: 'x'.repeat(1001) }, { school_id: SCHOOL_A });
     check('sendMessage rejects a body over 1000 characters', res.ok === false);
   }
+  // ---- sendMessage: a real provider configured (Sender ID now live) ---------
+  // smsProvider.js's sendSms() calls the global fetch — stubbed here so the
+  // test never makes a real network call, same spirit as mockAdmin standing
+  // in for supabase-js.
+  const realFetch = global.fetch;
+  function stubFetch(atResponse) {
+    global.fetch = async () => ({ json: async () => atResponse, status: 200 });
+  }
   {
-    // Simulates a provider being configured via env var.
     const admin = mockAdmin({
       tables: { staff: [{ id: 'st1', full_name: 'Mr T', school_id: SCHOOL_A, phone: '0711111111' }] }
     });
     process.env.SMS_PROVIDER_API_KEY = 'test-key';
+    process.env.SMS_PROVIDER_USERNAME = 'test-user';
+    stubFetch({ SMSMessageData: { Recipients: [{ status: 'Success', messageId: 'AT-msg-1' }] } });
     const res = await sendMessage(admin, { scope: 'individual_staff', staff_id: 'st1', body: 'Staff meeting at 4pm' }, { school_id: SCHOOL_A });
-    delete process.env.SMS_PROVIDER_API_KEY;
-    check('sendMessage marks rows "queued" once a provider is configured', admin._tables.message_logs[0].status === 'queued');
+    check('sendMessage marks a successfully-sent row "sent" once a provider is configured', admin._tables.message_logs[0].status === 'sent');
+    check('sendMessage records the provider\'s own message id', admin._tables.message_logs[0].provider_response.indexOf('AT-msg-1') !== -1);
     check('sendMessage reports delivered=true once a provider is configured', res.delivered === true);
   }
+  {
+    // A provider that reports failure for the recipient (bad number, AT-side
+    // rejection, etc.) — the row is marked "failed", not silently dropped,
+    // and the send as a whole still reports ok (it was attempted).
+    const admin = mockAdmin({
+      tables: { staff: [{ id: 'st1', full_name: 'Mr T', school_id: SCHOOL_A, phone: '0711111111' }] }
+    });
+    stubFetch({ SMSMessageData: { Recipients: [{ status: 'InvalidPhoneNumber' }] } });
+    const res = await sendMessage(admin, { scope: 'individual_staff', staff_id: 'st1', body: 'Hi' }, { school_id: SCHOOL_A });
+    check('sendMessage marks a provider-rejected row "failed"', admin._tables.message_logs[0].status === 'failed');
+    check('sendMessage still reports ok:true (it logged the attempt)', res.ok === true);
+    check('sendMessage\'s summary message says how many of the batch actually sent', /Sent 0 of 1/.test(res.message));
+  }
+  {
+    // Not enough SMS credit: debit_sms_wallet() raises, and NO messages
+    // should be sent or logged at all — the whole batch stops up front.
+    const admin = mockAdmin({
+      forceDebitError: 'Not enough SMS credit — top up before sending.',
+      tables: { staff: [{ id: 'st1', full_name: 'Mr T', school_id: SCHOOL_A, phone: '0711111111' }] }
+    });
+    stubFetch({ SMSMessageData: { Recipients: [{ status: 'Success', messageId: 'should-not-be-used' }] } });
+    const res = await sendMessage(admin, { scope: 'individual_staff', staff_id: 'st1', body: 'Hi' }, { school_id: SCHOOL_A });
+    check('sendMessage refuses the whole batch when the wallet has insufficient credit', res.ok === false);
+    check('sendMessage never logs a message when the debit is refused', admin._tables.message_logs.length === 0);
+  }
+  global.fetch = realFetch;
+  delete process.env.SMS_PROVIDER_API_KEY;
+  delete process.env.SMS_PROVIDER_USERNAME;
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

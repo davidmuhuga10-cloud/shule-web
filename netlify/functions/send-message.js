@@ -2,15 +2,16 @@
  * send-message.js
  * ----------------------------------------------------------------------------
  * Fans a "send to a class / a student's guardian / a staff member / everyone"
- * request out into one message_logs row per actual recipient, and — if (and
- * only if) a real SMS provider is configured via environment variables —
- * would hand each one off to that provider. No provider is configured yet
- * (see PRODUCT_ROADMAP.md's Phase 1 notes: this is deliberately staged so
- * the whole compose/recipient/history workflow is real and usable today,
- * without pretending messages are being delivered when there's no SMS
- * account behind it yet). Every send is still fully logged either way, so
- * flipping on a real provider later is a matter of implementing
- * sendViaProvider() below and setting one env var — no frontend changes.
+ * request out into one message_logs row per actual recipient, and — now that
+ * a Sender ID is live on the connected Africa's Talking account (see
+ * netlify/functions/_lib/smsProvider.js) — actually hands each one to that
+ * provider, charging the school's own sms_wallets balance for what it costs
+ * (1 credit per 160-character segment, per recipient) via the
+ * debit_sms_wallet() RPC (migrations/0041_sms_wallet_debit_rpc.sql) BEFORE
+ * sending, so an under-funded school gets a clear "top up first" instead of
+ * a partially-sent batch. If SMS_PROVIDER_API_KEY/USERNAME aren't set (e.g.
+ * a dev environment), sends fall back to the original "logged only, not
+ * sent" behavior — no wallet is touched in that case either.
  *
  * Uses requireStaff (admin OR teacher), not requireAdmin — messaging is a
  * day-to-day teacher action, not an admin-only one, matching Zeraki.
@@ -18,6 +19,7 @@
  */
 const crypto = require('crypto');
 const { getAdminClient, requireStaff } = require('./_lib/supabaseAdmin');
+const { isProviderConfigured, sendSms, smsUnits } = require('./_lib/smsProvider');
 
 function json(statusCode, body) {
   return { statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
@@ -97,12 +99,6 @@ async function resolveRecipients(admin, schoolId, payload) {
   return { error: 'Unknown recipient scope: ' + scope };
 }
 
-/** The one seam a real SMS provider (e.g. Africa's Talking) plugs into
- *  later. Deliberately not implemented yet — see the file header. */
-function isProviderConfigured() {
-  return !!process.env.SMS_PROVIDER_API_KEY;
-}
-
 async function sendMessage(admin, payload, callerProfile) {
   const body = String(payload.body || '').trim();
   if (!body) return { ok: false, message: 'Message cannot be empty.' };
@@ -114,32 +110,55 @@ async function sendMessage(admin, payload, callerProfile) {
 
   const providerConfigured = isProviderConfigured();
   const batchId = crypto.randomUUID();
+  const unitsPerRecipient = smsUnits(body);
 
-  const rows = recipients.map((r) => ({
-    school_id: schoolId,
-    batch_id: batchId,
-    sent_by: callerProfile.staff_id || null,
-    recipient_scope: payload.scope,
-    scope_label: scopeLabel,
-    student_id: r.student_id || null,
-    staff_id: r.staff_id || null,
-    phone: r.phone,
-    body,
-    channel: 'sms',
-    status: providerConfigured ? 'queued' : 'logged',
-    provider_response: providerConfigured ? null : 'No SMS provider is connected yet — this message was recorded but not actually sent.'
-  }));
+  // Charge BEFORE sending, not after — an insufficient wallet should stop
+  // the whole batch up front (a clear "top up first") rather than sending
+  // some recipients and silently dropping the rest partway through.
+  if (providerConfigured) {
+    const totalCredits = unitsPerRecipient * recipients.length;
+    const { error: debitErr } = await admin.rpc('debit_sms_wallet', { p_school_id: schoolId, p_credits: totalCredits });
+    if (debitErr) return { ok: false, message: debitErr.message };
+  }
+
+  const rows = [];
+  for (const r of recipients) {
+    let status = 'logged';
+    let providerResponse = 'No SMS provider is connected yet — this message was recorded but not actually sent.';
+    let providerMessageId = null;
+    if (providerConfigured) {
+      const result = await sendSms(r.phone, body);
+      status = result.status; // 'sent' | 'failed'
+      providerResponse = result.raw;
+      providerMessageId = result.messageId;
+    }
+    rows.push({
+      school_id: schoolId,
+      batch_id: batchId,
+      sent_by: callerProfile.staff_id || null,
+      recipient_scope: payload.scope,
+      scope_label: scopeLabel,
+      student_id: r.student_id || null,
+      staff_id: r.staff_id || null,
+      phone: r.phone,
+      body,
+      channel: 'sms',
+      status,
+      provider_response: providerConfigured ? `${providerResponse}${providerMessageId ? ` (id: ${providerMessageId})` : ''}` : providerResponse
+    });
+  }
 
   const { error: insertErr } = await admin.from('message_logs').insert(rows);
   if (insertErr) return { ok: false, message: 'Could not save the message log: ' + insertErr.message };
 
+  const sentCount = rows.filter((r) => r.status === 'sent').length;
   return {
     ok: true,
     batch_id: batchId,
     recipients: rows.length,
     delivered: providerConfigured,
     message: providerConfigured
-      ? undefined
+      ? (sentCount < rows.length ? `Sent ${sentCount} of ${rows.length} — see SMS history for which failed.` : undefined)
       : `Logged for ${rows.length} recipient(s), but not actually sent — no SMS provider is connected yet.`
   };
 }
