@@ -1074,6 +1074,84 @@ create policy exam_classes_admin_update on public.exam_classes for update
   using (public.is_admin() and school_id = public.current_school_id())
   with check (public.is_admin() and school_id = public.current_school_id());
 
+-- 0040_consolidated_exams.sql — "Consolidated Exam" (combine 2+ existing
+-- exams, e.g. Opener/Midterm/Endterm, into one weighted-average result). No
+-- new marks-entry path or RPC: an admin names this exam's component exams
+-- here, and recomputeConsolidated() (src/lib/api/results.mjs) averages each
+-- student's per-subject score across them and writes it into THIS exam's
+-- own `results` rows via the existing save_results_batch() RPC — so Review
+-- & Publish, report cards, broadsheets and exam analysis all work exactly
+-- as they already do, with zero changes, once those rows exist.
+create table public.exam_components (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  exam_id uuid not null references public.exams(id) on delete cascade,           -- the consolidated exam
+  component_exam_id uuid not null references public.exams(id) on delete cascade, -- one exam being folded into it
+  weight numeric not null default 1,
+  created_at timestamptz not null default now(),
+  unique (exam_id, component_exam_id),
+  check (exam_id <> component_exam_id),
+  check (weight > 0)
+);
+create index idx_exam_components_exam on public.exam_components(exam_id);
+create index idx_exam_components_component on public.exam_components(component_exam_id);
+create index idx_exam_components_school on public.exam_components(school_id);
+
+-- Guard rail: the exam being attached to must actually be a consolidated
+-- exam, and a component must be a real, non-consolidated exam in the same
+-- school — disallowing nesting keeps recomputeConsolidated()'s weighted
+-- average unambiguous (no tree of consolidations to flatten).
+create or replace function public.check_exam_component()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_component_type text;
+  v_component_school uuid;
+  v_exam_type text;
+  v_exam_school uuid;
+begin
+  select exam_type, school_id into v_exam_type, v_exam_school from public.exams where id = new.exam_id;
+  if v_exam_type is null then
+    raise exception 'Exam not found.';
+  end if;
+  if v_exam_type is distinct from 'consolidated' then
+    raise exception 'Only a Consolidated Exam can have component exams.';
+  end if;
+
+  select exam_type, school_id into v_component_type, v_component_school from public.exams where id = new.component_exam_id;
+  if v_component_type is null then
+    raise exception 'Component exam not found.';
+  end if;
+  if v_component_type = 'consolidated' then
+    raise exception 'A consolidated exam cannot combine another consolidated exam.';
+  end if;
+  if v_component_school is distinct from v_exam_school then
+    raise exception 'Component exam must belong to the same school.';
+  end if;
+  if new.school_id is distinct from v_exam_school then
+    raise exception 'Component exam must belong to the same school.';
+  end if;
+
+  return new;
+end;
+$$;
+create trigger trg_check_exam_component before insert or update on public.exam_components
+  for each row execute function public.check_exam_component();
+
+alter table public.exam_components enable row level security;
+create policy exam_components_read on public.exam_components for select
+  using (school_id = public.current_school_id());
+create policy exam_components_admin_write on public.exam_components for insert
+  with check (public.is_admin() and school_id = public.current_school_id());
+create policy exam_components_admin_delete on public.exam_components for delete
+  using (public.is_admin() and school_id = public.current_school_id());
+create policy exam_components_admin_update on public.exam_components for update
+  using (public.is_admin() and school_id = public.current_school_id())
+  with check (public.is_admin() and school_id = public.current_school_id());
+
 -- results: staff (admin+teacher) can enter/edit and always read everything
 -- in their own school (published or not — they need to review before
 -- publishing); a student can read only their OWN rows, and only once the

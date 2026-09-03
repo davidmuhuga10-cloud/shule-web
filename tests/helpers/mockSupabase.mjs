@@ -20,7 +20,12 @@ const EMBEDS = [
   { needle: 'staff(', table: 'staff', fk: 'staff_id', as: 'staff' },
   { needle: 'students(', table: 'students', fk: 'student_id', as: 'students' },
   { needle: 'streams(', table: 'streams', fk: 'stream_id', as: 'streams' },
-  { needle: 'rooms(', table: 'rooms', fk: 'room_id', as: 'rooms' }
+  { needle: 'rooms(', table: 'rooms', fk: 'room_id', as: 'rooms' },
+  // exam_components' component_exam_id -> exams embed (results.mjs's
+  // getExamComponents), aliased as `exams` since the FK column isn't named
+  // exam_id here (that column means something else on this table — the
+  // CONSOLIDATED exam, not the component).
+  { needle: 'component_exam_id(', table: 'exams', fk: 'component_exam_id', as: 'exams' }
 ];
 
 export function createMockSupabase(initialTables) {

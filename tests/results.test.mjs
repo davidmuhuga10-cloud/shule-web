@@ -948,6 +948,74 @@ async function run() {
     check('a recently-deleted exam survives the purge sweep', sb._tables.exams.some((e) => e.id === exam2.id));
   }
 
+  // ---- Consolidated Exam: combine 2+ exams into one weighted average -----------
+  {
+    const { sb, results } = freshApis();
+    const opener = (await results.saveExam({ name: 'Opener', academic_year_id: 'y1', term_id: 't1', out_of: 50, class_ids: ['c1'] })).data;
+    const midterm = (await results.saveExam({ name: 'Midterm', academic_year_id: 'y1', term_id: 't1', out_of: 100, class_ids: ['c1'] })).data;
+    const consolidated = (await results.saveExam({ name: 'Term 1 Consolidated', academic_year_id: 'y1', term_id: 't1', out_of: 100, exam_type: 'consolidated', class_ids: ['c1'] })).data;
+    check('a consolidated exam saves with exam_type consolidated', consolidated.exam_type === 'consolidated');
+
+    const candidates = await results.listConsolidatableExams(consolidated.id);
+    check('listConsolidatableExams excludes the consolidated exam itself', !candidates.data.some((e) => e.id === consolidated.id));
+    check('listConsolidatableExams offers the two normal exams', candidates.data.length === 2 && candidates.data.some((e) => e.id === opener.id) && candidates.data.some((e) => e.id === midterm.id));
+
+    check('saveExamComponents requires at least 2 components', (await results.saveExamComponents(consolidated.id, [{ exam_id: opener.id, weight: 1 }])).ok === false);
+
+    const saveComp = await results.saveExamComponents(consolidated.id, [{ exam_id: opener.id, weight: 1 }, { exam_id: midterm.id, weight: 2 }]);
+    check('saveExamComponents succeeds with 2 components', saveComp.ok === true);
+    check('saveExamComponents actually wrote the rows', sb._tables.exam_components.filter((r) => r.exam_id === consolidated.id).length === 2);
+
+    const comps = await results.getExamComponents(consolidated.id);
+    check('getExamComponents returns both with their weight and name', comps.data.length === 2 && comps.data.some((c) => c.component_exam_id === midterm.id && c.weight === 2));
+
+    // Re-saving the set (Opener weight changed, Midterm dropped, English... er
+    // a third exam added) must be a full replace: update the kept one's
+    // weight in place, remove what's no longer wanted, insert what's new —
+    // this specifically exercises the .update() path that needs the RLS
+    // update policy this session added to the migration.
+    const endterm = (await results.saveExam({ name: 'Endterm', academic_year_id: 'y1', term_id: 't1', out_of: 100, class_ids: ['c1'] })).data;
+    const resave = await results.saveExamComponents(consolidated.id, [{ exam_id: opener.id, weight: 3 }, { exam_id: endterm.id, weight: 1 }]);
+    check('saveExamComponents re-save succeeds', resave.ok === true);
+    const compsAfter = await results.getExamComponents(consolidated.id);
+    check('re-save drops the removed component (Midterm)', !compsAfter.data.some((c) => c.component_exam_id === midterm.id));
+    check('re-save keeps + updates the weight of the retained component (Opener)', compsAfter.data.find((c) => c.component_exam_id === opener.id).weight === 3);
+    check('re-save adds the new component (Endterm)', compsAfter.data.some((c) => c.component_exam_id === endterm.id));
+
+    // recomputeConsolidated needs real per-exam marks to average — restore a
+    // simple 2-component set (Opener out of 50, Endterm out of 100) so the
+    // fraction math is easy to hand-check: Jane gets 40/50 (0.8) on Opener
+    // and 90/100 (0.9) on Endterm, equally weighted -> 0.85 -> 85/100 on the
+    // consolidated exam. Amos only has an Endterm score (Opener absent for
+    // him) -> his consolidated score is just Endterm's fraction, 60/100.
+    await results.saveExamComponents(consolidated.id, [{ exam_id: opener.id, weight: 1 }, { exam_id: endterm.id, weight: 1 }]);
+    await results.saveResultsEntry({ exam_id: opener.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '40' }] });
+    await results.saveResultsEntry({ exam_id: endterm.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '90' }, { student_id: 's2', score: '60' }] });
+
+    check('recomputeConsolidated rejects a non-consolidated exam', (await results.recomputeConsolidated(opener.id, 'c1')).ok === false);
+
+    const recompute = await results.recomputeConsolidated(consolidated.id, 'c1');
+    check('recomputeConsolidated succeeds', recompute.ok === true && recompute.subjects === 1);
+
+    const consolidatedEntry = await results.getResultsEntry({ exam_id: consolidated.id, class_id: 'c1', subject_id: 'su1' });
+    const janeRow = consolidatedEntry.data.find((r) => r.student_id === 's1');
+    const amosRow = consolidatedEntry.data.find((r) => r.student_id === 's2');
+    check('a student scored in both components gets the correctly weighted average (0.8 & 0.9 equally weighted -> 85)', janeRow.score === 85);
+    check('a student missing one component is averaged only across the component(s) they have (Endterm-only -> 60)', amosRow.score === 60);
+
+    // Idempotent: running it again after a correction overwrites rather
+    // than accumulating/duplicating rows.
+    await results.saveResultsEntry({ exam_id: endterm.id, class_id: 'c1', subject_id: 'su1', scores: [{ student_id: 's1', score: '80' }] });
+    await results.recomputeConsolidated(consolidated.id, 'c1');
+    const afterRerun = await results.getResultsEntry({ exam_id: consolidated.id, class_id: 'c1', subject_id: 'su1' });
+    check('recompute overwrites (not duplicates) on a second run', afterRerun.data.filter((r) => r.student_id === 's1').length === 1);
+    check('recompute reflects the corrected component score (0.8 & 0.8 -> 80)', afterRerun.data.find((r) => r.student_id === 's1').score === 80);
+
+    // The DB-level no-nesting guard (0040_consolidated_exams.sql's
+    // check_exam_component trigger) is Postgres-only and can't run against
+    // the mock client — it's covered by manual SQL review, not this suite.
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }
