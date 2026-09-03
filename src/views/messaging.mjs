@@ -21,7 +21,7 @@
  * SMS-segment counting (160 chars/segment, the auto-added school-name
  * header counted in) instead of a flat 1000-character cap.
  */
-import { esc, options, toast, renderPrereq, renderPrereqOrConnectivity, loader, fmtDate, modal, closeModal, withBusy, state } from '../app.js';
+import { esc, options, toast, renderPrereq, renderPrereqOrConnectivity, loader, fmtDate, modal, closeModal, withBusy, state, confirmAction } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { groupMessagesByBatch } from '../lib/api/messaging.mjs';
 import { takeNavIntent } from '../lib/navIntent.mjs';
@@ -221,31 +221,68 @@ function renderCompose(body, data, sel, root) {
   textEl.oninput = updateCount;
   updateCount();
 
-  body.querySelector('#msg-send').onclick = async () => {
-    const btn = body.querySelector('#msg-send');
-    btn.disabled = true; btn.textContent = 'Sending…';
-    const payload = { scope: sel.scope, body: textEl.value, class_id: sel.class_id, student_id: sel.student_id, staff_id: sel.staff_id };
-    const r = await Db.messaging.send(payload);
-
-    let ccResult = null;
-    if (r.ok && sel.ccEnabled && sel.ccStaffIds.length) {
-      const ccRecipients = sel.ccStaffIds
-        .map((id) => staff.find((s) => s.id === id))
-        .filter((s) => s && s.phone)
-        .map((s) => ({ staff_id: s.id, phone: s.phone, body: textEl.value }));
-      if (ccRecipients.length) {
-        ccResult = await Db.messaging.send({ scope: 'personalized', scope_label: 'Copy of a message', recipients: ccRecipients });
-      }
+  // A misclick sends real SMS at real cost — 14 sent by mistake was the
+  // report that prompted this. "Send message" now only OPENS a confirm
+  // dialog naming exactly who's about to get it; the actual send only
+  // happens once that's explicitly accepted.
+  function describeSendTarget() {
+    if (sel.scope === 'broadcast') {
+      const count = students.filter((s) => s.guardian_contact).length;
+      return `all ${count} guardian(s) with a phone number on file`;
     }
+    if (sel.scope === 'class') {
+      const cls = classes.find((c) => c.id === sel.class_id);
+      if (!cls) { toast('Choose a class first.', 'err'); return null; }
+      const count = students.filter((s) => s.class_id === sel.class_id && s.guardian_contact).length;
+      return `${count} guardian(s) in ${cls.name}`;
+    }
+    if (sel.scope === 'individual_student') {
+      const s = students.find((x) => x.id === sel.student_id);
+      if (!s) { toast('Choose a student first.', 'err'); return null; }
+      if (!s.guardian_contact) { toast(`${s.full_name} has no guardian contact on file.`, 'err'); return null; }
+      return `${s.full_name}'s guardian`;
+    }
+    if (sel.scope === 'individual_staff') {
+      const s = staff.find((x) => x.id === sel.staff_id);
+      if (!s) { toast('Choose a staff member first.', 'err'); return null; }
+      if (!s.phone) { toast(`${s.full_name} has no phone on file.`, 'err'); return null; }
+      return s.full_name;
+    }
+    return null;
+  }
 
-    btn.disabled = false; btn.textContent = 'Send message';
-    if (!r.ok) { toast(r.message, 'err'); return; }
-    let msg = r.message || `Sent to ${r.recipients} recipient(s).`;
-    if (ccResult) msg += ccResult.ok ? ` Copy sent to ${sel.ccStaffIds.length} staff.` : ` (Copy failed: ${ccResult.message})`;
-    toast(msg, r.delivered ? 'ok' : 'warn');
-    sel.body = ''; textEl.value = ''; updateCount();
-    sel.ccEnabled = false; sel.ccStaffIds = [];
-    renderCompose(body, data, sel, root);
+  body.querySelector('#msg-send').onclick = () => {
+    const bodyText = textEl.value.trim();
+    if (!bodyText) { toast('Message cannot be empty.', 'err'); return; }
+    const who = describeSendTarget();
+    if (!who) return; // describeSendTarget already toasted why
+    const { segments } = smsCount(bodyText);
+    const ccNote = (sel.ccEnabled && sel.ccStaffIds.length) ? ` A copy also goes to ${sel.ccStaffIds.length} staff member(s).` : '';
+    confirmAction(
+      `Send this message (${segments} SMS segment${segments > 1 ? 's' : ''} each) to ${who}?${ccNote}`,
+      async () => {
+        const payload = { scope: sel.scope, body: bodyText, class_id: sel.class_id, student_id: sel.student_id, staff_id: sel.staff_id };
+        const r = await Db.messaging.send(payload);
+
+        let ccResult = null;
+        if (r.ok && sel.ccEnabled && sel.ccStaffIds.length) {
+          const ccRecipients = sel.ccStaffIds
+            .map((id) => staff.find((s) => s.id === id))
+            .filter((s) => s && s.phone)
+            .map((s) => ({ staff_id: s.id, phone: s.phone, body: bodyText }));
+          if (ccRecipients.length) {
+            ccResult = await Db.messaging.send({ scope: 'personalized', scope_label: 'Copy of a message', recipients: ccRecipients });
+          }
+        }
+
+        if (!r.ok) { toast(r.message, 'err'); return; }
+        let msg = r.message || `Sent to ${r.recipients} recipient(s).`;
+        if (ccResult) msg += ccResult.ok ? ` Copy sent to ${sel.ccStaffIds.length} staff.` : ` (Copy failed: ${ccResult.message})`;
+        toast(msg, r.delivered ? 'ok' : 'warn');
+        sel.body = ''; sel.ccEnabled = false; sel.ccStaffIds = [];
+        renderCompose(body, data, sel, root);
+      }
+    );
   };
 }
 
@@ -396,25 +433,25 @@ function renderResultsSendCard(el, data, sel, root, body) {
     `;
     countEl.textContent = `${withPhone.length} of ${rows.length} ${sel.resultsMode === 'student' ? 'student' : 'students'} with a guardian number on file will be sent.`;
 
-    el.querySelector('#msg-results-send').onclick = async () => {
-      const btn = el.querySelector('#msg-results-send');
-      btn.disabled = true; btn.textContent = 'Processing…';
-      const recipients = withPhone.map((r) => {
-        const s = data.students.find((x) => x.id === r.student_id);
-        return { student_id: r.student_id, phone: s.guardian_contact, body: buildResultsMessage(bs, r, examLabel, cls.name, sel.customNote) };
+    el.querySelector('#msg-results-send').onclick = () => {
+      const who = sel.resultsMode === 'student' ? previewRow.full_name + "'s guardian" : `${withPhone.length} guardian(s) in ${cls.name}`;
+      confirmAction(`Send exam results to ${who}?`, async () => {
+        const recipients = withPhone.map((r) => {
+          const s = data.students.find((x) => x.id === r.student_id);
+          return { student_id: r.student_id, phone: s.guardian_contact, body: buildResultsMessage(bs, r, examLabel, cls.name, sel.customNote) };
+        });
+        const res = await Db.messaging.send({
+          scope: 'personalized',
+          scope_label: `${exam.name} Results — ${cls.name}`,
+          recipients
+        });
+        if (!res.ok) { toast(res.message, 'err'); return; }
+        const skipped = rows.length - withPhone.length;
+        el.querySelector('#msg-results-processed').innerHTML = `
+          <div class="card-b processed-toast"><span class="ico">✓</span>
+            Processed — ${withPhone.length} of ${rows.length} queued for sending${skipped ? ` (${skipped} have no guardian number on file)` : ''}. Check SMS History for delivery.
+          </div>`;
       });
-      const res = await Db.messaging.send({
-        scope: 'personalized',
-        scope_label: `${exam.name} Results — ${cls.name}`,
-        recipients
-      });
-      btn.disabled = false; btn.textContent = 'Send results';
-      if (!res.ok) { toast(res.message, 'err'); return; }
-      const skipped = rows.length - withPhone.length;
-      el.querySelector('#msg-results-processed').innerHTML = `
-        <div class="card-b processed-toast"><span class="ico">✓</span>
-          Processed — ${withPhone.length} of ${rows.length} queued for sending${skipped ? ` (${skipped} have no guardian number on file)` : ''}. Check SMS History for delivery.
-        </div>`;
     };
   }).catch((e) => {
     // A network hiccup, or a genuine bug in the block above, used to leave
