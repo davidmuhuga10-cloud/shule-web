@@ -4869,6 +4869,25 @@ grant execute on function public.admin_record_impersonation_start(uuid, uuid) to
 grant execute on function public.admin_record_impersonation_end(uuid) to authenticated;
 
 -- ---------------------------------------------------------------------------
+-- 5. Phone OTP verification (signup + password reset) — see
+--    migrations/0042_phone_otps.sql for the full rationale. Server-only
+--    table: touched exclusively by send-otp.js/verify-otp.js via the
+--    service_role key, so RLS is enabled with zero policies (deny-all).
+-- ---------------------------------------------------------------------------
+create table public.phone_otps (
+  id uuid primary key default gen_random_uuid(),
+  phone text not null,
+  purpose text not null check (purpose in ('signup', 'password_reset')),
+  code_hash text not null,
+  expires_at timestamptz not null,
+  attempts integer not null default 0,
+  consumed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index idx_phone_otps_lookup on public.phone_otps(phone, purpose, created_at desc);
+alter table public.phone_otps enable row level security;
+
+-- ---------------------------------------------------------------------------
 -- 6. Bootstrap the one designated Super Admin account
 --    (kinyuadavid2003@gmail.com — created here if it doesn't already exist
 --    as an auth user; password intentionally NOT set by SQL — Supabase Auth

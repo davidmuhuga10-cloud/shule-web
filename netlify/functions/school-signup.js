@@ -26,6 +26,12 @@
  *     orphaned half-created tenant behind
  *   - passwords go through the same minimum-length rule Supabase itself
  *     enforces, checked here first so the error message is clear
+ *   - the admin's phone number must have gone through send-otp.js/
+ *     verify-otp.js first — this endpoint checks the resulting
+ *     otp_verified_token against adminPhone + purpose 'signup' itself
+ *     (never just trusts the frontend to have done the check), closing the
+ *     "anyone's phone number creates an admin account" gap this used to
+ *     have no verification against at all
  *
  * This endpoint is intentionally simple for this phase — no CAPTCHA/rate
  * limiting yet (see PRODUCT_ROADMAP.md Phase 0 notes). Netlify Functions
@@ -39,6 +45,7 @@
 const { getAdminClient } = require('./_lib/supabaseAdmin');
 const { staffUsernameFor, staffEmailFor } = require('./_lib/studentLogin');
 const { isValidPhone } = require('../../src/lib/phone.shared.js');
+const { verifyToken } = require('./_lib/otp');
 
 function json(statusCode, body) {
   return { statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
@@ -102,6 +109,16 @@ async function createSchoolAndAdmin(admin, payload) {
   // frontend validation still gets a clear, real error here).
   if (!adminPhone) return { ok: false, message: 'Enter your (the admin\'s) phone number.' };
   if (!isValidPhone(adminPhone)) return { ok: false, message: 'Enter a correct phone number, e.g. 0712345678.' };
+  // Account security hardening: a signup no longer completes on a bare
+  // phone number claim — the caller must first have gone through
+  // send-otp.js/verify-otp.js for THIS exact phone number and purpose
+  // 'signup', and present the short-lived token that proves it. Verified
+  // here (not just trusted from the frontend) since this is a public,
+  // unauthenticated endpoint — anyone could otherwise skip straight past
+  // the OTP screen with a raw request.
+  if (!verifyToken(payload.otp_verified_token, adminPhone, 'signup')) {
+    return { ok: false, message: 'Please verify your phone number first (the code may have expired — request a new one).' };
+  }
   if (password.length < 6) return { ok: false, message: 'Password must be at least 6 characters.' };
   if (!code || code.length < 3) return { ok: false, message: 'School Code must be at least 3 characters (letters, numbers, hyphens only).' };
 
