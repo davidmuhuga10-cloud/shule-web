@@ -412,7 +412,14 @@ function renderResultsSendCard(el, data, sel, root, body) {
     const previewBox = el.querySelector('#msg-results-preview-box');
     const countEl = el.querySelector('#msg-results-count');
     if (!bsRes.ok) { previewBox.innerHTML = `⚠️ ${esc(bsRes.message)}`; return; }
-    const bs = bsRes.data;
+    // getBroadsheet() returns ok(null, {students, subjects, exam, ...}) —
+    // its payload sits on the result object itself (see broadsheet.mjs,
+    // reportForms.mjs etc., which all read res.students directly), NOT
+    // under a `.data` key. Reading `bsRes.data` here always got `null`,
+    // which is the real, previously-hidden cause of the exam-results send
+    // crashing for every exam/class in production — not anything to do
+    // with malformed subject data.
+    const bs = bsRes;
     let rows = bs.students.filter((r) => r.counted > 0);
     if (sel.resultsMode === 'student') rows = rows.filter((r) => r.student_id === sel.resultsStudentId);
     const withPhone = rows.filter((r) => {
