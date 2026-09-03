@@ -740,6 +740,17 @@ export function createResultsApi(supabase, gradingApi) {
       q = q || {};
       if (!q.exam_id) return err('Please choose an exam.');
       if (!q.class_id) return err('Please choose a class.');
+      // Everything below used to be able to throw an uncaught exception
+      // (any of the many Supabase reads below, or a data-shape surprise in
+      // real production data that never showed up in test fixtures) and
+      // leave the caller's promise REJECTED instead of resolving to a
+      // normal {ok:false} — e.g. Messaging's "Send results" preview would
+      // just spin forever, or (once that had its own .catch) show a
+      // generic "something went wrong" with no way to tell what actually
+      // failed. Wrapping the whole thing means a real failure always comes
+      // back as a normal err() with the ACTUAL reason attached, so it's
+      // visible on screen and in the console instead of being swallowed.
+      try {
 
       // System Fixes brief §12/§13: these three don't depend on each other
       // — used to be three sequential round trips before anything else
@@ -1112,6 +1123,10 @@ export function createResultsApi(supabase, gradingApi) {
         min_subjects: minSubjects,
         deviation_exam: deviationExam
       });
+      } catch (e) {
+        console.error('getBroadsheet failed:', e);
+        return err(`Something went wrong building the mark list (${(e && e.message) || 'unknown error'}). Try again — if it keeps happening, note the exam and class and let support know.`);
+      }
     },
 
     /** Current publishing-workflow status for one (exam, class, subject) —
