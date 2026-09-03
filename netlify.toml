@@ -57,3 +57,13 @@
   for = "/src/vendor/*"
   [headers.values]
     Cache-Control = "public, max-age=3600, must-revalidate"
+
+[[headers]]
+  # sw.js's OWN bytes are what tells the browser "there's a new service
+  # worker" (a byte-for-byte diff on its next fetch) — see sw.js's own
+  # header comment for how the caching it does stays safe on its own, but
+  # this file itself must never be cached by the browser/CDN, or that
+  # update-check can be delayed far longer than it should be.
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
