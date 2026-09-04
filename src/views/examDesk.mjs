@@ -96,17 +96,32 @@ async function renderBoardScreen(root, years, terms) {
 
 async function renderBoard(root, exams, classes, years, terms) {
   const board = root.querySelector('#exam-board');
-  board.innerHTML = loader();
-  const classRowsByExam = await Promise.all(exams.map((e) => Db.results.listExamClasses(e.id)));
-  const rowsByExamId = {};
-  exams.forEach((e, i) => { rowsByExamId[e.id] = classRowsByExam[i].ok ? classRowsByExam[i].data : []; });
+  // Perf/UX fix ("click Exam Desk, see the exams listed immediately, let
+  // results/status process while I'm already there"): this used to hold
+  // up the ENTIRE board behind one Promise.all of every exam's own
+  // class-status query — the slowest exam in the list decided how long
+  // every OTHER exam's card sat on a spinner. Now every exam's card
+  // (name, type, term, Edit/Delete) paints the instant the exam list
+  // itself is known, each with its own class-status table loading; each
+  // card then swaps to its real table — and only then wires its
+  // status-dependent buttons — the moment THAT exam's own query resolves,
+  // independently of the others.
+  board.innerHTML = exams.map((e, i) => examCard(e, null, i)).join('');
 
-  board.innerHTML = exams.map((e, i) => examCard(e, rowsByExamId[e.id], i)).join('');
+  exams.forEach((e, i) => {
+    Db.results.listExamClasses(e.id).then((res) => {
+      const classRows = res.ok ? res.data : [];
+      const oldCard = board.querySelector(`[data-exam-card="${e.id}"]`);
+      if (!oldCard) return; // board was re-rendered/navigated away before this resolved
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = examCard(e, classRows, i);
+      const card = wrapper.firstElementChild;
+      oldCard.replaceWith(card);
+      wireExamCard(card, e, classRows);
+    }).catch(() => { /* leave the loading skeleton up — reopening the screen retries */ });
+  });
 
-  exams.forEach((e) => {
-    const card = board.querySelector(`[data-exam-card="${e.id}"]`);
-    if (!card) return;
-    const classRows = rowsByExamId[e.id];
+  function wireExamCard(card, e, classRows) {
     // Each of these now appears twice per card (once in the desktop header/
     // toolbar, once in the mobile-only view) — querySelectorAll+forEach
     // instead of the old querySelector so both copies get wired.
@@ -186,7 +201,7 @@ async function renderBoard(root, exams, classes, years, terms) {
       if (errors.length) toast(errors.join(' · '), 'err');
       renderBoard(root, exams, classes, years, terms);
     }, 'Recomputing…'));
-  });
+  }
 }
 
 const STATUS_META = {
@@ -273,15 +288,45 @@ function mobileClassAccordion(classRows) {
   }).join('');
 }
 
+// Perf/UX fix: `classRows === null` means "this exam's own class-status
+// query hasn't come back yet" (see renderBoard below) — every exam's card
+// header (name, badges, Edit/Delete) is known the instant the exam list
+// itself loads, so it's shown right away; only the per-class status table
+// underneath needs to wait, and it waits on THIS exam's own request, not
+// the slowest exam in the whole list.
 function examCard(exam, classRows, i) {
   const accent = ACCENTS[i % ACCENTS.length];
   const isConsolidated = exam.exam_type === 'consolidated';
+  const loading = classRows === null;
   // Recompute only makes sense for a class that's actually ticked onto this
   // exam and has students to score — same set of classes the board already
   // shows a row for, so no separate "which class?" picker is needed.
-  const recomputeBtn = (mobile) => isConsolidated
+  const recomputeBtn = (mobile) => isConsolidated && !loading
     ? (mobile ? `<button data-recompute-exam="${exam.id}">🔄 Recompute results</button>` : `<button class="btn ghost sm" data-recompute-exam="${exam.id}">🔄 Recompute</button>`)
     : '';
+  if (loading) {
+    const skeletonRows = `<div class="card-b"><div class="skeleton" style="width:100%;height:20px;margin-bottom:10px"></div><div class="skeleton" style="width:100%;height:20px"></div></div>`;
+    return `<div class="card side-accent ${accent}" style="margin-bottom:16px" data-exam-card="${exam.id}" data-loading="1">
+      <div class="ed-desktop-view">
+        <div class="card-h">
+          <h3>${esc(exam.name)}</h3>
+          <span class="badge grey">${esc(EXAM_TYPE_LABELS[exam.exam_type] || exam.exam_type || 'Normal Exam')}</span>
+          <span class="badge blue">${esc(exam.academic_year_name)} · ${esc(exam.term_name)}</span>
+        </div>
+        ${skeletonRows}
+      </div>
+      <div class="ed-mobile-view">
+        <div class="ed-m-head">
+          <div class="ed-m-name">${esc(exam.name)}</div>
+          <div class="ed-m-badges">
+            <span class="badge grey">${esc(EXAM_TYPE_LABELS[exam.exam_type] || exam.exam_type || 'Normal Exam')}</span>
+            <span class="badge blue">${esc(exam.academic_year_name)} · ${esc(exam.term_name)}</span>
+          </div>
+        </div>
+        ${skeletonRows}
+      </div>
+    </div>`;
+  }
   const desktopRows = classRows.length ? `<div class="table-wrap"><table class="data">
     <thead><tr><th>Class</th><th>Subjects with marks</th><th>Status</th><th>Last published</th><th></th></tr></thead>
     <tbody>${classRows.map((r) => {
