@@ -42,6 +42,22 @@ const EXAM_TYPE_CHOICES = Object.keys(EXAM_TYPE_LABELS).map((k) => ({ id: k, nam
 const ACCENTS = ['tile-blue', 'tile-green', 'tile-purple', 'tile-amber', 'tile-teal', 'tile-rose', 'tile-indigo'];
 
 export async function viewExamDesk(root) {
+  // Perf/UX fix ("click Exam Desk, it just sits on the spinner for a
+  // couple seconds"): this screen used to await its very first network
+  // call (years + terms) before writing anything to `root` at all, so the
+  // router's generic full-page spinner just sat there with no sense of
+  // progress for however long that round trip took. Painting the page
+  // header + a board-shaped skeleton immediately means the screen itself
+  // has already "arrived" the instant its code loads — only the data
+  // inside it is still catching up, which reads as much faster even
+  // though the actual network time hasn't changed.
+  root.innerHTML = `
+    <div class="page-head"><div><h2>Exam Desk</h2></div></div>
+    <div class="card"><div class="card-b">
+      <div class="skeleton" style="width:100%;height:80px;margin-bottom:12px"></div>
+      <div class="skeleton" style="width:100%;height:80px"></div>
+    </div></div>
+  `;
   const [yearsRes, termsRes] = await Promise.all([Db.academicYears.list(), Db.terms.list()]);
   if (!yearsRes.ok || !termsRes.ok) {
     renderPrereqOrConnectivity(root, { ok: false, onRetry: () => viewExamDesk(root) });

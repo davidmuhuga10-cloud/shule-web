@@ -16,6 +16,16 @@ export async function viewGrading(root) {
 }
 
 async function render(root) {
+  // Perf/UX fix: paint the page shell instantly instead of leaving the
+  // router's bare spinner up for the full round trip — see examDesk.mjs's
+  // viewExamDesk for the fuller explanation of why this matters.
+  root.innerHTML = `
+    <div class="page-head"><div><h2>Grading Scales</h2><p>Configure how raw scores map to letter grades. One scale is used as the default for grading — exams can't be published until one is active.</p></div></div>
+    <div class="card"><div class="card-b">
+      <div class="skeleton" style="width:100%;height:60px;margin-bottom:12px"></div>
+      <div class="skeleton" style="width:100%;height:60px"></div>
+    </div></div>
+  `;
   const res = await Db.grading.listScales();
   const scales = res.ok ? res.data : [];
   if (expandedIds === null) expandedIds = new Set(scales.length <= 1 ? scales.map((sc) => sc.id) : []);

@@ -55,6 +55,16 @@ function smsCount(bodyText) {
 }
 
 export async function viewMessaging(root) {
+  // Perf/UX fix: paint the page shell instantly instead of leaving the
+  // router's bare spinner up for the full round trip — see examDesk.mjs's
+  // viewExamDesk for the fuller explanation of why this matters.
+  root.innerHTML = `
+    <div class="page-head"><div><h2>Messaging</h2></div></div>
+    <div class="card"><div class="card-b">
+      <div class="skeleton" style="width:100%;height:60px;margin-bottom:12px"></div>
+      <div class="skeleton" style="width:100%;height:60px"></div>
+    </div></div>
+  `;
   const [classesRes, studentsRes, staffRes, examsRes] = await Promise.all([
     Db.classes.list(), Db.students.list({}), Db.staff.list(), Db.results.listExams()
   ]);

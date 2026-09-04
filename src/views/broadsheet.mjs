@@ -22,6 +22,16 @@ import { applyMeritListDisplayPrefs } from '../lib/meritListPrefs.mjs';
 import { printHeaderHtml, reportTitleBarHtml, isContactInfoComplete, renderMissingContactInfo } from '../lib/printHeader.mjs';
 
 export async function viewBroadsheet(root) {
+  // Perf/UX fix: paint the page shell instantly instead of leaving the
+  // router's bare spinner up for the full round trip — see examDesk.mjs's
+  // viewExamDesk for the fuller explanation of why this matters.
+  root.innerHTML = `
+    <div class="page-head no-print"><div><h2>Mark List</h2><p>Students &times; subjects, with grades, points and position — stream and overall.</p></div></div>
+    <div class="card"><div class="card-b">
+      <div class="skeleton" style="width:100%;height:60px;margin-bottom:12px"></div>
+      <div class="skeleton" style="width:100%;height:60px"></div>
+    </div></div>
+  `;
   const [examsRes, classesRes] = await Promise.all([Db.results.listExams(), Db.classes.list()]);
   // Round 6 §5 (recurring BUG): don't conflate a lost/flaky connection with
   // "genuinely nothing set up yet" — see examAnalysis.mjs for the full

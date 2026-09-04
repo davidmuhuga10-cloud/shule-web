@@ -56,6 +56,16 @@ const SAMPLE_ROW = {
 };
 
 export async function viewBulkUpload(root) {
+  // Perf/UX fix: paint the page shell instantly instead of leaving the
+  // router's bare spinner up for the full round trip — see examDesk.mjs's
+  // viewExamDesk for the fuller explanation of why this matters.
+  root.innerHTML = `
+    <div class="page-head"><div><h2>Bulk Upload</h2><p>Import many students at once from a spreadsheet — download the template, fill it in, then upload the same file back.</p></div></div>
+    <div class="card"><div class="card-b">
+      <div class="skeleton" style="width:100%;height:60px;margin-bottom:12px"></div>
+      <div class="skeleton" style="width:100%;height:60px"></div>
+    </div></div>
+  `;
   const classesRes = await Db.classes.list();
   // Round 6 §5 (recurring BUG): see examAnalysis.mjs for the full story.
   if (!classesRes.ok) {

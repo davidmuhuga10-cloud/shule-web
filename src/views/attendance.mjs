@@ -21,6 +21,16 @@ function todayStr() {
 }
 
 export async function viewAttendance(root) {
+  // Perf/UX fix: paint the page shell instantly instead of leaving the
+  // router's bare spinner up for the full round trip — see examDesk.mjs's
+  // viewExamDesk for the fuller explanation of why this matters.
+  root.innerHTML = `
+    <div class="page-head"><div><h2>Attendance</h2><p>Mark daily attendance and review class summaries.</p></div></div>
+    <div class="card"><div class="card-b">
+      <div class="skeleton" style="width:100%;height:60px;margin-bottom:12px"></div>
+      <div class="skeleton" style="width:100%;height:60px"></div>
+    </div></div>
+  `;
   const classesRes = await Db.classes.list();
   // Round 6 §5 (recurring BUG): see examAnalysis.mjs for the full story.
   if (!classesRes.ok) { renderPrereqOrConnectivity(root, { ok: false, onRetry: () => viewAttendance(root) }); return; }
