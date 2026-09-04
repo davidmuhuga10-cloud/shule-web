@@ -41,6 +41,15 @@ function fmtMoney(n) {
 }
 
 export async function viewFinanceDashboard(root, access) {
+  // Perf/UX fix: paint something immediately instead of leaving Finance's
+  // generic tab-switch spinner up for this extra round trip too — see
+  // examDesk.mjs's viewExamDesk for the fuller explanation.
+  root.innerHTML = `
+    <div class="card"><div class="card-b">
+      <div class="skeleton" style="width:100%;height:60px;margin-bottom:12px"></div>
+      <div class="skeleton" style="width:100%;height:60px"></div>
+    </div></div>
+  `;
   const [yearsRes, termsRes] = await Promise.all([Db.academicYears.list(), Db.terms.list()]);
   const years = yearsRes.ok ? yearsRes.data : [];
   const terms = termsRes.ok ? termsRes.data : [];

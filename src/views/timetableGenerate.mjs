@@ -34,6 +34,15 @@ export async function viewTimetableGenerate(root, onGenerated) {
   // fetch here fails open (button stays enabled) — generate() itself is
   // still the authoritative check either way, so nothing unsafe can slip
   // through if this particular request happens to be offline.
+  // Perf/UX fix: paint something immediately instead of leaving the
+  // Timetable tab-switch spinner up for this extra round trip too — see
+  // examDesk.mjs's viewExamDesk for the fuller explanation.
+  root.innerHTML = `
+    <div class="card"><div class="card-b">
+      <div class="skeleton" style="width:100%;height:60px;margin-bottom:12px"></div>
+      <div class="skeleton" style="width:100%;height:60px"></div>
+    </div></div>
+  `;
   const [yearsRes, periodsRes, capacityRes] = await Promise.all([Db.academicYears.list(), Db.timetable.periods.list(), Db.timetable.checkCapacityStatus()]);
   // Round 5 §5 (BUG): don't conflate a failed fetch (usually a lost/flaky
   // connection) with "genuinely not configured yet".

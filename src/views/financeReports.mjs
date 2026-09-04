@@ -93,8 +93,8 @@ async function loadBalances(root, settings, classes, sel) {
     <div id="fb-table" style="margin-top:14px">${loader()}</div>
   `;
   const refilter = (patch) => loadBalances(root, settings, classes, { ...sel, ...patch });
-  root.querySelector('#fb-class').onchange = (e) => refilter({ class_id: e.target.value, stream_name: '' });
-  root.querySelector('#fb-min').oninput = (e) => refilter({ min_balance: e.target.value });
+  root.querySelector('#fb-class').onchange = (e) => refilter({ class_id: e.target.value, stream_name: '', page: 1 });
+  root.querySelector('#fb-min').oninput = (e) => refilter({ min_balance: e.target.value, page: 1 });
   root.querySelector('#fb-xlsx').onclick = async () => {
     const res = await Db.finance.reports.classBalances(sel.class_id || null, sel.min_balance || null);
     const rows = (res.ok ? res.data : []).filter((r) => !sel.stream_name || r.stream_name === sel.stream_name);
@@ -113,26 +113,66 @@ async function loadBalances(root, settings, classes, sel) {
   const streamNames = [...new Set(allRows.map((r) => r.stream_name).filter(Boolean))].sort();
   const streamSel = root.querySelector('#fb-stream');
   streamSel.innerHTML = `<option value="">All streams</option>${streamNames.map((n) => `<option value="${esc(n)}" ${n === sel.stream_name ? 'selected' : ''}>${esc(n)}</option>`).join('')}`;
-  streamSel.onchange = (e) => refilter({ stream_name: e.target.value });
-  const rows = allRows.filter((r) => !sel.stream_name || r.stream_name === sel.stream_name);
-  const desktopTable = `<div class="frb-desktop-view"><table class="print-grid">
-      <thead><tr><th>Adm. No.</th><th>Name</th><th>Class</th><th class="num">Expected</th><th class="num">Paid</th><th class="num">Credit Note</th><th class="num">Balance</th></tr></thead>
-      <tbody>${rows.map((r) => `<tr>
+  streamSel.onchange = (e) => refilter({ stream_name: e.target.value, page: 1 });
+  // Ranked highest balance owed first (the actionable order for a
+  // collections screen — "who owes the most" reads top to bottom), tied
+  // off by admission number so the order stays stable/predictable.
+  const rows = allRows.filter((r) => !sel.stream_name || r.stream_name === sel.stream_name)
+    .slice()
+    .sort((a, b) => (Number(b.balance || 0) - Number(a.balance || 0)) || String(a.admission_no || '').localeCompare(String(b.admission_no || ''), undefined, { numeric: true }));
+
+  // Perf/UX fix ("just show first 15, paginate the rest — but print the
+  // full filtered list, not just the current page"): the on-screen table
+  // shows PAGE_SIZE rows at a time (pageRows) with Prev/Next controls
+  // below it. A second, screen-hidden copy of the FULL filtered+sorted
+  // list (`rows`, un-sliced, class .fb-print-full) only appears when the
+  // browser's print/download dialog actually runs — see the #fb-table
+  // print override in main.css, which swaps which of the two is visible
+  // specifically for this screen (scoped by #fb-table so it doesn't touch
+  // how any OTHER report using the shared .frb-desktop-view/.rcb-desktop-
+  // view classes prints).
+  const PAGE_SIZE = 15;
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const page = Math.min(Math.max(1, sel.page || 1), totalPages);
+  const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const balRow = (r) => `<tr>
         <td>${esc(r.admission_no)}</td><td>${esc(r.full_name)}</td><td>${esc(r.class_name)}${r.stream_name ? ' ' + esc(r.stream_name) : ''}</td>
         <td class="num">${Number(r.expected || 0).toLocaleString()}</td><td class="num">${Number(r.paid || 0).toLocaleString()}</td>
         <td class="num">${Number(r.credit_note || 0).toLocaleString()}</td><td class="num">${Number(r.balance || 0).toLocaleString()}</td>
-      </tr>`).join('') || '<tr><td colspan="7" class="muted">No students match this filter.</td></tr>'}</tbody>
+      </tr>`;
+  const balTableHead = `<thead><tr><th>Adm. No.</th><th>Name</th><th>Class</th><th class="num">Expected</th><th class="num">Paid</th><th class="num">Credit Note</th><th class="num">Balance</th></tr></thead>`;
+  const noMatch = '<tr><td colspan="7" class="muted">No students match this filter.</td></tr>';
+
+  const desktopTable = `<div class="frb-desktop-view"><table class="print-grid">
+      ${balTableHead}
+      <tbody>${pageRows.map(balRow).join('') || noMatch}</tbody>
+    </table>
+    ${totalPages > 1 ? `<div class="pagination no-print">
+      <button class="btn sm secondary" id="fb-page-prev" ${page <= 1 ? 'disabled' : ''}>‹ Prev</button>
+      <span class="muted">Page ${page} of ${totalPages} (${rows.length} student${rows.length === 1 ? '' : 's'})</span>
+      <button class="btn sm secondary" id="fb-page-next" ${page >= totalPages ? 'disabled' : ''}>Next ›</button>
+    </div>` : ''}
+  </div>`;
+  // Print/download always gets the FULL filtered list, ranked the same
+  // way — never just whatever page is currently on screen.
+  const printTable = `<div class="fb-print-full"><table class="print-grid">
+      ${balTableHead}
+      <tbody>${rows.map(balRow).join('') || noMatch}</tbody>
     </table></div>`;
-  tableEl.innerHTML = reportSheetHtml('fb-sheet', settings, 'Balances', `${desktopTable}<div class="frb-mobile-view no-print">${rows.length ? rows.map(balanceCardHtml).join('') : '<p class="muted center" style="margin:20px 0">No students match this filter.</p>'}</div>`);
+  tableEl.innerHTML = reportSheetHtml('fb-sheet', settings, 'Balances', `${desktopTable}${printTable}<div class="frb-mobile-view no-print">${pageRows.length ? pageRows.map(balanceCardHtml).join('') : '<p class="muted center" style="margin:20px 0">No students match this filter.</p>'}</div>`);
   wirePrintOptions(root, 'fb', 'Balances');
+  const prevBtn = root.querySelector('#fb-page-prev');
+  const nextBtn = root.querySelector('#fb-page-next');
+  if (prevBtn) prevBtn.onclick = () => refilter({ page: page - 1 });
+  if (nextBtn) nextBtn.onclick = () => refilter({ page: page + 1 });
 
   // Messaging_Overhaul.docx item 4 — "Add the ability to send fee balance
-  // messages under Finance." Only the students CURRENTLY on screen (this
-  // filter's own class/stream/min-balance selection) with a balance
-  // actually owing are eligible — "a student with a zero balance or an
-  // overpayment/credit should not receive a balance message" is enforced
-  // here (owingRows), not just left to the min-balance filter someone may
-  // not have set.
+  // messages under Finance." Every student matching this filter (class/
+  // stream/min-balance) with a balance actually owing is eligible — the
+  // full filtered list, not just whatever page happens to be showing —
+  // with "a student with a zero balance or an overpayment/credit should
+  // not receive a balance message" enforced here (owingRows).
   const owingRows = rows.filter((r) => Number(r.balance || 0) > 0);
   root.querySelector('#fb-send-balances').onclick = () => openSendBalancesModal(owingRows, sel);
 }

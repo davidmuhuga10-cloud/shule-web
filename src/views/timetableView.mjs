@@ -44,6 +44,15 @@ function pickDefaultYearTerm(years, termsByYear) {
 }
 
 export async function viewTimetableView(root, preselect) {
+  // Perf/UX fix: paint something immediately instead of leaving the
+  // Timetable tab-switch spinner up for this extra round trip too — see
+  // examDesk.mjs's viewExamDesk for the fuller explanation.
+  root.innerHTML = `
+    <div class="card"><div class="card-b">
+      <div class="skeleton" style="width:100%;height:60px;margin-bottom:12px"></div>
+      <div class="skeleton" style="width:100%;height:60px"></div>
+    </div></div>
+  `;
   const [yearsRes, classesRes, staffRes, roomsRes, periodsRes, daysRes, settingsRes] = await Promise.all([
     Db.academicYears.list(), Db.classes.list(), Db.staff.list(), Db.timetable.rooms.list(), Db.timetable.periods.list(), Db.timetable.days.get(), Db.settings.get()
   ]);
