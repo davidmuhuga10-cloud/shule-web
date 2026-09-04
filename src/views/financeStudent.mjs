@@ -472,7 +472,7 @@ async function renderStatement(root, student, years, terms) {
     invoiceItems, debitNotes: dnRes.ok ? dnRes.data : [], creditNotes: cnRes.ok ? cnRes.data : [], collections: colRes.ok ? colRes.data : []
   });
   const groups = groupByTerm(rows, { terms: terms || [], academicYears: years || [] });
-  const schoolName = (state.settings && state.settings.school_name) || 'Shule';
+  const schoolName = (state.settings && state.settings.school_name) || 'ShuleTop';
 
   root.innerHTML = statementSheetHtml(schoolName, student, groups);
   wireMobileStatementTabs(root);

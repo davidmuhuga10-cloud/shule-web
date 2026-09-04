@@ -12,5 +12,5 @@
 window.SHULE_CONFIG = {
   SUPABASE_URL: 'https://tyycjuppsdqcbrzmlimf.supabase.co',
   SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR5eWNqdXBwc2RxY2Jyem1saW1mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2ODg5ODgsImV4cCI6MjEwMTI2NDk4OH0.908_pOVgcbDF4RrwGwdYqyXQjaV7jXzbrY-evBhBqlg',
-  SCHOOL_BRAND_NAME: 'Shule' // fallback shown before Settings has a school_name saved
+  SCHOOL_BRAND_NAME: 'ShuleTop' // fallback shown before Settings has a school_name saved
 };

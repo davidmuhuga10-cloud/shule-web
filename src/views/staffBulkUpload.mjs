@@ -36,7 +36,7 @@ export async function viewStaffBulkUpload(root) {
 }
 
 function downloadTemplate() {
-  downloadXlsx('shule-staff-upload-template.xlsx', [SAMPLE_ROW], TEMPLATE_COLUMNS, 'Staff');
+  downloadXlsx('shuletop-staff-upload-template.xlsx', [SAMPLE_ROW], TEMPLATE_COLUMNS, 'Staff');
 }
 
 function looksLikeHeaderRow(row) {

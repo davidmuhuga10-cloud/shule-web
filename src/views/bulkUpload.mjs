@@ -71,7 +71,7 @@ export async function viewBulkUpload(root) {
 }
 
 function downloadTemplate() {
-  downloadXlsx('shule-student-upload-template.xlsx', [SAMPLE_ROW], TEMPLATE_COLUMNS, 'Students');
+  downloadXlsx('shuletop-student-upload-template.xlsx', [SAMPLE_ROW], TEMPLATE_COLUMNS, 'Students');
 }
 
 function looksLikeHeaderRow(row) {

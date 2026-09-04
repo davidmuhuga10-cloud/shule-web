@@ -91,7 +91,7 @@ function renderLogin(errorMsg) {
   root.innerHTML = `
     <div class="a-login-wrap">
       <div class="a-login-box">
-        <h1>Shule — Super Admin</h1>
+        <h1>ShuleTop — Super Admin</h1>
         <p class="a-sub">Platform management. This is not the school login — regular school accounts cannot sign in here.</p>
         <div class="a-field"><label>Email</label><input id="a-login-email" type="email" autocomplete="username"></div>
         <div class="a-field"><label>Password</label><input id="a-login-pw" type="password" autocomplete="current-password"></div>
@@ -123,7 +123,7 @@ function renderShell(activeKey) {
   root.innerHTML = `
     <div class="a-shell">
       <aside class="a-sidebar">
-        <div class="a-brand">Shule<small>Super Admin</small></div>
+        <div class="a-brand">ShuleTop<small>Super Admin</small></div>
         <nav class="a-nav">
           ${SCREENS.map((s) => `<a data-screen="${s.key}" class="${s.key === activeKey ? 'active' : ''}">${s.ico} ${esc(s.label)}</a>`).join('')}
         </nav>
@@ -325,7 +325,7 @@ async function openSchoolDetail(schoolId, body, searchTerm) {
     // meantime rather than a blank flash.
     const newTab = window.open('about:blank', '_blank');
     if (newTab) {
-      try { newTab.document.write('<title>Shule</title><body style="font:15px system-ui;display:flex;align-items:center;justify-content:center;height:100vh;color:#374151">Opening school account…</body>'); } catch (e) { /* cross-origin timing edge case — harmless */ }
+      try { newTab.document.write('<title>ShuleTop</title><body style="font:15px system-ui;display:flex;align-items:center;justify-content:center;height:100vh;color:#374151">Opening school account…</body>'); } catch (e) { /* cross-origin timing edge case — harmless */ }
     }
 
     const { data: { session } } = await supabase.auth.getSession();

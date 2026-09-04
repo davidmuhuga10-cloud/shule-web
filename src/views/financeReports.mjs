@@ -413,7 +413,7 @@ async function loadOpeningBalances(root, years, students, sel) {
       admission_no: s.admission_no, full_name: s.full_name, class_name: s.class_name || '', stream_name: s.stream_name || '',
       amount: existingRes[i] && existingRes[i].ok && existingRes[i].data ? existingRes[i].data.amount : ''
     }));
-    downloadXlsx('shule-opening-balances-template.xlsx', rows, OB_TEMPLATE_COLUMNS, 'Opening Balances');
+    downloadXlsx('shuletop-opening-balances-template.xlsx', rows, OB_TEMPLATE_COLUMNS, 'Opening Balances');
   };
 
   let pendingRows = null;

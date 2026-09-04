@@ -1596,3 +1596,24 @@ table.data td.num,table.data th.num{text-align:center}
 .mh-detail-meta span{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
 .mh-detail-meta b{font-size:17px}
 @media (max-width:560px){.mh-detail-meta{grid-template-columns:repeat(2,1fr)}}
+
+/* ---------------------------------------------------------------------
+   #seo-landing (index.html) — static pre-JS marketing content. Normally
+   removed by app.js before first paint (see init()), but this CSS also
+   makes it look like a real, finished page in the rare case JS fails to
+   run at all, rather than leaving visitors staring at a blank body.
+   --------------------------------------------------------------------- */
+#seo-landing{max-width:760px;margin:0 auto;padding:32px 20px 60px}
+.sl-top{margin-bottom:28px}
+.sl-brand{font-size:19px;font-weight:800;color:var(--brand);display:flex;align-items:center;gap:8px}
+.sl-logo{font-size:22px}
+.sl-hero h1{font-size:28px;line-height:1.25;color:var(--ink);margin:0 0 10px}
+.sl-sub{font-size:15px;color:var(--muted);line-height:1.6;max-width:640px}
+.sl-features{margin-top:30px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:22px 24px;box-shadow:var(--shadow)}
+.sl-features h2{font-size:16px;margin:0 0 12px;color:var(--ink)}
+.sl-features ul{margin:0;padding-left:18px}
+.sl-features li{margin-bottom:9px;font-size:13.5px;color:var(--ink);line-height:1.55}
+.sl-cta{margin-top:26px;font-size:13.5px;color:var(--muted)}
+.sl-cta a{color:var(--primary);font-weight:600;text-decoration:none}
+.sl-cta a:hover{text-decoration:underline}
+.sl-foot{margin-top:40px;font-size:12px;color:var(--muted)}

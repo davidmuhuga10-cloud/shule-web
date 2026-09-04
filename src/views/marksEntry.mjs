@@ -462,7 +462,7 @@ async function renderBulkUpload(area, sel, subjectTabs) {
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = 'shule-marks-upload-template.csv'; a.click();
+    a.href = url; a.download = 'shuletop-marks-upload-template.csv'; a.click();
     URL.revokeObjectURL(url);
   };
 

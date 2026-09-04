@@ -391,7 +391,7 @@ const ROLE_LABEL = { admin: 'Administrator', teacher: 'Teacher', parent: 'Parent
 // (brief: "Remove the Student Login tab — not needed at this stage") —
 // loginStudent() itself is untouched for whenever that's revisited.
 export function renderAuth(errorMsg) {
-  const name = (state.settings && state.settings.school_name) || (window.SHULE_CONFIG && window.SHULE_CONFIG.SCHOOL_BRAND_NAME) || 'Shule';
+  const name = (state.settings && state.settings.school_name) || (window.SHULE_CONFIG && window.SHULE_CONFIG.SCHOOL_BRAND_NAME) || 'ShuleTop';
   const features = [
     ['🎒', 'Students', 'Classes, streams & enrollment'],
     ['🧑‍🏫', 'Teachers', 'Subjects & teacher assignment'],
@@ -403,7 +403,7 @@ export function renderAuth(errorMsg) {
   $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
-      <h1>Shule</h1>
+      <h1>ShuleTop</h1>
       <p>A clean, modern way to run your school — from enrollment to report forms.</p>
       <div class="feat-grid">${features}</div>
     </div></div>
@@ -491,7 +491,7 @@ function renderAccountPicker(accounts, phone, pw, opts) {
   $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
-      <h1>Shule</h1>
+      <h1>ShuleTop</h1>
       <p>A clean, modern way to run your school — from enrollment to report forms.</p>
     </div></div>
     <div class="formside"><div class="formcard">
@@ -554,7 +554,7 @@ function renderOtpVerify(opts) {
   $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
-      <h1>Shule</h1>
+      <h1>ShuleTop</h1>
       <p>A clean, modern way to run your school — from enrollment to report forms.</p>
     </div></div>
     <div class="formside"><div class="formcard">
@@ -654,7 +654,7 @@ function renderForgotPassword(errorMsg, isFirstTime) {
   $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
-      <h1>Shule</h1>
+      <h1>ShuleTop</h1>
       <p>A clean, modern way to run your school — from enrollment to report forms.</p>
     </div></div>
     <div class="formside"><div class="formcard">
@@ -745,7 +745,7 @@ function renderSignup(prefill) {
   $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card">
     <div class="promo"><div class="promo-inner">
       <div class="logo">🎓</div>
-      <h1>Bring your school onto Shule</h1>
+      <h1>Bring your school onto ShuleTop</h1>
       <p>Set up your school's own space in under a minute — classes, subjects, exams and report forms, ready to go.</p>
     </div></div>
     <div class="formside"><div class="formcard">
@@ -1217,7 +1217,7 @@ async function bootApp() {
  *  back to the same generic values a brand-new/unseeded school should
  *  show. */
 function applyBranding() {
-  $('#brand-school').textContent = (state.settings && state.settings.school_name) || 'Shule';
+  $('#brand-school').textContent = (state.settings && state.settings.school_name) || 'ShuleTop';
   const brandLogo = $('.sidebar .brand .logo');
   if (!brandLogo) return;
   brandLogo.innerHTML = state.settings && state.settings.logo
@@ -1340,6 +1340,14 @@ window.addEventListener('online', () => toast('Back online.', 'ok'));
 
 /* ------------------------------- INIT ----------------------------------- */
 (async function init() {
+  // SEO: #seo-landing is real static marketing HTML that exists in the raw
+  // page source for search engines and link-preview crawlers to read (see
+  // index.html for why). Real visitors run JS, so pull it out immediately —
+  // first line, before any awaits — so it's gone before the next paint and
+  // never visibly competes with the real auth screen or app below it.
+  const seoLanding = document.getElementById('seo-landing');
+  if (seoLanding) seoLanding.remove();
+
   state.settings = {}; // no school context yet — the auth screen shows generic platform branding until sign-in
 
   // Mobile UI fix: tapping the dimmed area behind an open nav drawer used to

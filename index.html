@@ -3,10 +3,85 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Shule — School Management System</title>
+<title>ShuleTop — School Management System for Kenyan Schools</title>
+<meta name="description" content="ShuleTop is a school management system built for Kenyan schools — manage students, exams, fees, timetables and staff, and send exam results and fee reminders to parents by SMS, all from one secure, easy-to-use dashboard.">
+<meta name="keywords" content="school management system Kenya, school fees management software, SMS exam results system, school SMS software, school management system, Kenyan schools software, student information system Kenya">
+<link rel="canonical" href="https://shuletop.com/">
+
+<!-- Open Graph / social sharing -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="ShuleTop">
+<meta property="og:title" content="ShuleTop — School Management System for Kenyan Schools">
+<meta property="og:description" content="Manage students, exams, fees, timetables and staff — and send exam results and fee reminders to parents by SMS — all from one secure dashboard built for Kenyan schools.">
+<meta property="og:url" content="https://shuletop.com/">
+<meta property="og:locale" content="en_KE">
+
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="ShuleTop — School Management System for Kenyan Schools">
+<meta name="twitter:description" content="Manage students, exams, fees, timetables and staff — and send exam results and fee reminders to parents by SMS — all from one secure dashboard built for Kenyan schools.">
+
+<!-- Structured data so Google understands this is a real software product -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "ShuleTop",
+  "applicationCategory": "BusinessApplication",
+  "operatingSystem": "Web",
+  "url": "https://shuletop.com/",
+  "description": "ShuleTop is a school management system for Kenyan schools covering student records, exams and report forms, fee collection, timetables, staff management, and SMS communication with parents.",
+  "offers": {
+    "@type": "Offer",
+    "priceCurrency": "KES",
+    "availability": "https://schema.org/InStock"
+  },
+  "areaServed": {
+    "@type": "Country",
+    "name": "Kenya"
+  }
+}
+</script>
+
 <link rel="stylesheet" href="src/styles/main.css">
 </head>
 <body>
+  <!--
+    #seo-landing: real, static HTML that exists the instant the page loads —
+    before any JavaScript runs. This is what search engines and link
+    previews actually read. src/app.js removes this element in the very
+    first line of its init() (synchronously, before any awaits), so a real
+    visitor never sees more than an instant flash before the live app takes
+    over — but the crawlable content underneath it is real and permanent.
+  -->
+  <div id="seo-landing">
+    <header class="sl-top">
+      <div class="sl-brand"><span class="sl-logo">🎓</span> ShuleTop</div>
+    </header>
+    <main>
+      <section class="sl-hero">
+        <h1>School Management System for Kenyan Schools</h1>
+        <p class="sl-sub">ShuleTop helps Kenyan primary and secondary schools manage students, exams, fees, timetables and staff — and send exam results and fee reminders straight to parents by SMS, even when they have no smartphone or data bundle.</p>
+      </section>
+      <section class="sl-features" aria-label="Features">
+        <h2>What ShuleTop does for your school</h2>
+        <ul>
+          <li><strong>Student &amp; class management</strong> — enrolment, classes, streams and promotions in one place.</li>
+          <li><strong>Exams &amp; report forms</strong> — record marks, generate grade sheets, broadsheets and printable report forms automatically.</li>
+          <li><strong>SMS exam results &amp; fee reminders</strong> — reach every parent by SMS, no smartphone or internet connection required on their end.</li>
+          <li><strong>Fee &amp; finance tracking</strong> — invoices, payments, balances and collection reports per student and per term.</li>
+          <li><strong>Timetable generation</strong> — build clash-free class timetables automatically.</li>
+          <li><strong>Staff &amp; attendance management</strong> — teacher assignments, subject allocation and daily attendance.</li>
+          <li><strong>Bank-grade data security</strong> — each school's data is isolated at the database level, independently security-audited.</li>
+        </ul>
+      </section>
+      <section class="sl-cta">
+        <p>Already have an account? Sign in above once the app loads, or get in touch to set up your school.</p>
+        <p><a href="/blog/">Read more about running a school with less paperwork on the ShuleTop blog →</a></p>
+      </section>
+    </main>
+    <footer class="sl-foot">ShuleTop — built for Kenyan schools.</footer>
+  </div>
+
   <div id="toasts"></div>
   <div id="modal-root"></div>
   <div id="scrim" class="scrim"></div>
@@ -19,12 +94,12 @@
         <div class="brand">
           <div class="logo">🎓</div>
           <div>
-            <h1 id="brand-school">Shule</h1>
+            <h1 id="brand-school">ShuleTop</h1>
             <small>School Manager</small>
           </div>
         </div>
         <nav class="nav" id="nav"></nav>
-        <div class="side-foot">Shule &copy; <span id="year"></span></div>
+        <div class="side-foot">ShuleTop &copy; <span id="year"></span></div>
       </aside>
 
       <div class="main">
