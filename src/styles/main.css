@@ -362,27 +362,45 @@ html,body{max-width:100%;overflow-x:hidden}
    not squeezed into this row. */
 .dash-top-row{display:flex;gap:16px;align-items:stretch;margin-bottom:16px}
 .dash-top-row .stats-desktop{margin-bottom:0;flex:1;max-width:none}
-.dash-top-row .dash-gender-desktop{flex:1;min-width:280px;display:flex;flex-direction:column}
+/* Bulk SMS Balance tile (was missing from desktop entirely — only ever
+   shown on the mobile 6-tile layout): sits between the 2x2 tile grid and
+   the "Students by gender" card, i.e. immediately to its left, sized like
+   a single stat tile rather than stretching to fill the row. The gender
+   card gives up some of its former width/padding to make room for it
+   (min-width 280→220, panel padding and number size trimmed slightly)
+   without needing a 3rd row or a wider dashboard. */
+.dash-sms-tile{flex:0 1 210px;min-width:170px;display:flex}
+.dash-sms-tile .stat{flex:1;max-width:none;width:100%}
+/* Approved layout (round 2): icon on its own line, balance below it,
+   "Bulk SMS Balance" below that — all centered, instead of the usual
+   icon-beside-text row every other stat tile uses. */
+.stat.stat-vertical{flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:6px}
+.stat.stat-vertical .s-ico{margin-bottom:2px}
+.stat.stat-vertical .s-val{font-size:26px;font-weight:750;line-height:1}
+.stat.stat-vertical .s-lab{margin-top:0}
+.dash-top-row .dash-gender-desktop{flex:1;min-width:220px;display:flex;flex-direction:column}
 .dash-top-row .dash-gender-desktop .gender-panel{flex:1}
-.gender-panel{display:flex;flex-direction:column;gap:16px;padding:24px 30px}
-.gender-panel .g-row{display:flex;align-items:center;justify-content:space-between}
-.gender-panel .g-side{text-align:center}
-.gender-panel .g-num{font-size:38px;font-weight:800;line-height:1}
+.gender-panel{display:flex;flex-direction:column;justify-content:center;gap:4px;padding:22px;flex:1}
+.gender-panel .g-row{display:flex;align-items:center;justify-content:center;gap:14px}
+.gender-panel .g-side{text-align:center;flex:0 0 auto}
+.gender-panel .g-mid{flex:0 0 auto}
+/* Gauge redesign (round 3, approved): a downward-facing arc instead of the
+   old edge-to-edge straight bar, sized on its own and centered under the
+   row — i.e. centered between the Boys and Girls figures — rather than
+   stretching the full width of the panel the way the bar used to. */
+.gender-gauge{display:block;width:100px;max-width:100%;height:auto;margin:0}
+.gender-panel .g-num{font-size:30px;font-weight:800;line-height:1}
 .gender-panel .g-lab{font-size:12.5px;color:var(--muted);margin-top:6px;font-weight:650;text-transform:uppercase;letter-spacing:.04em}
-.gender-panel .g-div{width:1px;align-self:stretch;background:var(--line)}
 /* Boys/Girls visual upgrade (design standard brief item 8, approved option
-   A): a horizontal proportional split-bar in the space below the two
-   counts — purely decorative, the counts themselves are unchanged. */
-.gender-bar{height:10px;border-radius:6px;overflow:hidden;display:flex;background:var(--line)}
-.gender-bar .gb-b{background:#2563eb}
-.gender-bar .gb-g{background:#db2777}
+   A): now an inline arc gauge between the two counts (see .gender-gauge) —
+   the counts themselves are unchanged. */
 .stat.gender-tile{flex-direction:column;align-items:stretch;gap:8px}
 .stat.gender-tile .s-ico{align-self:center}
-.stat.gender-tile .s-body{display:flex;align-items:center;justify-content:space-between;flex:1;gap:8px;min-width:0}
-.stat.gender-tile .g-side{text-align:center}
+.stat.gender-tile .s-body{display:flex;align-items:center;justify-content:center;flex:1;gap:8px;min-width:0}
+.stat.gender-tile .g-side{text-align:center;flex:0 0 auto}
+.stat.gender-tile .g-mid{flex:0 0 auto}
 .stat.gender-tile .g-num{font-size:21px;font-weight:800;line-height:1}
 .stat.gender-tile .g-lab{font-size:10.5px;color:var(--muted);margin-top:3px}
-.stat.gender-tile .gender-bar{height:6px;margin-top:2px}
 
 /* ---------- Tables ---------- */
 .table-wrap{overflow-x:auto}
@@ -1121,6 +1139,11 @@ table.data td.num,table.data th.num{text-align:center}
      it for real. */
   .dash-top-row{display:block;margin-bottom:0}
   .dash-top-row .dash-gender-desktop{display:none}
+  /* Same reasoning as the gender card above: the mobile tile set already
+     has its own Bulk SMS Balance tile (stats-mobile), so don't also show
+     this desktop-only one — same specificity fix applies (two-class
+     selector, not a bare .dash-sms-tile{display:none}). */
+  .dash-top-row .dash-sms-tile{display:none}
 }
 @media screen and (max-width:400px){
   .content{padding:12px}
