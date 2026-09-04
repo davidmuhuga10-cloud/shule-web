@@ -48,10 +48,10 @@
   <!--
     #seo-landing: real, static HTML that exists the instant the page loads —
     before any JavaScript runs. This is what search engines and link
-    previews actually read. src/app.js removes this element in the very
-    first line of its init() (synchronously, before any awaits), so a real
-    visitor never sees more than an instant flash before the live app takes
-    over — but the crawlable content underneath it is real and permanent.
+    previews actually read. It's removed by src/lib/seo-hide.js (loaded
+    right below, before the main app bundle) as fast as a network request
+    possibly can — see that file for why a slow connection needs this to
+    NOT depend on the full app finishing its download first.
   -->
   <div id="seo-landing">
     <header class="sl-top">
@@ -81,6 +81,7 @@
     </main>
     <footer class="sl-foot">ShuleTop — built for Kenyan schools.</footer>
   </div>
+  <script src="src/lib/seo-hide.js"></script>
 
   <div id="toasts"></div>
   <div id="modal-root"></div>

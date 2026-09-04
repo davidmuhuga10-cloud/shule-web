@@ -7,6 +7,16 @@ import { isContactInfoComplete, renderMissingContactInfo } from '../lib/printHea
 const BATCH_VALUE = '__all__';
 
 export async function viewReports(root) {
+  // Perf/UX fix: paint the page shell instantly instead of leaving the
+  // router's bare spinner up for the full round trip — see examDesk.mjs's
+  // viewExamDesk for the fuller explanation of why this matters.
+  root.innerHTML = `
+    <div class="page-head no-print"><div><h2>Report Forms</h2><p>Pick a class, then an exam and a student, to generate their report form — or choose "Print all" to batch-print a whole class at once.</p></div></div>
+    <div class="card"><div class="card-b">
+      <div class="skeleton" style="width:100%;height:60px;margin-bottom:12px"></div>
+      <div class="skeleton" style="width:100%;height:60px"></div>
+    </div></div>
+  `;
   const [examsRes, classesRes, settingsRes] = await Promise.all([Db.results.listExams(), Db.classes.list(), Db.settings.get()]);
   // Round 6 §5 (recurring BUG, same class as Round 4 §5's Mark List fix,
   // now also applied to examAnalysis.mjs): a lost/flaky connection used to

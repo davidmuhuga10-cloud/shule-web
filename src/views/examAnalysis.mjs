@@ -17,6 +17,16 @@ import { printHeaderHtml, reportTitleBarHtml, isContactInfoComplete, renderMissi
 import { takeNavIntent } from '../lib/navIntent.mjs';
 
 export async function viewExamAnalysis(root) {
+  // Perf/UX fix: paint the page shell instantly instead of leaving the
+  // router's bare spinner up for the full round trip — see examDesk.mjs's
+  // viewExamDesk for the fuller explanation of why this matters.
+  root.innerHTML = `
+    <div class="page-head no-print"><div><h2>Exam Analysis</h2><p>Top students and class-wide performance analysis for one exam and class.</p></div></div>
+    <div class="card"><div class="card-b">
+      <div class="skeleton" style="width:100%;height:60px;margin-bottom:12px"></div>
+      <div class="skeleton" style="width:100%;height:60px"></div>
+    </div></div>
+  `;
   const [examsRes, classesRes] = await Promise.all([Db.results.listExams(), Db.classes.list()]);
   // Round 6 §5 (recurring BUG, same class as Round 4 §5's Mark List fix):
   // a lost/flaky connection used to get silently treated the same as

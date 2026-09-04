@@ -66,6 +66,58 @@ async function resolveRouteFn(route) {
   return fn;
 }
 
+// Perf fix ("module to module switching feels slow"): resolveRouteFn()
+// above only ever runs AFTER the user has already clicked a nav link, so
+// the full round-trip time to fetch that route's JS chunk sits directly in
+// front of the user every time they open a screen for the first time this
+// session — that's the multi-second wait being reported, not anything
+// about how much work each screen does once it's loaded (screens that
+// paint a skeleton immediately, like the dashboard, already feel instant
+// on data; it's specifically the code itself arriving late).
+//
+// The fix isn't to split screens into even smaller pieces — most of them
+// are already a single small chunk — it's to fetch that chunk BEFORE the
+// click, while the browser is idle, so by the time the user actually
+// clicks, the code is already sitting in the browser's cache and only the
+// (already-fast) data fetch remains. Two mechanisms, both best-effort and
+// silently ignored on failure — a missed prefetch just means the normal
+// on-click fetch happens instead, exactly like today:
+//  1. prefetchRoute() below fires the instant a nav link is hovered/
+//     touched (prefetchNavHoverIntent()) — for a deliberate click this
+//     usually finishes before the click event even lands.
+//  2. warmRouteCache() fires once, shortly after login, and quietly
+//     fetches every OTHER route chunk this user's role can reach, one at a
+//     time in the background, so normal in-app navigation is warm almost
+//     immediately. It's skipped entirely on a metered/slow connection
+//     (Data Saver on, or 2G) so it never costs someone real airtime money
+//     for screens they may never open.
+function prefetchRoute(route) {
+  if (_routeFnCache[route] || _prefetching.has(route)) return;
+  const loader = ROUTE_LOADERS[route];
+  if (!loader) return;
+  _prefetching.add(route);
+  loader().then((fn) => { _routeFnCache[route] = fn; }).catch(() => {}).finally(() => { _prefetching.delete(route); });
+}
+const _prefetching = new Set();
+function isSlowOrMeteredConnection() {
+  const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (!conn) return false;
+  if (conn.saveData) return true;
+  return /^(slow-2g|2g)$/.test(conn.effectiveType || '');
+}
+function warmRouteCache() {
+  if (isSlowOrMeteredConnection()) return;
+  const routes = Object.keys(allowedRoutes(state.profile.role)).filter((r) => ROUTE_LOADERS[r]);
+  let i = 0;
+  const step = () => {
+    if (i >= routes.length) return;
+    prefetchRoute(routes[i++]);
+    schedule(step);
+  };
+  const schedule = (fn) => (window.requestIdleCallback ? requestIdleCallback(fn, { timeout: 2000 }) : setTimeout(fn, 300));
+  schedule(step);
+}
+
 /* ------------------------------ Shared state ----------------------------- */
 export const state = { profile: null, settings: null, impersonation: null };
 
@@ -1070,6 +1122,14 @@ function buildNav() {
   $('#nav').innerHTML = html;
   $('#nav').querySelectorAll('a[data-route]').forEach((a) => {
     a.onclick = () => go(a.getAttribute('data-route'));
+    // Perf fix: start fetching that screen's code the moment intent shows
+    // (hover on desktop, touchstart on mobile/tablet) — a deliberate click
+    // usually lands after this has already finished, so the actual
+    // navigation just swaps in code that's already sitting in the cache.
+    const prefetch = () => prefetchRoute(a.getAttribute('data-route'));
+    a.addEventListener('mouseenter', prefetch, { passive: true });
+    a.addEventListener('touchstart', prefetch, { passive: true });
+    a.addEventListener('focus', prefetch, { passive: true });
   });
   $('#nav').querySelectorAll('.parent-toggle').forEach((a) => {
     a.onclick = () => a.parentElement.classList.toggle('open');
@@ -1201,6 +1261,10 @@ async function bootApp() {
 
   if (!location.hash) location.hash = '#/' + defaultRoute();
   router();
+  // Fire after the route the user actually asked for is already underway —
+  // this is strictly background bandwidth for screens they haven't opened
+  // yet, so it must never compete with the thing they're waiting on.
+  warmRouteCache();
 }
 
 /** Round 2 brief §1 (BUG): this used to only ever SET the sidebar's brand
@@ -1342,9 +1406,12 @@ window.addEventListener('online', () => toast('Back online.', 'ok'));
 (async function init() {
   // SEO: #seo-landing is real static marketing HTML that exists in the raw
   // page source for search engines and link-preview crawlers to read (see
-  // index.html for why). Real visitors run JS, so pull it out immediately —
-  // first line, before any awaits — so it's gone before the next paint and
-  // never visibly competes with the real auth screen or app below it.
+  // index.html for why). src/lib/seo-hide.js — a tiny, dependency-free
+  // script loaded ahead of this whole file — is what actually removes it
+  // for real visitors, specifically so the removal doesn't wait on this
+  // much larger app bundle to finish downloading on a slow connection.
+  // This is just a harmless safety net in case that file ever fails to
+  // load for some reason.
   const seoLanding = document.getElementById('seo-landing');
   if (seoLanding) seoLanding.remove();
 
