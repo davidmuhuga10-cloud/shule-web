@@ -1340,6 +1340,14 @@ window.addEventListener('online', () => toast('Back online.', 'ok'));
 
 /* ------------------------------- INIT ----------------------------------- */
 (async function init() {
+  // SEO: #seo-landing is real static marketing HTML that exists in the raw
+  // page source for search engines and link-preview crawlers to read (see
+  // index.html for why). Real visitors run JS, so pull it out immediately —
+  // first line, before any awaits — so it's gone before the next paint and
+  // never visibly competes with the real auth screen or app below it.
+  const seoLanding = document.getElementById('seo-landing');
+  if (seoLanding) seoLanding.remove();
+
   state.settings = {}; // no school context yet — the auth screen shows generic platform branding until sign-in
 
   // Mobile UI fix: tapping the dimmed area behind an open nav drawer used to

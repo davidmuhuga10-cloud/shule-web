@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Allow: /blog/
+
+# The app itself lives behind login — nothing useful for search engines to
+# index past this point, and no reason to spend crawl budget there.
+Disallow: /admin
+Disallow: /admin.html
+
+Sitemap: https://shuletop.com/sitemap.xml
