@@ -76,7 +76,7 @@ async function sendOtp(admin, payload) {
     return { ok: true, sent: false, message: 'SMS provider is not configured — no code was actually sent.' };
   }
 
-  const message = `Your Shule verification code is ${code}. It expires in 5 minutes. Do not share this code.`;
+  const message = `Your ShuleTop verification code is ${code}. It expires in 5 minutes. Do not share this code.`;
   const result = await sendSms(smsConfig, phone, message);
   if (result.status !== 'sent') {
     return { ok: true, sent: false, message: `Could not deliver the code: ${result.raw}` };

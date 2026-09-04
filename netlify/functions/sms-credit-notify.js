@@ -73,7 +73,7 @@ async function notifyAdmin(admin, payload, callerProfile) {
 
   const schoolName = (req.schools && req.schools.name) || 'A school';
   const amountLabel = req.amount_paid ? `, KES ${req.amount_paid}` : '';
-  const message = `Shule Admin: ${schoolName} has requested ${req.requested_credits} SMS credits${amountLabel} and submitted a payment confirmation. Please review and approve in the Admin Dashboard.`;
+  const message = `ShuleTop Admin: ${schoolName} has requested ${req.requested_credits} SMS credits${amountLabel} and submitted a payment confirmation. Please review and approve in the Admin Dashboard.`;
 
   const smsConfig = await loadSmsConfig(admin);
   const providerConfigured = isConfigured(smsConfig);
