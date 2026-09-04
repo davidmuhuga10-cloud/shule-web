@@ -1342,9 +1342,12 @@ window.addEventListener('online', () => toast('Back online.', 'ok'));
 (async function init() {
   // SEO: #seo-landing is real static marketing HTML that exists in the raw
   // page source for search engines and link-preview crawlers to read (see
-  // index.html for why). Real visitors run JS, so pull it out immediately —
-  // first line, before any awaits — so it's gone before the next paint and
-  // never visibly competes with the real auth screen or app below it.
+  // index.html for why). src/lib/seo-hide.js — a tiny, dependency-free
+  // script loaded ahead of this whole file — is what actually removes it
+  // for real visitors, specifically so the removal doesn't wait on this
+  // much larger app bundle to finish downloading on a slow connection.
+  // This is just a harmless safety net in case that file ever fails to
+  // load for some reason.
   const seoLanding = document.getElementById('seo-landing');
   if (seoLanding) seoLanding.remove();
 
