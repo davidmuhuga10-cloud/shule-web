@@ -1233,6 +1233,16 @@ table.data td.num,table.data th.num{text-align:center}
   .frb-mobile-view,.rcb-mobile-view{display:none!important}
   .frb-desktop-view,.rcb-desktop-view{display:block!important}
 }
+/* Balances pagination (screen shows 15 rows/page; printing always gets the
+   full filtered list — see loadBalances() in financeReports.mjs). Scoped
+   to #fb-table specifically so it doesn't touch how any other report
+   using the shared .frb-desktop-view/.rcb-desktop-view classes prints. */
+.pagination{display:flex;align-items:center;justify-content:center;gap:14px;padding:14px 0 4px;font-size:13px}
+.fb-print-full{display:none}
+@media print{
+  #fb-table .frb-desktop-view{display:none!important}
+  #fb-table .fb-print-full{display:block!important}
+}
 /* Balances — one card per student with a Paid-vs-Expected progress bar
    (approved "Style 3"), balance colored red if still owing, green if
    cleared/overpaid. */
