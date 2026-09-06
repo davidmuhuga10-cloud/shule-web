@@ -12,7 +12,7 @@
  * server-side (finance_invoice_route in migrations/0032), not just hidden
  * client-side.
  */
-import { esc, options, toast, modal, closeModal, loader } from '../app.js';
+import { esc, options, toast, modal, closeModal, confirmAction, loader } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 
 export async function viewFinanceTransport(root, access) {
@@ -128,10 +128,12 @@ async function loadRouteDetail(root, access, route, routes, years, terms, sel) {
   root.querySelector('#ftd-term').onchange = (e) => loadRouteDetail(root, access, route, routes, years, terms, { ...sel, term_id: e.target.value });
 
   const rosterEl = root.querySelector('#ftd-roster');
+  let lastRoster = [];
   const refreshRoster = async () => {
-    if (!sel.academic_year_id || !sel.term_id) { rosterEl.innerHTML = '<div class="card pad muted">Choose an academic year and term.</div>'; return []; }
+    if (!sel.academic_year_id || !sel.term_id) { rosterEl.innerHTML = '<div class="card pad muted">Choose an academic year and term.</div>'; lastRoster = []; return []; }
     const res = await Db.finance.routes.studentsOnRoute(route.id, sel.academic_year_id, sel.term_id);
     const rows = res.ok ? res.data : [];
+    lastRoster = rows;
     rosterEl.innerHTML = `
       <div class="card side-accent tile-teal"><div class="card-b table-wrap"><table class="data">
         <thead><tr><th>Student</th><th>Class</th><th>Direction</th></tr></thead>
@@ -147,20 +149,68 @@ async function loadRouteDetail(root, access, route, routes, years, terms, sel) {
   await refreshRoster();
 
   if (access.canManage) {
-    root.querySelector('#ftd-add-student').onclick = () => openAddStudentModal(route, sel, async () => { await refreshRoster(); });
-    root.querySelector('#ftd-invoice').onclick = async () => {
+    root.querySelector('#ftd-add-student').onclick = () => openAddStudentModal(route, routes, sel, async () => { await refreshRoster(); });
+    // Finance Expansion §5.7/Phase 5 — "ask before invoicing" instead of
+    // silently billing everyone on the route the moment the button is
+    // clicked. The bulk RPC already skips anyone already invoiced
+    // server-side, so the confirmation only needs to set expectations, not
+    // duplicate that check client-side.
+    root.querySelector('#ftd-invoice').onclick = () => {
       if (!sel.academic_year_id || !sel.term_id) { toast('Choose an academic year and term first.', 'err'); return; }
-      const btn = root.querySelector('#ftd-invoice');
-      btn.disabled = true; const label = btn.textContent; btn.textContent = 'Invoicing…';
-      const res = await Db.finance.routes.invoiceRoute(route.id, sel.academic_year_id, sel.term_id);
-      btn.disabled = false; btn.textContent = label;
-      if (!res.ok) { toast(res.message, 'err'); return; }
-      toast(`Invoiced ${res.data.invoiced_count} student(s)${res.data.skipped_count ? `, skipped ${res.data.skipped_count} already invoiced` : ''}.`, 'ok');
+      const term = terms.find((t) => t.id === sel.term_id);
+      const termLabel = term ? term.name : 'the selected term';
+      confirmAction(
+        `Invoice ${route.name} transport for ${termLabel} now? This adds a transport charge to the invoice of every student on this route (${lastRoster.length} currently assigned) who hasn't already been charged for it this term.`,
+        async () => {
+          const res = await Db.finance.routes.invoiceRoute(route.id, sel.academic_year_id, sel.term_id);
+          if (!res.ok) { toast(res.message, 'err'); return; }
+          toast(`Invoiced ${res.data.invoiced_count} student(s)${res.data.skipped_count ? `, skipped ${res.data.skipped_count} already invoiced` : ''}.`, 'ok');
+        }
+      );
     };
   }
 }
 
-function openAddStudentModal(route, sel, onSaved) {
+function routeAmount(route, direction) {
+  return Number((direction === 'two_way' ? route.two_way_amount : route.one_way_amount) || 0);
+}
+
+/**
+ * Finance Expansion §5.4/5.6 (Phase 5) — "Students Changing Routes" /
+ * negotiated charges. finance_assign_route() already auto-applies the new
+ * route/direction's standard charge whenever a student is (re)assigned;
+ * this is the missing "or keep the old charge on purpose" choice, asked
+ * only when there's actually a decision to make (an existing assignment
+ * this term whose charge would change). fnProceed(amountOverride) is
+ * called with either a number (keep current charge) or null (apply the
+ * new standard charge) — the caller does the actual save.
+ */
+function promptChargeAdjustment(studentName, oldAmount, newAmount, fnProceed) {
+  const verb = newAmount > oldAmount ? 'increase' : 'reduce';
+  modal({
+    title: 'Transport Charge Changed',
+    body: `
+      <p style="margin-top:0">${esc(studentName)}'s new route/direction changes their transport charge from <b>KES ${oldAmount.toLocaleString()}</b> to <b>KES ${newAmount.toLocaleString()}</b> (a ${verb}).</p>
+      <div class="field">
+        <label class="chk" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin:8px 0">
+          <input type="radio" name="ars-charge" value="new" checked style="margin-top:3px">
+          <span>Apply the new charge — KES ${newAmount.toLocaleString()} (the standard rate for this route/direction)</span>
+        </label>
+        <label class="chk" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin:8px 0">
+          <input type="radio" name="ars-charge" value="keep" style="margin-top:3px">
+          <span>Keep the current charge — KES ${oldAmount.toLocaleString()} (a negotiated/special-arrangement rate)</span>
+        </label>
+      </div>
+    `,
+    okLabel: 'Continue',
+    onOk: async () => {
+      const choice = document.querySelector('input[name="ars-charge"]:checked').value;
+      await fnProceed(choice === 'keep' ? oldAmount : null);
+    }
+  });
+}
+
+function openAddStudentModal(route, routes, sel, onSaved) {
   if (!sel.academic_year_id || !sel.term_id) { toast('Choose an academic year and term first.', 'err'); return; }
   let selectedStudent = null;
   modal({
@@ -178,11 +228,32 @@ function openAddStudentModal(route, sel, onSaved) {
     onOk: async () => {
       if (!selectedStudent) { toast('Search for and select a student first.', 'err'); return; }
       const direction = document.getElementById('ars-direction').value;
-      const res = await Db.finance.routes.assign(selectedStudent.id, route.id, direction, sel.academic_year_id, sel.term_id);
-      if (!res.ok) { toast(res.message, 'err'); return; }
-      closeModal();
-      toast(`${selectedStudent.full_name} added to ${route.name}.`, 'ok');
-      onSaved();
+      const doAssign = async (amountOverride) => {
+        const res = await Db.finance.routes.assign(selectedStudent.id, route.id, direction, sel.academic_year_id, sel.term_id, amountOverride);
+        if (!res.ok) { toast(res.message, 'err'); return; }
+        closeModal();
+        toast(`${selectedStudent.full_name} added to ${route.name}.`, 'ok');
+        onSaved();
+      };
+
+      // Only worth asking when this is actually a CHANGE from an existing
+      // assignment this term, and that change actually moves the charge —
+      // a brand-new assignment or a same-charge switch (e.g. two routes
+      // priced identically) just proceeds as before, no extra click.
+      const existingRes = await Db.finance.routes.forStudent(selectedStudent.id, sel.academic_year_id, sel.term_id);
+      const existing = existingRes.ok ? existingRes.data : null;
+      if (existing && (existing.route_id !== route.id || existing.direction !== direction)) {
+        const oldRoute = routes.find((r) => r.id === existing.route_id);
+        if (oldRoute) {
+          const oldAmount = routeAmount(oldRoute, existing.direction);
+          const newAmount = routeAmount(route, direction);
+          if (oldAmount !== newAmount) {
+            promptChargeAdjustment(selectedStudent.full_name, oldAmount, newAmount, doAssign);
+            return;
+          }
+        }
+      }
+      await doAssign(null);
     }
   });
   const qEl = document.getElementById('ars-q');

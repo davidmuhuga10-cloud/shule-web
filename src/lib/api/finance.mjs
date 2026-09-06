@@ -75,10 +75,16 @@ export function createFinanceApi(supabase) {
       };
       return fromResult(await supabase.from('finance_routes').upsert(row).select().single());
     },
-    async assign(studentId, routeId, direction, academicYearId, termId) {
+    /** amountOverride: pass a number to keep a negotiated rate instead of
+     *  the route/direction's standard charge (Finance Expansion §5.4/5.6 —
+     *  "editable where necessary... negotiated charges for individual
+     *  students"); omit/null to let the server auto-apply the standard
+     *  charge as it always has. */
+    async assign(studentId, routeId, direction, academicYearId, termId, amountOverride) {
       const { data, error } = await supabase.rpc('finance_assign_route', {
         p_student_id: studentId, p_route_id: routeId, p_direction: direction,
-        p_academic_year_id: academicYearId, p_term_id: termId
+        p_academic_year_id: academicYearId, p_term_id: termId,
+        p_amount_override: (amountOverride === undefined || amountOverride === null || amountOverride === '') ? null : Number(amountOverride)
       });
       if (error) return err(error.message);
       clearCache();
