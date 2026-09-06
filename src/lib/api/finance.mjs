@@ -419,6 +419,46 @@ export function createFinanceApi(supabase) {
     }
   };
 
+  // Finance Expansion brief item 2 ("Accounting Module") — Account Types
+  // and Accounts, same shape/conventions as voteHeads just above (simple
+  // school-scoped list + upsert, RLS does the real enforcement). See
+  // migrations/0050_finance_accounting_foundations.sql.
+  const accountTypes = {
+    async list() {
+      const { data, error } = await supabase.from('finance_account_types').select('*').order('is_default', { ascending: false }).order('name');
+      if (error) return err(error.message);
+      return ok(data || []);
+    },
+    async save(payload) {
+      payload = payload || {};
+      if (!String(payload.name || '').trim()) return err('Account type name is required.');
+      const row = { id: payload.id || undefined, name: payload.name.trim(), active: payload.active !== false };
+      const res = fromResult(await supabase.from('finance_account_types').upsert(row).select().single());
+      if (res.ok) clearCache();
+      return res;
+    }
+  };
+  const accounts = {
+    async list() {
+      const { data, error } = await supabase.from('finance_accounts').select('*, finance_account_types(name)').order('name');
+      if (error) return err(error.message);
+      return ok(data || []);
+    },
+    async save(payload) {
+      payload = payload || {};
+      if (!String(payload.name || '').trim()) return err('Account name is required.');
+      if (!payload.account_type_id) return err('Choose an account type.');
+      const row = {
+        id: payload.id || undefined, account_type_id: payload.account_type_id, name: payload.name.trim(),
+        bank_name: payload.bank_name || null, account_number: payload.account_number || null, branch: payload.branch || null,
+        is_cash: !!payload.is_cash, active: payload.active !== false
+      };
+      const res = fromResult(await supabase.from('finance_accounts').upsert(row).select().single());
+      if (res.ok) clearCache();
+      return res;
+    }
+  };
+
   return {
     /** Idempotent — call once when the Finance module is first opened;
      *  cheap no-op on every subsequent call (see migrations/0031). */
@@ -434,6 +474,7 @@ export function createFinanceApi(supabase) {
       return ok(data);
     },
     voteHeads, routes, feeStructures, invoices, debitNotes, creditNotes, collections, students, reports,
+    accountTypes, accounts,
     clearCache
   };
 }
