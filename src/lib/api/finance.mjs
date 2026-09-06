@@ -577,6 +577,83 @@ export function createFinanceApi(supabase) {
     }
   };
 
+  // Finance Expansion brief item 3 ("Payroll Module"). See
+  // migrations/0054_finance_payroll.sql for the full flow — a payroll
+  // profile per staff member, a monthly run of items (one per profiled
+  // staff member), and finalize() which posts ONE finance_expenses row
+  // (total net pay) so the rest of Finance (Record Payment, vouchers,
+  // ledger) handles the actual payment with no payroll-specific code.
+  const payrollProfiles = {
+    async list() {
+      const { data, error } = await supabase.from('finance_payroll_profiles').select('*, staff(full_name, role)').order('created_at', { ascending: false });
+      if (error) return err(error.message);
+      return ok(data || []);
+    },
+    async save(payload) {
+      payload = payload || {};
+      if (!payload.staff_id) return err('Choose a staff member.');
+      const row = {
+        id: payload.id || undefined, staff_id: payload.staff_id,
+        position: payload.position || null, department: payload.department || null,
+        basic_salary: Number(payload.basic_salary) || 0, regular_allowances: Number(payload.regular_allowances) || 0,
+        regular_deductions: Number(payload.regular_deductions) || 0, payment_method: payload.payment_method || 'bank',
+        bank_name: payload.bank_name || null, account_number: payload.account_number || null,
+        active: payload.active !== false
+      };
+      const res = fromResult(await supabase.from('finance_payroll_profiles').upsert(row).select().single());
+      if (res.ok) clearCache();
+      return res;
+    }
+  };
+  const payrollRuns = {
+    async list() {
+      const { data, error } = await supabase.from('finance_payroll_runs').select('*, finance_expenses(expense_no, amount, paid_amount, status)').order('period_year', { ascending: false }).order('period_month', { ascending: false });
+      if (error) return err(error.message);
+      return ok(data || []);
+    },
+    async items(runId) {
+      const { data, error } = await supabase.from('finance_payroll_items').select('*, staff(full_name)').eq('payroll_run_id', runId).order('created_at');
+      if (error) return err(error.message);
+      return ok(data || []);
+    },
+    /** For "open an individual employee and view their salary history
+     *  across different months" (brief §3.5) — every finalized item for
+     *  one staff member, newest first. */
+    async historyForStaff(staffId) {
+      const { data, error } = await supabase.from('finance_payroll_items')
+        .select('*, finance_payroll_runs!inner(period_year, period_month, status)')
+        .eq('staff_id', staffId).eq('finance_payroll_runs.status', 'finalized')
+        .order('created_at', { ascending: false });
+      if (error) return err(error.message);
+      return ok(data || []);
+    },
+    async create(periodYear, periodMonth) {
+      const { data, error } = await supabase.rpc('finance_payroll_create_run', { p_period_year: periodYear, p_period_month: periodMonth });
+      if (error) return err(error.message);
+      clearCache();
+      return ok(data);
+    },
+    /** adjustments: [{label, kind: 'allowance'|'deduction', amount}] */
+    async updateItem(itemId, adjustments) {
+      const { data, error } = await supabase.rpc('finance_payroll_update_item', { p_item_id: itemId, p_adjustments: adjustments || [] });
+      if (error) return err(error.message);
+      clearCache();
+      return ok(data);
+    },
+    async finalize(runId) {
+      const { data, error } = await supabase.rpc('finance_payroll_finalize', { p_run_id: runId });
+      if (error) return err(error.message);
+      clearCache();
+      return ok(data);
+    },
+    async reverse(runId, reason) {
+      const { data, error } = await supabase.rpc('finance_payroll_reverse', { p_run_id: runId, p_reason: reason || null });
+      if (error) return err(error.message);
+      clearCache();
+      return ok(data);
+    }
+  };
+
   return {
     /** Idempotent — call once when the Finance module is first opened;
      *  cheap no-op on every subsequent call (see migrations/0031). */
@@ -594,6 +671,7 @@ export function createFinanceApi(supabase) {
     voteHeads, routes, feeStructures, invoices, debitNotes, creditNotes, collections, students, reports,
     accountTypes, accounts,
     suppliers, lpos, expenses, paymentVouchers, supplierBalances,
+    payrollProfiles, payrollRuns,
     clearCache
   };
 }

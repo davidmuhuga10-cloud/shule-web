@@ -26,6 +26,7 @@ import { viewFinanceReports } from './financeReports.mjs';
 import { viewFinanceAccounting } from './financeAccounting.mjs';
 import { viewFinanceMessaging } from './financeMessaging.mjs';
 import { viewFinanceExpenses } from './financeExpenses.mjs';
+import { viewFinancePayroll } from './financePayroll.mjs';
 import { viewFinanceTransport } from './financeTransport.mjs';
 // Finance Expansion brief item 1.1 ("Student Module Under Finance"): reuse
 // the EXACT existing Students screen — same search, add/edit/move, class
@@ -62,6 +63,7 @@ const TABS = [
   { key: 'invoicing', label: 'Invoicing' },
   { key: 'accounting', label: 'Accounting' },
   { key: 'expenses', label: 'Expenses' },
+  { key: 'payroll', label: 'Payroll' },
   { key: 'reports', label: 'Reports' },
   { key: 'transport', label: 'Transport' },
   { key: 'reminders', label: 'Reminders' },
@@ -176,6 +178,7 @@ export async function viewFinanceHub(root) {
     else if (key === 'invoicing') viewFinanceInvoicing(body, access);
     else if (key === 'accounting') viewFinanceAccounting(body, access);
     else if (key === 'expenses') viewFinanceExpenses(body, access);
+    else if (key === 'payroll') viewFinancePayroll(body, access);
     else if (key === 'collections') viewFinanceCollections(body, access);
     else if (key === 'reports') viewFinanceReports(body, access);
     else if (key === 'preferences') viewFinancePreferences(body, access);

@@ -23,7 +23,11 @@ const STATUS_BADGE = {
   paid: '<span class="badge green">Paid</span>',
   pending: '<span class="badge amber">Pending</span>',
   fulfilled: '<span class="badge green">Fulfilled</span>',
-  cancelled: '<span class="badge">Cancelled</span>'
+  cancelled: '<span class="badge">Cancelled</span>',
+  // Payroll Expansion §3.7 — a reversed payroll voids its posted expense
+  // rather than deleting it (see migrations/0054). Shown distinctly so it
+  // reads as "never actually owed," not just another unpaid bill.
+  void: '<span class="badge">Voided</span>'
 };
 
 export async function viewFinanceExpenses(root, access) {
@@ -88,7 +92,7 @@ async function loadExpenses(root, suppliers, voteHeads, filters) {
     listEl.innerHTML = loader();
     const res = await Db.finance.expenses.list(f);
     const rows = res.ok ? res.data : [];
-    const totalOwed = rows.reduce((a, r) => a + (Number(r.amount) - Number(r.paid_amount)), 0);
+    const totalOwed = rows.filter((r) => r.status !== 'void').reduce((a, r) => a + (Number(r.amount) - Number(r.paid_amount)), 0);
     listEl.innerHTML = `
       <div class="card pad" style="margin-bottom:10px"><b>${rows.length}</b> expense(s) shown · Outstanding across them: <b>KES ${totalOwed.toLocaleString()}</b></div>
       <div class="card side-accent tile-teal"><div class="card-b table-wrap"><table class="data">
@@ -103,7 +107,7 @@ async function loadExpenses(root, suppliers, voteHeads, filters) {
           <td>KES ${Number(r.amount).toLocaleString()}</td>
           <td>KES ${Number(r.paid_amount).toLocaleString()}</td>
           <td>${STATUS_BADGE[r.status] || esc(r.status)}</td>
-          <td>${r.status !== 'paid' ? `<button class="btn secondary sm" data-pay="${r.id}">Record Payment</button>` : ''}</td>
+          <td>${r.status !== 'paid' && r.status !== 'void' ? `<button class="btn secondary sm" data-pay="${r.id}">Record Payment</button>` : ''}</td>
         </tr>`).join('') || '<tr><td colspan="10" class="muted">No expenses match these filters.</td></tr>'}</tbody>
       </table></div></div>
     `;
