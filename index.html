@@ -8,6 +8,13 @@
 <meta name="keywords" content="school management system Kenya, school fees management software, SMS exam results system, school SMS software, school management system, Kenyan schools software, student information system Kenya">
 <link rel="canonical" href="https://shuletop.com/">
 
+<!-- Perf fix (Kodi comparison investigation): warms up the connection to
+     Supabase before the app's own JS would otherwise discover it needs it —
+     shaves a DNS+TLS round trip off the very first request, which matters
+     most on the higher-latency mobile connections this app is built for. -->
+<link rel="preconnect" href="https://tyycjuppsdqcbrzmlimf.supabase.co">
+<link rel="dns-prefetch" href="https://tyycjuppsdqcbrzmlimf.supabase.co">
+
 <!-- Open Graph / social sharing -->
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="ShuleTop">
@@ -81,7 +88,18 @@
     </main>
     <footer class="sl-foot">ShuleTop — built for Kenyan schools.</footer>
   </div>
-  <script src="src/lib/seo-hide.js"></script>
+  <!-- Perf fix (Kodi comparison investigation): inlined instead of loaded via
+       src="src/lib/seo-hide.js". An external <script src> still has to win a
+       network race against every other resource on the page (config.js, the
+       vendor bundles, etc.) before it can run — on a first visit, before the
+       browser/service-worker cache is warm, that race is exactly what let the
+       marketing block stay on screen long enough to look like it "appears
+       during login" before vanishing. Inlining removes the network dependency
+       entirely: this runs the instant the parser reaches this line, with zero
+       chance of being delayed by anything else in flight. Logic is byte-for-byte
+       identical to src/lib/seo-hide.js (kept in place as documentation / for
+       any other page that still references it). -->
+  <script>(function () { var el = document.getElementById('seo-landing'); if (el) el.remove(); })();</script>
 
   <div id="toasts"></div>
   <div id="modal-root"></div>

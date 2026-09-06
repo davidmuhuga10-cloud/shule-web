@@ -528,7 +528,7 @@ async function finishLogin(account, phone, pw, btn) {
     renderAuth(res.message || 'Sign in failed.');
     return;
   }
-  await bootApp();
+  await bootApp(res.profile);
 }
 
 /** Shared by both the sign-in flow and the forgot-password flow — same
@@ -906,7 +906,7 @@ async function createSchoolAccount(body, otpVerifiedToken) {
     lastPhone = body.admin_phone;
     const loginRes = await loginStaffByUsername(result.username, body.password, result.school_code);
     if (loginRes.ok) {
-      await bootApp();
+      await bootApp(loginRes.profile);
       // Brief C1: the admin is already looking at their dashboard now —
       // seeding (subjects, grading scale, academic year/terms) finishes in
       // the background instead of making them wait on a progress screen.
@@ -1206,8 +1206,17 @@ window.App = {
   }
 };
 
-async function bootApp() {
-  state.profile = await getCurrentProfile();
+// Perf fix ("noticeable white space after entering login details"): every
+// caller used to just do `await bootApp()`, which ALWAYS re-fetched the
+// profile from scratch via getCurrentProfile() — even when the caller
+// (a login function, or the page-reload boot path just below) had already
+// fetched that exact same `profiles` row moments earlier to check
+// something else. That was one full extra network round trip on every
+// single sign-in and every page reload. Callers that already have a fresh
+// profile in hand now pass it straight in; only the true cold-start path
+// (no profile fetched yet at all) falls back to fetching one here.
+async function bootApp(prefetchedProfile) {
+  state.profile = prefetchedProfile || await getCurrentProfile();
   if (!state.profile) { renderAuth('Could not load your account. Please sign in again.'); return; }
 
   // Settings are per-school and RLS-gated on being signed in, so they can
@@ -1215,12 +1224,18 @@ async function bootApp() {
   // version did (there was only ever one school's settings to show, and
   // they were deliberately world-readable; now every school's are private
   // to its own members).
-  try {
-    const settingsRes = await Db.settings.get();
-    state.settings = settingsRes.ok ? settingsRes.data : {};
-  } catch (e) {
-    state.settings = {};
-  }
+  //
+  // Perf fix (Kodi comparison investigation): this used to await Settings,
+  // THEN await the teacher capabilities check — two round trips back to
+  // back even though neither depends on the other's result. Fetched
+  // concurrently now, so a teacher's sign-in pays for one round trip's
+  // worth of wall-clock time instead of two.
+  const isTeacherWithStaffId = state.profile.role === 'teacher' && !!state.profile.staff_id;
+  const [settingsRes, capsRes] = await Promise.all([
+    Db.settings.get().catch(() => ({ ok: false })),
+    isTeacherWithStaffId ? Db.capabilities.listForStaff(state.profile.staff_id).catch(() => ({ ok: false })) : Promise.resolve(null)
+  ]);
+  state.settings = settingsRes.ok ? settingsRes.data : {};
 
   // Finance module: a teacher's sidebar only shows "Finance" once they've
   // been granted one of the two finance capabilities (see staff.mjs's
@@ -1234,15 +1249,10 @@ async function bootApp() {
   // an admin — the school creator/an admin always has full access, exactly
   // like financeAccess never being checked for them above.
   state.profile.deniedModules = new Set();
-  if (state.profile.role === 'teacher' && state.profile.staff_id) {
-    try {
-      const capsRes = await Db.capabilities.listForStaff(state.profile.staff_id);
-      const caps = capsRes.ok ? capsRes.data : [];
-      state.profile.financeAccess = caps.indexOf('finance_manage_fees') !== -1 || caps.indexOf('finance_record_collections') !== -1;
-      state.profile.deniedModules = new Set(caps.filter((c) => c.indexOf('deny_') === 0));
-    } catch (e) {
-      state.profile.financeAccess = false;
-    }
+  if (isTeacherWithStaffId) {
+    const caps = (capsRes && capsRes.ok) ? capsRes.data : [];
+    state.profile.financeAccess = caps.indexOf('finance_manage_fees') !== -1 || caps.indexOf('finance_record_collections') !== -1;
+    state.profile.deniedModules = new Set(caps.filter((c) => c.indexOf('deny_') === 0));
   }
 
   $('#auth-screen').classList.add('hidden');
@@ -1442,7 +1452,9 @@ window.addEventListener('online', () => toast('Back online.', 'ok'));
   const { data: { session } } = await supabase.auth.getSession();
   if (session) {
     const profile = await getCurrentProfile();
-    if (profile) { state.profile = profile; await bootApp(); renderImpersonationBanner(); return; }
+    // Perf fix: this fetch just happened one line up — bootApp(profile)
+    // reuses it instead of calling getCurrentProfile() again internally.
+    if (profile) { await bootApp(profile); renderImpersonationBanner(); return; }
   }
   renderAuth();
 
