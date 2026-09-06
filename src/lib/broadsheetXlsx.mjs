@@ -131,20 +131,23 @@ export function buildBroadsheetAoa({ settings, exam, cls, streamName, subjects, 
   const columns = buildSubjectColumns(subjects);
   aoa.push(['Adm. No.', 'Name', 'Stream', ...columns.map((c) => c.header), 'SBJ', 'TT MKS', 'MN MKS', 'PL', 'TT PTS', 'MN PTS', 'DEV', 'STREAM POS', 'OVR POS']);
 
-  // Sprint Review correction (final): only an INDIVIDUAL result — one
-  // subject's own score for one student — rounds to a whole number
-  // (columnCell above). Every aggregate figure (a total, a mean/average, a
-  // points sum, a deviation, a class average) keeps 2 decimal places
-  // wherever it appears, on screen and in this export alike, instead of
-  // losing precision to Math.round(). TT MKS is a plain 2dp number per
-  // student (the earned/possible format lives on the TOTAL row instead).
+  // Sprint Review correction (final), amended by Round 7: only an
+  // INDIVIDUAL result — one subject's own score for one student — rounds to
+  // a whole number (columnCell above). Every aggregate figure (a mean/
+  // average, a points sum, a deviation, a class average) keeps 2 decimal
+  // places wherever it appears, on screen and in this export alike, instead
+  // of losing precision to Math.round(). TT MKS is the one exception carved
+  // out of that rule: a student's marks may never show as a decimal, so it
+  // now exports as a whole number too (matching the screen — see
+  // broadsheet.mjs), even though the earned/possible format still lives on
+  // the TOTAL row only.
   const examOutOf = Number(exam && exam.out_of) || 100;
   students.forEach((s) => {
     const subjCells = columns.map((c) => columnCell(c, s, showLevels));
     const deviation = Number(s.deviation.toFixed(2));
     aoa.push([
       s.admission_no, s.full_name, s.stream_name || '—', ...subjCells,
-      s.subject_count, Number(s.total.toFixed(2)), Number(s.average.toFixed(2)), showLevels ? (s.overall_grade || '—') : '—',
+      s.subject_count, Math.round(s.total), Number(s.average.toFixed(2)), showLevels ? (s.overall_grade || '—') : '—',
       s.total_points === null || s.total_points === undefined ? '—' : Number(s.total_points.toFixed(2)),
       s.mean_points === null || s.mean_points === undefined ? '—' : Number(s.mean_points.toFixed(2)),
       deviation > 0 ? `+${deviation}` : deviation,

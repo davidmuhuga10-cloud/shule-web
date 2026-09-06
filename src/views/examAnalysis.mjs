@@ -75,6 +75,12 @@ function topTable(title, rows) {
   // .table-wrap wrapper its sibling gradeSummaryTable() (below) already
   // has — an 8-column table with no wrap overflows the screen on a phone
   // instead of scrolling within its own box.
+  //
+  // Round 7: "Score" here is either a student's overall TOTAL MARKS (the
+  // "Top Students/Boys/Girls - Overall" tables — src/lib/examAnalysis.mjs
+  // passes `s.total`) or one subject's own score (the per-subject tables —
+  // `s.scores[sub.id]`). Both are marks, and marks must never show as a
+  // decimal, so this rounds to a whole number instead of .toFixed(2).
   return `<div style="margin-top:14px">
     <div style="font-weight:700;font-size:12.5px;margin-bottom:6px">${esc(title)}</div>
     <div class="table-wrap"><table class="print-grid"><thead><tr>
@@ -82,7 +88,7 @@ function topTable(title, rows) {
     </tr></thead><tbody>${rows.map((r) => `<tr>
       <td>${esc(r.admission_no)}</td><td>${esc(r.full_name)}</td><td>${esc(r.stream_name || '—')}</td>
       <td class="num">${r.stream_rank} / ${r.stream_total}</td><td class="num">${r.overall_rank} / ${r.overall_total}</td>
-      <td class="num"><b>${r.score.toFixed(2)}</b></td><td>${esc(r.level || '—')}</td><td>${esc(r.gender || '—')}</td>
+      <td class="num"><b>${Math.round(r.score)}</b></td><td>${esc(r.level || '—')}</td><td>${esc(r.gender || '—')}</td>
     </tr>`).join('')}</tbody></table></div>
   </div>`;
 }

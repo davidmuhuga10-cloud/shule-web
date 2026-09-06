@@ -701,6 +701,44 @@ export function createResultsApi(supabase, gradingApi) {
       return saveResultsEntryImpl(supabase, clearCache, payload);
     },
 
+    /** BUG FIX (live report — "120 students across 11 subjects... it told
+     *  me all results uploaded, yet some subjects were still missing some
+     *  results, and some came empty"): Bulk Upload Marks used to call
+     *  saveResultsEntry() once per subject/paper column in a client-side
+     *  loop — 11-15 separate sequential network round trips for one import.
+     *  Any ONE of those could fail (dropped connection, timeout, transient
+     *  hiccup) and the loop just skipped it and kept going, so a partially
+     *  failed import still ended with "Import complete" — the caller never
+     *  even knew a column failed, let alone which one.
+     *
+     *  This calls save_results_batch_multi() (0062_bulk_marks_atomic_multi_
+     *  subject.sql) instead — every subject/paper column's scores in ONE
+     *  request, saved inside ONE database transaction server-side. Either
+     *  every column commits or (if the request fails/network drops) NONE of
+     *  them do — there is no longer a way for some subjects to land while
+     *  others silently vanish. entries: [{subject_id, paper_id, scores:
+     *  [{student_id, score}]}]. */
+    async saveResultsBatchMulti(examId, classId, entries) {
+      if (!examId) return err('Missing exam.');
+      if (!classId) return err('Missing class.');
+      const cleanEntries = (entries || []).map((e) => ({
+        subject_id: e.subject_id, paper_id: e.paper_id || null,
+        scores: (e.scores || []).map((s) => ({
+          student_id: s.student_id,
+          score: s.score === null || s.score === undefined ? '' : String(s.score)
+        }))
+      }));
+      const { data, error } = await supabase.rpc('save_results_batch_multi', {
+        p_exam_id: examId, p_class_id: classId, p_entries: cleanEntries
+      });
+      if (error) return err(error.message || 'Could not save marks — please check your connection and try again.');
+      clearCache();
+      const rows = data || [];
+      const totalSaved = rows.reduce((a, r) => a + (r.saved || 0), 0);
+      const totalCleared = rows.reduce((a, r) => a + (r.cleared || 0), 0);
+      return ok(null, { saved: totalSaved, cleared: totalCleared, perSubject: rows });
+    },
+
     /** Wipe every recorded mark for one (exam, class, subject) in one click —
      *  brief §7.2's "Delete All Results" (the real gap left after Add/Edit,
      *  which the existing shared entry grid already covers by just typing

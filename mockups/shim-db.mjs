@@ -510,6 +510,10 @@ export const Db = {
   },
   results: {
     async listExams() { return { ok: true, data: [{ id: EXAM_ID, name: 'End Term 2 Exam' }, { id: 'exam-0', name: 'Mid Term 2 Exam' }] }; },
+    // Harness-only stand-in for the real per-class exam scoping (reportForms.mjs)
+    // — this shim predates that feature; just proxy to listExams() so the
+    // Report Forms screenshot flow (Class -> Exam -> Student) works.
+    async listExamsForClass() { return this.listExams(); },
     // Exam Desk board rows — Round 2 §7/§8 screenshot QA: a deliberate mix
     // of statuses so the board shows off the renamed/reordered row actions
     // ("✅ Review and Publish" replacing "📝 Enter Marks" for not_started;

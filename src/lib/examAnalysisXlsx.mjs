@@ -4,21 +4,22 @@
  * `buildExamAnalysis()` output (see examAnalysis.mjs) the on-screen report
  * renders from.
  */
-// Sprint Review correction (final): only an INDIVIDUAL result — one
-// subject's own score for one student — rounds to a whole number. Every
-// aggregate/computed figure (a mean, a points sum, a class-wide statistic)
-// keeps 2 decimal places wherever it appears, on screen and in this export
-// alike — same rule applied to views/examAnalysis.mjs. The "Score" column
-// here mirrors that view's topTable() (also 2dp, kept identical between
-// overall and per-subject tables so the download never disagrees with the
-// screen).
+// Sprint Review correction (final), amended by Round 7: only an INDIVIDUAL
+// result — one subject's own score for one student — rounds to a whole
+// number; every aggregate/computed figure (a mean, a points sum, a
+// class-wide statistic) still keeps 2 decimal places. The "Score" column
+// here is itself always a mark (a student's overall total marks on the
+// "Overall" tables, or one subject's own score on the per-subject tables —
+// see examAnalysis.mjs), so it now rounds to a whole number too, kept
+// identical to that view's topTable() so the download never disagrees with
+// the screen.
 function topTableRows(title, rows) {
   const out = [[title], ['Admno', 'Name', 'Stream', 'Stream Rank', 'Ovrl Rank', 'Score', 'Performance Level', 'Gender']];
   rows.forEach((r) => {
     out.push([
       r.admission_no, r.full_name, r.stream_name,
       `${r.stream_rank || ''} / ${r.stream_total || ''}`, `${r.overall_rank || ''} / ${r.overall_total || ''}`,
-      Number(r.score.toFixed(2)), r.level, r.gender
+      Math.round(r.score), r.level, r.gender
     ]);
   });
   out.push([]);

@@ -123,6 +123,61 @@ async function run() {
     check('saveResultsEntry issues exactly ONE supabase.rpc() call no matter how many students are in the grid', rpcCalls === 1);
   }
 
+  // ---- saveResultsBatchMulti (live BUG FIX — "120 students across 11
+  // subjects... it told me all results uploaded, yet some subjects were
+  // still missing some results, and some came empty"). Bulk Upload Marks
+  // used to call saveResultsEntry() once per subject/paper column in a
+  // client-side loop that silently skipped (and never reported) a failed
+  // column. saveResultsBatchMulti sends every column in ONE request/ONE
+  // transaction: either the whole import lands or none of it does. -------
+  {
+    const { sb, results } = freshApis();
+    const exam = (await results.saveExam({ name: 'Big Sheet', academic_year_id: 'y1', term_id: 't1', out_of: 100 })).data;
+
+    // Simulate the reported scale: 200 students across 15 subjects.
+    const studentIds = Array.from({ length: 200 }, (_, i) => `s${i + 1}`);
+    const subjectIds = Array.from({ length: 15 }, (_, i) => `su${i + 1}`);
+    const entries = subjectIds.map((subId) => ({
+      subject_id: subId, paper_id: null,
+      scores: studentIds.map((sid, i) => ({ student_id: sid, score: String(40 + (i % 60)) }))
+    }));
+
+    let rpcCalls = 0;
+    const realRpc = sb.rpc.bind(sb);
+    sb.rpc = (name, args) => { if (name === 'save_results_batch_multi') rpcCalls++; return realRpc(name, args); };
+
+    const res = await results.saveResultsBatchMulti(exam.id, 'c1', entries);
+    check('saveResultsBatchMulti succeeds for a 200-student x 15-subject sheet', res.ok === true);
+    check('saveResultsBatchMulti saves all 3000 cells (200 x 15)', res.saved === 3000);
+    check('saveResultsBatchMulti issues exactly ONE supabase.rpc() call for the whole multi-subject sheet, not one per subject', rpcCalls === 1);
+    check('saveResultsBatchMulti actually persisted all 3000 result rows', sb._tables.results.filter((r) => r.exam_id === exam.id).length === 3000);
+
+    // ---- Atomicity: one bad subject/paper must fail the WHOLE import,
+    // not just that column — proving "if network is lost/anything fails,
+    // nothing should be uploaded" rather than a silent partial import. ----
+    const exam2 = (await results.saveExam({ name: 'Big Sheet 2', academic_year_id: 'y1', term_id: 't1', out_of: 100 })).data;
+    const badEntries = subjectIds.map((subId, i) => ({
+      subject_id: subId,
+      // Subject #10 (mid-batch — several valid subjects would have already
+      // been processed before reaching it) points at a paper that was
+      // never created, forcing the RPC to fail partway through.
+      paper_id: i === 9 ? 'nonexistent-paper-id' : null,
+      scores: studentIds.map((sid, j) => ({ student_id: sid, score: String(40 + (j % 60)) }))
+    }));
+    const failedRes = await results.saveResultsBatchMulti(exam2.id, 'c1', badEntries);
+    check('saveResultsBatchMulti reports failure (not ok) when one subject in the batch is invalid', failedRes.ok === false);
+    check('saveResultsBatchMulti leaves a clear, non-empty error message', !!failedRes.message);
+    check('saveResultsBatchMulti commits NOTHING when the batch fails — not even the subjects processed before the bad one',
+      sb._tables.results.filter((r) => r.exam_id === exam2.id).length === 0);
+
+    // A network/transport-level failure (rpc() itself errors) must surface
+    // the same way — ok:false, nothing saved — never a false "success".
+    const exam3 = (await results.saveExam({ name: 'Big Sheet 3', academic_year_id: 'y1', term_id: 't1', out_of: 100 })).data;
+    sb.rpc = () => Promise.resolve({ data: null, error: { message: 'Failed to fetch' } });
+    const networkFailRes = await results.saveResultsBatchMulti(exam3.id, 'c1', entries);
+    check('saveResultsBatchMulti surfaces a network failure as ok:false with a message, never a false success', networkFailRes.ok === false && !!networkFailRes.message);
+  }
+
   // ---- deleteAllResults (brief §7.2 "Delete All Results") -------------------------
   {
     const { sb, results } = freshApis();

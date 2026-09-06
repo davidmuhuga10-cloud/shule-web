@@ -1332,7 +1332,18 @@ window.App = {
  *  message for the whole boot sequence, then bootApp() itself swaps in the
  *  real dashboard the moment it's ready. */
 function renderBootingScreen() {
-  $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card" style="text-align:center;padding:52px 32px">
+  // BUG FIX: this used to reuse the login page's ".auth > .auth-card"
+  // wrapper, but .auth-card is "display:contents" (it exists only so the
+  // login page's two side-by-side panels — .promo/.formside — can each be
+  // a direct grid item of .auth's 2-column grid). display:contents means
+  // THIS element never generates its own box, so the inline
+  // text-align/padding here silently did nothing, and its children (logo,
+  // spinner, heading, text) were each auto-placed as their own separate
+  // grid item across .auth's 2 columns instead of forming one centered
+  // card — the loading screen was rendering scattered across the page
+  // rather than as the intended centered message. Uses its own
+  // self-contained centering wrapper instead of borrowing login-page CSS.
+  $('#auth-screen').innerHTML = `<div class="boot-loading"><div class="boot-loading-card">
     <div style="font-size:38px;margin-bottom:6px">🎓</div>
     <div class="spin" style="margin:0 auto 18px"></div>
     <h2 style="margin:0 0 6px">Setting up your dashboard</h2>

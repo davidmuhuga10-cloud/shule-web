@@ -87,9 +87,9 @@ function render(root, exams, classes, sel) {
 // an explicit param rather than a module-level flag so this file stays a
 // plain function of its arguments (same convention as everything else
 // here reading from `settings`).
-function cell(score, gr, showLevels) {
-  if (score === null || score === undefined) return '<td class="num">—</td>';
-  return `<td class="num mark-cell"><b>${score}</b>${showLevels && gr && gr.grade_label ? ` <span class="mark-grade">${esc(gr.grade_label)}</span>` : ''}</td>`;
+function cell(score, gr, showLevels, tintClass) {
+  if (score === null || score === undefined) return `<td class="num${tintClass}">—</td>`;
+  return `<td class="num mark-cell${tintClass}"><b>${score}</b>${showLevels && gr && gr.grade_label ? ` <span class="mark-grade">${esc(gr.grade_label)}</span>` : ''}</td>`;
 }
 
 /** Plain-number cell for one paper's raw score — no grade badge (Learning
@@ -97,17 +97,28 @@ function cell(score, gr, showLevels) {
  *  combined % column carries the grade instead). Round 6 §1: rounded for
  *  display same as every other mark on this sheet — a teacher can enter a
  *  fractional mark for a paper same as any other score field. */
-function paperCell(score) {
-  return score === null || score === undefined ? '<td class="num">—</td>' : `<td class="num">${Math.round(score)}</td>`;
+function paperCell(score, tintClass) {
+  return score === null || score === undefined ? `<td class="num${tintClass}">—</td>` : `<td class="num${tintClass}">${Math.round(score)}</td>`;
 }
 
-function subjectHeaderHtml(sub) {
-  if (!sub.papers || !sub.papers.length) return `<th class="num subj-col">${esc(sub.code || sub.name)}</th>`;
-  const paperHeaders = sub.papers.map((p) => `<th class="num subj-col">${esc(sub.code || sub.name)} ${esc(p.name)}</th>`).join('');
-  return `${paperHeaders}<th class="num subj-col">${esc(sub.code || sub.name)} %</th>`;
+/** Legibility pass (live feedback comparing our printout to Zeraki's):
+ *  alternating subjects get a pale tint across their WHOLE column group —
+ *  header + every data/agg cell, paper sub-columns included — so a
+ *  subject reads as one visual block without needing another heavy
+ *  border. `idx` is the subject's position among all shown subjects
+ *  (0-based); odd subjects get tinted, even ones stay plain white. */
+function subjectHeaderHtml(sub, idx) {
+  const tint = idx % 2 === 1 ? ' subj-tint' : '';
+  if (!sub.papers || !sub.papers.length) return `<th class="num subj-col${tint}">${esc(sub.code || sub.name)}</th>`;
+  // Paper sub-columns use the narrower paper-col width (see main.css) —
+  // they only ever hold a bare number, never a grade badge, so they don't
+  // need the wider subj-col reserved for a "score + grade label" pairing.
+  const paperHeaders = sub.papers.map((p) => `<th class="num paper-col${tint}">${esc(sub.code || sub.name)} ${esc(p.name)}</th>`).join('');
+  return `${paperHeaders}<th class="num subj-col${tint}">${esc(sub.code || sub.name)} %</th>`;
 }
 
-function subjectRowCellsHtml(sub, student, showLevels) {
+function subjectRowCellsHtml(sub, student, showLevels, idx) {
+  const tintClass = idx % 2 === 1 ? ' subj-tint' : '';
   if (!sub.papers || !sub.papers.length) {
     // Round 5 §2 rounded ONLY Subject Combinations (SST/CRE-style, two
     // different subjects merged) for display, since those most often land
@@ -121,12 +132,12 @@ function subjectRowCellsHtml(sub, student, showLevels) {
     // a "how it's shown" change.
     const score = student.scores[sub.id];
     const displayScore = (score === null || score === undefined) ? null : Math.round(score);
-    return cell(displayScore, student.grades[sub.id], showLevels);
+    return cell(displayScore, student.grades[sub.id], showLevels, tintClass);
   }
   const raw = (student.paperScores && student.paperScores[sub.id]) || {};
-  const paperCells = sub.papers.map((p) => paperCell(raw[p.id] === undefined ? null : raw[p.id])).join('');
+  const paperCells = sub.papers.map((p) => paperCell(raw[p.id] === undefined ? null : raw[p.id], tintClass)).join('');
   const pct = student.subjectPct ? student.subjectPct[sub.id] : null;
-  return `${paperCells}${cell(pct === null || pct === undefined ? null : pct, student.grades[sub.id], showLevels)}`;
+  return `${paperCells}${cell(pct === null || pct === undefined ? null : pct, student.grades[sub.id], showLevels, tintClass)}`;
 }
 
 /** Round 5 §2: the TOTAL/AVERAGE rows at the very bottom of the Merit List —
@@ -215,6 +226,16 @@ async function load(root, classes, sel) {
   // each student's own TT MKS figure — that column reverted back to a
   // plain rounded number per the review. Still need the exam's out_of
   // here to compute each subject's "possible" on that TOTAL row.
+  //
+  // Round 7: explicit instruction — a student's marks (individual subject
+  // scores AND their TT MKS total) must never display as a decimal, so TT
+  // MKS below now shows Math.round(s.total) instead of s.total.toFixed(2).
+  // `s.total` itself stays the exact, unrounded sum at the API layer (see
+  // results.mjs) because it's also the field ranking sorts/ties by — only
+  // the on-screen/PDF/Excel presentation rounds. MN MKS (Mean Marks/
+  // "average") is a deliberate, separate exception that keeps 2dp, per the
+  // Sprint Review correction already documented on subjectAggCellsHtml
+  // above.
   const examOutOf = Number(res.exam.out_of) || 100;
 
   // Sprint Review §8: same "missing key means true" default as
@@ -240,14 +261,14 @@ async function load(root, classes, sel) {
       </div>
       <div class="card-b table-wrap"><table class="mark-list-grid">
         <thead><tr><th class="id-col">Adm. No.</th><th class="name-col">Name</th><th class="str-col">Stream</th>
-          ${res.subjects.map((s) => subjectHeaderHtml(s)).join('')}
+          ${res.subjects.map((s, i) => subjectHeaderHtml(s, i)).join('')}
           <th class="num sum-col">SBJ</th><th class="num sum-col">TT MKS</th><th class="num sum-col">MN MKS</th><th class="num sum-col">PL</th>
           <th class="num sum-col">TT PTS</th><th class="num sum-col">MN PTS</th><th class="num sum-col">DEV</th><th class="num sum-col">STREAM POS</th><th class="num sum-col">OVR POS</th></tr></thead>
         <tbody>${res.students.map((s) => `<tr>
           <td class="id-col">${esc(s.admission_no)}</td><td class="name-col">${esc(s.full_name)}</td><td class="str-col">${esc(s.stream_name || '—')}</td>
-          ${res.subjects.map((sub) => subjectRowCellsHtml(sub, s, showLevels)).join('')}
+          ${res.subjects.map((sub, i) => subjectRowCellsHtml(sub, s, showLevels, i)).join('')}
           <td class="num sum-col">${s.subject_count}</td>
-          <td class="num sum-col"><b>${s.total.toFixed(2)}</b></td><td class="num sum-col">${s.average.toFixed(2)}</td>
+          <td class="num sum-col"><b>${Math.round(s.total)}</b></td><td class="num sum-col">${s.average.toFixed(2)}</td>
           <td class="num sum-col">${showLevels ? `<span class="badge grade">${esc(s.overall_grade || '—')}</span>` : '—'}</td>
           <td class="num sum-col">${s.total_points === null ? '—' : s.total_points.toFixed(2)}</td><td class="num sum-col">${s.mean_points === null ? '—' : s.mean_points.toFixed(2)}</td>
           <td class="num sum-col">${s.deviation > 0 ? '+' : ''}${s.deviation.toFixed(2)}</td>

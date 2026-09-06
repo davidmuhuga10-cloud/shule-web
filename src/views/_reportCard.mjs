@@ -49,12 +49,22 @@ export function renderReportCard(container, data, extra) {
 
   const pointsCounted = subjects.filter((x) => x.points !== null && x.points !== undefined && x.points !== '');
   const totalPoints = pointsCounted.length ? pointsCounted.reduce((a, x) => a + Number(x.points), 0) : null;
-  // Sprint Review correction (final): only an INDIVIDUAL result (one
-  // subject's own score) rounds to a whole number — every aggregate figure
-  // (Total Marks, Total/Mean Points, deviation) keeps 2 decimal places
-  // wherever it appears, not just here. get_report_card() (schema.sql /
-  // migrations/0030_report_card_aggregates_2dp.sql) matches this at the
-  // source — this JS-side formatting is a defensive backstop either way.
+  // Round 7 (supersedes the old "Sprint Review correction (final)" below):
+  // explicit instruction — a student's TOTAL MARKS must never display as a
+  // decimal, so the "Total Marks" box now shows Math.round(data.total). The
+  // underlying `total` field itself stays the exact, unrounded figure at
+  // the API layer (results.mjs) since other things (ranking) still read it
+  // — only this presentation rounds. Total Points / Mean Points are a
+  // different metric (grading points, not marks) and keep 2 decimal places,
+  // unchanged from the original rule quoted below.
+  //
+  // Original Sprint Review correction (final), kept for history: only an
+  // INDIVIDUAL result (one subject's own score) rounds to a whole number —
+  // every aggregate figure (Total Marks, Total/Mean Points, deviation) keeps
+  // 2 decimal places wherever it appears, not just here. get_report_card()
+  // (schema.sql / migrations/0030_report_card_aggregates_2dp.sql) matches
+  // this at the source — this JS-side formatting is a defensive backstop
+  // either way. Total Marks is now the one exception carved out of this.
   const meanPoints = pointsCounted.length ? totalPoints / pointsCounted.length : null;
   const outOfTotal = (Number(exam.out_of) || 100) * (subjects.length || 1);
 
@@ -90,7 +100,7 @@ export function renderReportCard(container, data, extra) {
       </div>
       <div class="r-summary">
         <div class="box"><div class="v">${esc(data.overall_grade || '—')}</div><div class="l">Performance Level</div></div>
-        <div class="box"><div class="v">${data.total.toFixed(2)} / ${outOfTotal}</div><div class="l">Total Marks</div></div>
+        <div class="box"><div class="v">${Math.round(data.total)} / ${outOfTotal}</div><div class="l">Total Marks</div></div>
         <div class="box"><div class="v">${totalPoints === null ? '—' : totalPoints.toFixed(2)}</div><div class="l">Total Points</div></div>
         <div class="box"><div class="v">${meanPoints === null ? '—' : meanPoints.toFixed(2)}</div><div class="l">Mean Points</div></div>
       </div>

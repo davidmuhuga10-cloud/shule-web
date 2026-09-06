@@ -237,4 +237,69 @@ function mockSaveResultsBatch(args, tables) {
   return { data: [{ saved, cleared }], error: null };
 }
 
-const BUILTIN_RPCS = { save_results_batch: mockSaveResultsBatch };
+/** Built-in mock for save_results_batch_multi() (see
+ *  supabase/migrations/0062_bulk_marks_atomic_multi_subject.sql) — the fix
+ *  for the live bug where Bulk Upload Marks' per-subject client-side loop
+ *  could silently half-import a class (some subjects saved, some skipped,
+ *  "Import complete" shown regardless). Mirrors the real RPC's key
+ *  guarantee: every entry is applied to a WORKING COPY of the results
+ *  table, and that copy only replaces the real one if every entry in the
+ *  batch processes without error — one bad entry (e.g. an unknown
+ *  paper_id) means NOTHING in the whole call lands, not just that one
+ *  entry, same as a real Postgres transaction rolling back entirely. */
+function mockSaveResultsBatchMulti(args, tables) {
+  const { p_exam_id, p_class_id, p_entries } = args || {};
+  const exam = (tables.exams || []).find((e) => e.id === p_exam_id);
+  if (!exam) return { data: null, error: { message: 'Exam not found.' } };
+  const scale = (tables.grading_scales || []).find((s) => s.is_default);
+  const bands = scale ? (tables.grade_ranges || []).filter((b) => b.grading_scale_id === scale.id) : [];
+
+  const workingResults = (tables.results || []).map((r) => ({ ...r }));
+  const perEntry = [];
+
+  for (const entry of (p_entries || [])) {
+    const subjectId = entry.subject_id;
+    const paperId = entry.paper_id || null;
+    let outOf = Number(exam.out_of) || 100;
+    if (paperId) {
+      const paper = (tables.subject_papers || []).find((p) => p.id === paperId);
+      // Same all-or-nothing behaviour the real RPC gets from raising inside
+      // one PL/pgSQL transaction: bail out WITHOUT ever assigning
+      // tables.results = workingResults, so nothing from this call —
+      // including entries already processed above this one — is kept.
+      if (!paper) return { data: null, error: { message: 'Paper not found for one of the uploaded subjects.' } };
+      outOf = Number(paper.out_of) || 100;
+    }
+    let saved = 0, cleared = 0;
+    (entry.scores || []).forEach((s) => {
+      const raw = String(s.score == null ? '' : s.score).trim();
+      const idx = workingResults.findIndex((r) => r.exam_id === p_exam_id && r.subject_id === subjectId && r.student_id === s.student_id
+        && (paperId ? r.paper_id === paperId : !r.paper_id));
+      if (raw === '') {
+        if (idx !== -1) { workingResults.splice(idx, 1); cleared++; }
+        return;
+      }
+      const score = Number(raw);
+      if (isNaN(score) || score < 0 || score > outOf) return; // skip invalid silently, same as the real RPC
+      let grade_label = null, points = null, remark = null;
+      if (!paperId) {
+        const band = bands.find((b) => score >= Number(b.min_score) && score <= Number(b.max_score));
+        if (band) { grade_label = band.grade_label; points = band.points; remark = band.remark; }
+      }
+      const rec = {
+        exam_id: p_exam_id, student_id: s.student_id, subject_id: subjectId,
+        academic_year_id: exam.academic_year_id, term_id: exam.term_id,
+        class_id: p_class_id, paper_id: paperId, score, grade_label, points, remark
+      };
+      if (idx !== -1) Object.assign(workingResults[idx], rec, { updated_at: new Date(0).toISOString() });
+      else workingResults.push({ id: genId(), created_at: new Date(0).toISOString(), updated_at: new Date(0).toISOString(), ...rec });
+      saved++;
+    });
+    perEntry.push({ subject_id: subjectId, paper_id: paperId, saved, cleared });
+  }
+
+  tables.results = workingResults; // commit — only reached if every entry above succeeded
+  return { data: perEntry, error: null };
+}
+
+const BUILTIN_RPCS = { save_results_batch: mockSaveResultsBatch, save_results_batch_multi: mockSaveResultsBatchMulti };

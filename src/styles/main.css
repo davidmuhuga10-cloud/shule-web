@@ -484,8 +484,46 @@ table.data td.num,table.data th.num{text-align:center}
    (5mm instead of the app-wide 10mm — see wirePrintOptions()'s marginMm
    param) — the freed-up horizontal room absorbs the larger text without
    the wide, many-subject-column grid overflowing the printed page. */
+/* Legibility pass (live feedback: "Zeraki's printout is very legible, ours
+   you have to strain to read" — compared side by side against an actual
+   Zeraki export for the same real school). Root causes found:
+   1) Every cell (not just the outer frame) carried a bold 1.3px near-BLACK
+      border — a "wall of ink" that adds visual noise around already-small
+      print text without helping legibility. Zeraki's own sheet uses light
+      borders and leans on subtle column-group SHADING instead, which reads
+      as far calmer at the same information density.
+   2) With "Show papers separately" on (this school's actual setting),
+      English/Kiswahili each expand into 3 columns (Paper 1, Paper 2,
+      combined %) instead of 1 — every one of those got the SAME full
+      subj-col width as a normal subject, even though a paper cell only
+      ever holds a bare 2-3 digit number. That inflates the table's total
+      width well past one printed page, so the browser's print "fit to
+      page" auto-scaling has to shrink the WHOLE page harder — text and
+      all — to make it fit. Less wasted width per paper column means a
+      gentler shrink and genuinely bigger printed text, not just a
+      cosmetic change.
+   Direct feedback on an early pass of this fix: keep the grid AND the text
+   solid black, not grey — inner cell borders below are back to var(--grid-
+   ink) (black), just 1px instead of the original 1.3px so the grid still
+   reads slightly calmer without turning into grey. Text color was already
+   var(--grid-text) (black) throughout this table; the grey seen in an
+   earlier review screenshot came from that screenshot's own mockup markup
+   using a generic muted-grey style for its address line, not from this
+   component. */
 .mark-list-grid{border-collapse:collapse;font-size:13.5px;table-layout:fixed;width:100%;color:var(--grid-text)}
-.mark-list-grid th,.mark-list-grid td{border:1.3px solid var(--grid-ink);padding:7px 8px}
+.mark-list-grid th,.mark-list-grid td{border:1px solid var(--grid-ink);padding:6px 7px}
+.mark-list-grid{border:1.5px solid var(--grid-ink)}
+.mark-list-grid thead tr{border-bottom:1.5px solid var(--grid-ink)}
+/* Alternating pale tint per subject (Zeraki's own visual trick) — the
+   subject's header AND every one of its cells (including its paper
+   sub-columns, if shown separately) share one tint so a subject's whole
+   column group reads as one visual block without needing a heavy border
+   between every single subject. Kept deliberately close to white (not a
+   mid-tone) so it still prints/photocopies legibly in black & white —
+   a colored tint that's too strong turns to a grey smudge under the eye
+   or a mono printer either way, which would make this WORSE, not better. */
+.mark-list-grid td.subj-tint{background:#f3f8fc}
+.mark-list-grid th.subj-tint{background:#e3eef7}
 /* Header-truncation fix (feature brief §6): "Total Marks" was printing as
    "Total Mk" and "Stream Position" as "Stream Po..." because every header
    cell was fixed-height, single-line and clipped with overflow:hidden. Every
@@ -505,22 +543,31 @@ table.data td.num,table.data th.num{text-align:center}
 .mark-list-grid th{font-size:11.5px;font-weight:800;color:var(--grid-text);background:#f7f9fb;text-transform:uppercase;letter-spacing:.3px;text-align:left;white-space:normal;word-break:normal;overflow-wrap:break-word;vertical-align:bottom;overflow:visible}
 .mark-list-grid td{white-space:nowrap;overflow:hidden}
 .mark-list-grid td.num,.mark-list-grid th.num{text-align:center}
-.mark-list-grid th.id-col,.mark-list-grid td.id-col{width:64px}
-.mark-list-grid th.name-col,.mark-list-grid td.name-col{width:165px;white-space:normal;word-break:normal}
-.mark-list-grid th.str-col,.mark-list-grid td.str-col{width:56px}
+.mark-list-grid th.id-col,.mark-list-grid td.id-col{width:56px}
+.mark-list-grid th.name-col,.mark-list-grid td.name-col{width:150px;white-space:normal;word-break:normal}
+.mark-list-grid th.str-col,.mark-list-grid td.str-col{width:48px}
 /* Subject header cells: fixed width regardless of the subject's name length
    — a long name wraps onto multiple lines (row height grows) instead of
    stretching the column horizontally. Widened slightly (70px -> 78px)
    alongside the Next Sprint 2 §8 font bump above so headers like "ENGLISH"/
    "KISWAHILI" still fit on one line instead of wrapping awkwardly. */
 .mark-list-grid th.subj-col{width:78px}
-.mark-list-grid th.sum-col,.mark-list-grid td.sum-col{width:52px}
+/* Legibility pass: a paper sub-column (English Paper 1/2, Kiswahili Paper
+   1/2 — shown only when "Show papers separately" is on) only ever holds a
+   bare 2-3 digit number, never a grade badge — it never needed the same
+   78px a full subject/combined-% column reserves for a "score + grade
+   label" pairing. Narrowing just these reclaims real width across the
+   whole sheet (2 subjects x 2 papers = 4 columns, ~25px each saved here),
+   which is what actually earns back print-scale room and bigger text
+   overall — this one change matters more than any color/border tweak. */
+.mark-list-grid th.paper-col{width:52px}
+.mark-list-grid th.sum-col,.mark-list-grid td.sum-col{width:46px}
 /* Sprint Review redo: the earned/possible ("870/1200") format moved from
    the per-student TT MKS column to the class-level TOTAL row's subject
    columns (subj-col, already 70px — wider than sum-col — which is enough
    room for that format; verified visually, see EX7/EX8 CSS verification
    notes below). */
-.mark-list-grid tr:last-child td{border-bottom:1.3px solid var(--grid-ink)}
+.mark-list-grid tr:last-child td{border-bottom:1.5px solid var(--grid-ink)}
 .mark-cell .mark-grade{color:var(--grid-text);font-weight:600;font-size:10.5px}
 /* Round 5 §2: the TOTAL/AVERAGE rows at the very bottom of the Merit List —
    shaded like the header row so they read as a summary, not just two more
@@ -678,6 +725,18 @@ table.data td.num,table.data th.num{text-align:center}
    stretched to fill the whole column. .auth is the full-height grid;
    .auth-card is a non-rendering wrapper (display:contents) so .promo and
    .formside sit directly as the two grid columns. */
+/* Boot/loading screen ("Setting up your dashboard…") — deliberately its
+   own wrapper rather than reusing .auth/.auth-card. .auth-card is
+   display:contents (it only exists so .promo/.formside can be direct
+   grid items of .auth's 2-column layout below), so nesting the loading
+   card inside it left the card's own padding/centering with no box to
+   apply to, scattering its contents across the login grid's two columns
+   instead of showing one centered card. */
+/* A light mint tint off the brand teal (--brand-2), not the app's usual
+   near-white --bg/--surface — visibly a color, not a shade of grey/white,
+   while staying soft enough not to compete with the card's own text. */
+.boot-loading{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#e7f5f2}
+.boot-loading-card{text-align:center;padding:52px 32px}
 .auth{min-height:100vh;display:grid;grid-template-columns:.82fr 1.18fr}
 .auth-card{display:contents}
 .auth .promo{position:relative;background:linear-gradient(150deg,var(--brand),var(--brand-2));color:#fff;

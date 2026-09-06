@@ -513,17 +513,53 @@ function renderBulkPreview(area, sel, columns, matched, unmatched) {
   previewArea.querySelector('#bm-import').onclick = async () => {
     const btn = previewArea.querySelector('#bm-import');
     btn.disabled = true; btn.textContent = 'Importing…';
+    // BUG FIX (live report — "120 students across 11 subjects... it told me
+    // all results uploaded, yet some subjects were still missing some
+    // results, and some came empty"): this used to call
+    // Db.results.saveResultsEntry() once per subject/paper column in a
+    // sequential loop, silently skipping (and never reporting) any column
+    // whose call failed, then ALWAYS showing "Import complete" regardless.
+    // A network blip partway through a 11-15-subject import used to mean
+    // some subjects saved and some silently didn't, with no indication
+    // anything had gone wrong.
+    //
+    // Now sends every subject/paper column's scores in ONE request
+    // (Db.results.saveResultsBatchMulti — save_results_batch_multi RPC,
+    // 0062_bulk_marks_atomic_multi_subject.sql), saved inside ONE database
+    // transaction: either the whole import commits or (network failure,
+    // server error) NONE of it does — never a silent partial import. If it
+    // fails, nothing was saved, and that is exactly what's shown below —
+    // never a false "Import complete".
     const byColumn = scoresByColumn(matched, columns);
-    let saved = 0;
-    for (const c of columns) {
-      const scores = byColumn[c.key];
-      if (!scores.length) continue;
-      const r = await Db.results.saveResultsEntry({ exam_id: sel.exam_id, class_id: sel.class_id, subject_id: c.subject_id, paper_id: c.paper_id, scores });
-      if (r.ok) saved += r.saved;
+    const entries = columns
+      .filter((c) => byColumn[c.key].length)
+      .map((c) => ({ subject_id: c.subject_id, paper_id: c.paper_id, scores: byColumn[c.key] }));
+
+    if (!entries.length) {
+      previewArea.innerHTML = `<div class="card"><div class="card-b"><div class="empty">
+        <div class="e-ico">⚠️</div><h3>Nothing to import</h3><p>Every score cell was blank — nothing was sent.</p>
+      </div></div></div>`;
+      return;
     }
-    toast(`Imported ${saved} mark(s).`, 'ok');
+
+    const res = await Db.results.saveResultsBatchMulti(sel.exam_id, sel.class_id, entries);
+
+    if (!res.ok) {
+      previewArea.innerHTML = `<div class="card"><div class="card-b"><div class="empty">
+        <div class="e-ico">❌</div><h3>Network failed — please try again</h3>
+        <p>Nothing was saved — this import either fully succeeds or fully fails, so your class was left exactly as it was before you clicked Import.</p>
+        <p class="hint" style="color:var(--danger)">${esc(res.message || 'Could not reach the server.')}</p>
+        <button class="btn" id="bm-retry">Retry import</button>
+      </div></div></div>`;
+      previewArea.querySelector('#bm-retry').onclick = () => renderBulkPreview(area, sel, columns, matched, unmatched);
+      toast('Import failed — nothing was saved. Check your connection and try again.', 'err');
+      return;
+    }
+
+    const saved = res.saved;
+    toast(`Imported ${saved} mark(s) across ${entries.length} subject(s).`, 'ok');
     previewArea.innerHTML = `<div class="card"><div class="card-b"><div class="empty">
-      <div class="e-ico">✅</div><h3>Import complete</h3><p>${saved} mark(s) saved. Reload this page's subject tabs (switch class/exam and back) to see updated status, or click a subject above.</p>
+      <div class="e-ico">✅</div><h3>Import complete</h3><p>${saved} mark(s) saved across ${entries.length} subject(s) in one request. Reload this page's subject tabs (switch class/exam and back) to see updated status, or click a subject above.</p>
     </div></div></div>`;
   };
 }
