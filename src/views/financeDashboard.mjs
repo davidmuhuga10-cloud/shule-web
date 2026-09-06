@@ -17,8 +17,24 @@
  *   - "Total Payments" (a plain count) replaced with "Total Balances" (what's
  *     still owed overall) — clicking it jumps straight to Reports > Balances.
  */
-import { esc, options } from '../app.js';
+import { esc, options, state } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
+
+// POST-BUILD AUDIT (Sidebar_Performance_Login_Audit_Fixes.docx item 3:
+// "a greeting at the dashboard to the user") — same time-of-day + first-
+// name greeting the main app Dashboard already shows (dashboard.mjs), kept
+// as its own tiny copy here rather than exporting/importing it: it's two
+// one-line helpers, not worth coupling Finance's dashboard to the general
+// one just to share them.
+function greetingWord() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+function firstName() {
+  return ((state.profile && state.profile.name) || '').trim().split(/\s+/)[0] || '';
+}
 
 // Finance Expansion brief item 0 ("Dashboard — Inspiration From Competitor
 // SAMIS"): the director specifically called out two charts from a
@@ -174,6 +190,7 @@ export async function viewFinanceDashboard(root, access) {
 
 async function load(root, years, terms, sel, access) {
   root.innerHTML = `
+    <p class="muted" style="margin:0 0 12px;font-size:14.5px"><b>${greetingWord()}, ${esc(firstName())}</b> — here's your Finance snapshot.</p>
     <div class="fin-toolbar">
       <div class="fin-filters">
         <div class="field"><label>Academic Year</label>

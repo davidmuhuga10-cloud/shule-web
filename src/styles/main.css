@@ -249,7 +249,15 @@ input[placeholder^="🔍"]{border-color:#2563eb}
   display:grid;place-items:center;color:#fff;font-weight:800;font-size:18px;flex-shrink:0}
 .brand h1{color:#fff;font-size:17px;letter-spacing:.3px}
 .brand small{color:#8fb5b3;font-size:11px;display:block}
-.nav{flex:1;overflow-y:auto;padding:12px 10px}
+/* Slim scrollbar (matches .tabs/.fin-tabs' existing scrollbar-width:thin) —
+   without this the sidebar falls back to the browser's native scrollbar,
+   which on many browsers/OSes renders as a wide grey thumb with arrow
+   buttons that eats visibly into this already-narrow 250px column. */
+.nav{flex:1;overflow-y:auto;padding:12px 10px;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.2) transparent}
+.nav::-webkit-scrollbar{width:6px}
+.nav::-webkit-scrollbar-track{background:transparent}
+.nav::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:3px}
+.nav::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.32)}
 .nav .group{color:#6f9a98;font-size:10.5px;text-transform:uppercase;letter-spacing:.8px;padding:14px 12px 6px;font-weight:700}
 .nav a{display:flex;align-items:center;gap:11px;padding:9.5px 12px;border-radius:9px;color:#bcd6d4;
   font-weight:550;font-size:13.5px;margin-bottom:2px;cursor:pointer;transition:.12s}
@@ -294,7 +302,16 @@ body.finance-only-shell .main{margin-left:0}
 .dropdown .u-name{padding:10px 12px;border-bottom:1px solid var(--line);margin-bottom:6px}
 .dropdown a{display:block;padding:9px 12px;border-radius:7px;color:var(--ink);cursor:pointer;font-size:13.5px}
 .dropdown a:hover{background:#f2f5f8}
-.content{padding:24px;max-width:1200px;width:100%}
+/* POST-BUILD AUDIT (Sidebar_Performance_Login_Audit_Fixes.docx item 2,
+   BUG: "wasted space to the right — every module"): a hard 1200px cap
+   here used to leave a growing dead gutter on any screen wider than that
+   (visible in the reported Messaging screenshot, but true of every module
+   using this shared .content wrapper) — content occupying the full
+   remaining width, as the same feedback's item 3 asks for, means no cap
+   at all; individual screens that still want a deliberately narrower
+   reading column (long-form text, a single form) can set their own
+   max-width on their own inner wrapper. */
+.content{padding:24px;width:100%}
 /* Global safety net: no single element should ever be able to push the
    whole page into horizontal scroll (the root cause behind every "some
    pages scroll sideways" report). Everything that legitimately needs to
@@ -1444,9 +1461,29 @@ table.data td.num,table.data th.num{text-align:center}
    margin .main uses for the identical reason. */
 .fin-side-toggle{display:none}
 .fin-shell{display:flex;align-items:flex-start}
-.fin-side-nav{background:var(--brand)}
-.fin-side-nav a{display:flex;align-items:center;padding:10px 14px;border-radius:8px;color:#cfe3e2;font-weight:600;
-  font-size:13.5px;cursor:pointer;margin:2px 10px;transition:background .12s;white-space:nowrap}
+/* Flex column so the brand header stays pinned at top and the footer
+   (added below, mirroring .side-foot) stays pinned at bottom, with only
+   the middle tab list scrolling — same three-part split as the outer
+   .sidebar/.nav/.side-foot. */
+.fin-side-nav{background:var(--brand);display:flex;flex-direction:column}
+/* POST-BUILD AUDIT (Sidebar_Performance_Login_Audit_Fixes.docx item 3):
+   the school logo + name block, matching .brand (the outer app sidebar's
+   own header) — Finance's standalone tab used to jump straight into the
+   tab list with no branding at all above it. */
+/* Padding/gap/type sizes copied verbatim from .brand/.brand h1/.brand small
+   (the outer app sidebar's own header) so this is a literal replica, not a
+   smaller lookalike — see the logo-sizing comment in financeHub.mjs. */
+.fin-brand{padding:20px 20px 16px;display:flex;align-items:center;gap:11px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:8px}
+.fin-brand-name{color:#fff;font-size:17px;font-weight:700;letter-spacing:.3px;line-height:1.25}
+.fin-brand small{color:#8fb5b3;font-size:11px;display:block}
+/* A little more breathing room between items ("increase the space between
+   modules a little bit... make sure the menu has the scrollable feature")
+   — the nav already scrolls (overflow-y:auto below), this just makes the
+   list itself easier to scan at a glance without turning it into grouped
+   categories, per the same feedback's own follow-up note preferring that
+   over literal section headers. */
+.fin-side-nav a{display:flex;align-items:center;padding:11px 14px;border-radius:8px;color:#cfe3e2;font-weight:600;
+  font-size:13.5px;cursor:pointer;margin:3px 10px;transition:background .15s;white-space:nowrap}
 .fin-side-nav a:hover{background:rgba(255,255,255,.1);color:#fff}
 .fin-side-nav a.active{background:var(--primary);color:#fff}
 /* item 2 (BUG FIX): Messages used to carry a border-top + extra margin here,
@@ -1455,8 +1492,22 @@ table.data td.num,table.data th.num{text-align:center}
 .fin-side-nav a.fin-nav-msg{margin-top:2px;padding-top:10px;border-top:none}
 .fin-side-nav .fin-rail-arrow{display:none}
 .fin-side-body{flex:1;min-width:0}
+/* The scrollable middle section (tab links + Messages) — only this part
+   scrolls, so .fin-brand above and .fin-side-foot below never move.
+   Same slim-scrollbar treatment as .nav above so the two side-navs are a
+   genuine replica of each other, not just close. */
+.fin-nav-scroll{flex:1;min-height:0;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.2) transparent}
+.fin-nav-scroll::-webkit-scrollbar{width:6px}
+.fin-nav-scroll::-webkit-scrollbar-track{background:transparent}
+.fin-nav-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:3px}
+.fin-nav-scroll::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.32)}
+/* Copied verbatim from .side-foot (the outer app sidebar's own footer) —
+   "ShuleTop © 2026" belongs here too so Finance is a genuine replica,
+   not a lookalike missing a piece. */
+.fin-side-foot{padding:14px;border-top:1px solid rgba(255,255,255,.08);font-size:11.5px;color:#7ea6a4;flex-shrink:0}
 @media screen and (min-width:961px){
-  .fin-side-nav{position:fixed;top:0;bottom:0;left:0;width:var(--sidebar);padding:16px 0;z-index:32;overflow-y:auto}
+  .fin-side-nav{position:fixed;top:0;bottom:0;left:0;width:var(--sidebar);z-index:32}
+  .fin-nav-scroll{padding:16px 0}
   .fin-side-body{margin-left:var(--sidebar)}
   /* The page header (title + search bar) sits ABOVE .fin-shell as its own
      sibling, so it doesn't inherit .fin-side-body's margin. */
@@ -1465,9 +1516,9 @@ table.data td.num,table.data th.num{text-align:center}
 @media screen and (max-width:960px){
   .fin-side-toggle{display:inline-flex}
   .fin-shell{gap:0}
-  .fin-side-nav{position:fixed;top:0;bottom:0;left:0;width:230px;border-radius:0;
-    z-index:40;overflow-y:auto;transform:translateX(-100%);transition:transform .25s;box-shadow:var(--shadow);
-    padding:14px 0}
+  .fin-side-nav{position:fixed;top:0;bottom:0;left:0;width:var(--sidebar);border-radius:0;
+    z-index:40;transform:translateX(-100%);transition:transform .25s;box-shadow:var(--shadow)}
+  .fin-nav-scroll{padding:14px 0}
   .fin-side-nav a{font-size:13.5px;padding:10px 13px}
   .fin-side-nav.open{transform:none}
   .fin-side-body{margin-left:0}
@@ -1677,23 +1728,3 @@ table.data td.num,table.data th.num{text-align:center}
 .mh-detail-meta b{font-size:17px}
 @media (max-width:560px){.mh-detail-meta{grid-template-columns:repeat(2,1fr)}}
 
-/* ---------------------------------------------------------------------
-   #seo-landing (index.html) — static pre-JS marketing content. Normally
-   removed by app.js before first paint (see init()), but this CSS also
-   makes it look like a real, finished page in the rare case JS fails to
-   run at all, rather than leaving visitors staring at a blank body.
-   --------------------------------------------------------------------- */
-#seo-landing{max-width:760px;margin:0 auto;padding:32px 20px 60px}
-.sl-top{margin-bottom:28px}
-.sl-brand{font-size:19px;font-weight:800;color:var(--brand);display:flex;align-items:center;gap:8px}
-.sl-logo{font-size:22px}
-.sl-hero h1{font-size:28px;line-height:1.25;color:var(--ink);margin:0 0 10px}
-.sl-sub{font-size:15px;color:var(--muted);line-height:1.6;max-width:640px}
-.sl-features{margin-top:30px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:22px 24px;box-shadow:var(--shadow)}
-.sl-features h2{font-size:16px;margin:0 0 12px;color:var(--ink)}
-.sl-features ul{margin:0;padding-left:18px}
-.sl-features li{margin-bottom:9px;font-size:13.5px;color:var(--ink);line-height:1.55}
-.sl-cta{margin-top:26px;font-size:13.5px;color:var(--muted)}
-.sl-cta a{color:var(--primary);font-weight:600;text-decoration:none}
-.sl-cta a:hover{text-decoration:underline}
-.sl-foot{margin-top:40px;font-size:12px;color:var(--muted)}

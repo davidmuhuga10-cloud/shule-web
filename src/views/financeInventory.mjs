@@ -44,7 +44,16 @@ export async function viewFinanceInventory(root, access) {
     root.innerHTML = `<div class="card pad">You don't have permission to manage Inventory — ask your school admin for full Finance access.</div>`;
     return;
   }
-  await Db.inventory.bootstrap();
+  // POST-BUILD AUDIT (Sidebar_Performance_Login_Audit_Fixes.docx item 4,
+  // PERFORMANCE BUG): same class of bug as Payroll — this used to `await`
+  // an idempotent bootstrap call (creates default categories/units on
+  // first use only) BEFORE rendering the tab bar at all, so clicking
+  // Inventory left the generic Finance spinner up for an extra round trip
+  // for literally no benefit on every visit after the very first. The
+  // tab shell now paints immediately; bootstrap runs in the background —
+  // it only matters to Setup (categories/units), which isn't the landing
+  // tab, so there's nothing for it to block.
+  Db.inventory.bootstrap().catch(() => {});
   let active = 'dashboard';
   root.innerHTML = `
     <div class="fin-tabs wrap-tabs">

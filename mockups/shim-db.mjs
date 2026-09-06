@@ -388,6 +388,9 @@ export const Db = {
         ],
         setupComplete: true
       };
+    },
+    async getActiveContext() {
+      return { academic_year_name: '2026', term_name: 'Term 1' };
     }
   },
   classes: {

@@ -238,11 +238,36 @@ export function wirePrintOptions(root, idPrefix, suggestedFilename, marginMm) {
     const orient = root.querySelector(`#${idPrefix}-orient`).value;
     const size = root.querySelector(`#${idPrefix}-size`).value;
     if (suggestedFilename) {
+      // POST-BUILD AUDIT (Sidebar_Performance_Login_Audit_Fixes.docx item
+      // 7, BUG): a blind 5-second timeout used to be the ONLY safety net
+      // alongside 'afterprint'. Browsers' own print/"Save as PDF" dialog
+      // routinely stays open longer than 5 seconds while someone picks a
+      // printer or destination — the browser reads document.title for its
+      // OWN print header/footer at the moment Print/Save is actually
+      // clicked, not when the dialog first opened, so that timeout could
+      // (and did) revert the title back to whatever report was open
+      // PREVIOUSLY before the actual print fired — e.g. printing the
+      // Student Statement after having viewed Debit/Credit Notes shortly
+      // before could show a leftover, unrelated title in the printed
+      // header. Fixed by adding 'focus' as a second, more reliable signal
+      // (every browser's print/save dialog blurs the window while open and
+      // returns focus the instant it closes — 'afterprint' alone isn't
+      // fired consistently by every browser's "Save as PDF" path) and
+      // pushing the last-resort timeout out to 2 minutes — long enough it
+      // can never fire while a real print dialog is still genuinely open.
       const prevTitle = document.title;
       document.title = suggestedFilename;
-      const restore = () => { document.title = prevTitle; window.removeEventListener('afterprint', restore); };
+      let restored = false;
+      const restore = () => {
+        if (restored) return;
+        restored = true;
+        document.title = prevTitle;
+        window.removeEventListener('afterprint', restore);
+        window.removeEventListener('focus', restore);
+      };
       window.addEventListener('afterprint', restore);
-      setTimeout(restore, 5000);
+      window.addEventListener('focus', restore);
+      setTimeout(restore, 120000);
     }
     printWithOptions(orient, size, marginMm);
   };
@@ -1198,6 +1223,7 @@ async function router() {
   const allowed = allowedRoutes(state.profile.role)[route] === true;
   if (!allowed) route = defaultRoute();
   setActiveNav(route);
+  applyFinanceOnlyShell(route);
   const view = $('#view');
   view.innerHTML = loader();
   try {
@@ -1212,6 +1238,31 @@ async function router() {
     view.innerHTML = `<div class="card pad">⚠️ Something went wrong loading this page: ${esc(e.message || e)}</div>`;
   }
 }
+/** POST-BUILD AUDIT (Sidebar_Performance_Login_Audit_Fixes.docx item 1,
+ *  BUG): this used to be a ONE-TIME flag computed in bootApp() and never
+ *  touched again — true either for a real Finance Clerk (permanently, they
+ *  have no other nav) or for anyone who opened Finance's own "open in a new
+ *  tab" link (?view=finance stays in that tab's URL for its whole life).
+ *  The bug: Finance's own side-nav has a "💬 Messages" shortcut that calls
+ *  go('messaging') — a real app route, exiting Finance's hub entirely and
+ *  mounting the plain top-level Messaging screen. Since the class was only
+ *  ever set once at boot, it stayed stuck "on" after that navigation: the
+ *  outer sidebar stayed hidden (main.css's body.finance-only-shell .sidebar
+ *  rule) even though the user was no longer looking at Finance at all,
+ *  landing them on a screen with NO navigation of any kind visible.
+ *  Recomputing this on every route change fixes it correctly for both
+ *  cases: a real Finance Clerk has no route other than 'finance'/'my-
+ *  profile' to begin with (allowedRoutes() already confines them there), so
+ *  this stays permanently true for them regardless of route; an admin's
+ *  standalone Finance tab now correctly DROPS the flag (and gets their
+ *  normal sidebar back, Finance included as a link back in) the moment they
+ *  navigate to anything other than 'finance' inside it. */
+function applyFinanceOnlyShell(route) {
+  const standalone = state.profile.financeOnly
+    || (new URLSearchParams(location.search).get('view') === 'finance' && route === 'finance');
+  document.body.classList.toggle('finance-only-shell', standalone);
+}
+
 function defaultRoute() {
   if (state.profile.financeOnly) return 'finance';
   if (state.profile.role === 'student') return 'my-results';
@@ -1268,7 +1319,30 @@ window.App = {
 // single sign-in and every page reload. Callers that already have a fresh
 // profile in hand now pass it straight in; only the true cold-start path
 // (no profile fetched yet at all) falls back to fetching one here.
+/** POST-BUILD AUDIT (Sidebar_Performance_Login_Audit_Fixes.docx item 5):
+ *  the gap between "credentials verified" and the dashboard actually
+ *  appearing used to just leave whatever the login form last showed (a
+ *  disabled "Signing in…" button) on screen while bootApp() ran its
+ *  settings/capabilities/nav setup — a dead, ambiguous few hundred ms that
+ *  reads as the app stalling rather than doing something. Same idea as the
+ *  "Setting up your dashboard, please wait" loading screen requested (the
+ *  reference app isn't part of this codebase to copy byte-for-byte, so this
+ *  reimplements the same intent: a full, friendly, branded loading state
+ *  standing in for that gap) — replaces the auth screen with one clear
+ *  message for the whole boot sequence, then bootApp() itself swaps in the
+ *  real dashboard the moment it's ready. */
+function renderBootingScreen() {
+  $('#auth-screen').innerHTML = `<div class="auth"><div class="auth-card" style="text-align:center;padding:52px 32px">
+    <div style="font-size:38px;margin-bottom:6px">🎓</div>
+    <div class="spin" style="margin:0 auto 18px"></div>
+    <h2 style="margin:0 0 6px">Setting up your dashboard</h2>
+    <p class="muted" style="margin:0">Please wait a moment…</p>
+  </div></div>`;
+  $('#auth-screen').classList.remove('hidden');
+}
+
 async function bootApp(prefetchedProfile) {
+  renderBootingScreen();
   state.profile = prefetchedProfile || await getCurrentProfile();
   if (!state.profile) { renderAuth('Could not load your account. Please sign in again.'); return; }
 
@@ -1327,9 +1401,12 @@ async function bootApp(prefetchedProfile) {
   // data-standalone wiring) — both hide the outer sidebar so Finance's own
   // internal tab bar (Dashboard/Collections/Invoicing/Reports/Transport) is
   // the only navigation visible. ?view=finance is set by that window.open()
-  // call; it never appears in the normal in-app URL.
-  const standaloneFinanceTab = state.profile.financeOnly || new URLSearchParams(location.search).get('view') === 'finance';
-  document.body.classList.toggle('finance-only-shell', standaloneFinanceTab);
+  // call; it never appears in the normal in-app URL. The actual class is now
+  // (re)applied per-route in router() via applyFinanceOnlyShell() — see its
+  // header comment for why a one-time boot flag was a bug — this initial
+  // call just avoids a one-frame flash of the outer sidebar before the
+  // first router() call lands.
+  applyFinanceOnlyShell(state.profile.financeOnly ? 'finance' : (location.hash || '').replace(/^#\/?/, '').split('/')[0]);
 
   $('#auth-screen').classList.add('hidden');
   $('#app').classList.remove('hidden');
@@ -1490,17 +1567,6 @@ window.addEventListener('online', () => toast('Back online.', 'ok'));
 
 /* ------------------------------- INIT ----------------------------------- */
 (async function init() {
-  // SEO: #seo-landing is real static marketing HTML that exists in the raw
-  // page source for search engines and link-preview crawlers to read (see
-  // index.html for why). src/lib/seo-hide.js — a tiny, dependency-free
-  // script loaded ahead of this whole file — is what actually removes it
-  // for real visitors, specifically so the removal doesn't wait on this
-  // much larger app bundle to finish downloading on a slow connection.
-  // This is just a harmless safety net in case that file ever fails to
-  // load for some reason.
-  const seoLanding = document.getElementById('seo-landing');
-  if (seoLanding) seoLanding.remove();
-
   state.settings = {}; // no school context yet — the auth screen shows generic platform branding until sign-in
 
   // Mobile UI fix: tapping the dimmed area behind an open nav drawer used to

@@ -46,15 +46,18 @@ export async function viewFinancePayroll(root, access) {
     root.innerHTML = `<div class="card pad">You don't have permission to manage Payroll — ask your school admin for full Finance access.</div>`;
     return;
   }
-  // POST-BUILD FEEDBACK item 6: Setup is genuinely the first thing a new
-  // user sees now, not just first in the tab order — this only changes to
-  // 'run' automatically once at least one payroll profile exists (see the
-  // check right below), so a bursar who's already set Payroll up still
-  // lands somewhere useful instead of back at an empty Setup screen every
-  // time.
-  const profilesRes = await Db.finance.payrollProfiles.list();
-  const hasProfiles = profilesRes.ok && profilesRes.data.some((p) => p.active !== false);
-  let active = hasProfiles ? 'run' : 'profiles';
+  // POST-BUILD AUDIT (Sidebar_Performance_Login_Audit_Fixes.docx item 4,
+  // PERFORMANCE BUG): this used to `await` the payrollProfiles fetch BEFORE
+  // rendering anything at all — the tab bar, the whole module shell — so
+  // clicking Payroll left the user staring at Finance's generic spinner
+  // until that round trip finished, and this only gets slower as History
+  // grows into thousands of rows at a real school. Now the shell (tab bar +
+  // Setup, a fast local render) paints INSTANTLY; the "which tab should
+  // actually be the landing tab" decision (Run Payroll once profiles exist,
+  // same as before) resolves in the background and only takes over if the
+  // user hasn't already clicked something themselves in the meantime.
+  let active = 'profiles';
+  let userPicked = false;
   root.innerHTML = `
     <div class="fin-tabs wrap-tabs">
       ${SUB_TABS.map((t) => `<button data-ptab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</button>`).join('')}
@@ -70,8 +73,12 @@ export async function viewFinancePayroll(root, access) {
     else if (key === 'history') renderHistory(body);
     else renderReports(body);
   };
-  root.querySelectorAll('[data-ptab]').forEach((b) => b.onclick = () => show(b.dataset.ptab));
+  root.querySelectorAll('[data-ptab]').forEach((b) => b.onclick = () => { userPicked = true; show(b.dataset.ptab); });
   show(active);
+
+  const profilesRes = await Db.finance.payrollProfiles.list();
+  const hasProfiles = profilesRes.ok && profilesRes.data.some((p) => p.active !== false);
+  if (hasProfiles && !userPicked && active === 'profiles') show('run');
 }
 
 /* ---------------------------------------------------------------- Profiles */

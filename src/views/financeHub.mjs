@@ -110,6 +110,21 @@ export async function viewFinanceHub(root) {
   await Db.finance.bootstrap();
 
   let active = TABS[0].key;
+  // POST-BUILD AUDIT (Sidebar_Performance_Login_Audit_Fixes.docx item 3,
+  // BUG: "look like two different systems bolted together"): Finance opens
+  // as its own standalone tab (app.js's finance-only-shell hides the outer
+  // app chrome entirely for it — see applyFinanceOnlyShell()), which meant
+  // it never carried the same "Active: Year · Term" strip + school logo/
+  // name the rest of the app's topbar/sidebar always show. Added here so
+  // Finance reads as the same product, not a bolted-on second app.
+  const settings = state.settings || {};
+  // Sized/styled to match .brand .logo exactly (38x38, 10px radius, orange
+  // gradient) — the outer app sidebar's own logo tile — so Finance's nav
+  // reads as a literal replica, not a smaller lookalike (post-build audit,
+  // "should have been same size just a replica").
+  const logoHtml = settings.logo
+    ? `<img src="${esc(settings.logo)}" style="width:38px;height:38px;border-radius:10px;object-fit:cover;flex-shrink:0">`
+    : `<div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#e8890b);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🎓</div>`;
   root.innerHTML = `
     <div class="page-head fin-page-head no-print" style="align-items:flex-start;gap:20px">
       <div style="display:flex;align-items:center;gap:8px">
@@ -120,18 +135,35 @@ export async function viewFinanceHub(root) {
         <input id="fin-search-q" class="fin-search-prominent" placeholder="🔍 Search student — admission no. or name…" autocomplete="off">
         <div id="fin-search-results" class="search-results"></div>
       </div>
+      <div class="muted" id="fin-active-ctx" style="font-size:13px;white-space:nowrap;align-self:center">Active: <span class="skeleton" style="display:inline-block;width:70px;height:12px;vertical-align:middle"></span></div>
     </div>
     <div class="fin-shell">
       <div class="scrim no-print" id="fin-scrim"></div>
       <nav class="fin-side-nav no-print" id="fin-side-nav">
-        ${TABS.map((t) => `<a data-tab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</a>`).join('')}
-        <a class="fin-nav-msg" data-msg="1">💬 Messages</a>
+        <div class="fin-brand">${logoHtml}<div><div class="fin-brand-name">${esc(settings.school_name || 'ShuleTop')}</div><small>Finance</small></div></div>
+        <div class="fin-nav-scroll">
+          ${TABS.map((t) => `<a data-tab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</a>`).join('')}
+          <a class="fin-nav-msg" data-msg="1">💬 Messages</a>
+        </div>
+        <div class="fin-side-foot">ShuleTop &copy; 2026</div>
       </nav>
       <div class="fin-side-body">
         <div id="fin-hub-body"></div>
       </div>
     </div>
   `;
+  // Non-blocking — the shell above is already fully interactive; this just
+  // fills in the "Active: Year · Term" text once it resolves, same
+  // fire-and-forget pattern app.js's own topbar uses for the identical text.
+  try {
+    Promise.resolve(Db.dashboard.getActiveContext()).then((ctx) => {
+      const el = root.querySelector('#fin-active-ctx');
+      if (!el) return;
+      el.innerHTML = ctx.academic_year_name
+        ? `Active: <b>${esc(ctx.academic_year_name)}</b> · <b>${esc(ctx.term_name || 'No term set')}</b>`
+        : '<span class="muted">No active academic year set</span>';
+    }).catch(() => {});
+  } catch (e) { /* best-effort — the "Active: Year · Term" strip just stays blank */ }
   const body = root.querySelector('#fin-hub-body');
   const sideNav = root.querySelector('#fin-side-nav');
   const finScrim = root.querySelector('#fin-scrim');

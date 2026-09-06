@@ -11,6 +11,7 @@ import { Db } from '../lib/api/index.mjs';
 import { buildStatement, groupByTerm } from '../lib/finance/statement.mjs';
 import { viewFinanceCollections } from './financeCollections.mjs';
 import { renderIssueNoteModal } from './financeInvoicing.mjs';
+import { addressLines, isContactInfoComplete, missingContactInfoHtml } from '../lib/printHeader.mjs';
 
 export async function viewFinanceStudent(root, access) {
   root.innerHTML = `
@@ -221,11 +222,13 @@ async function renderProfile(root, access, student, ctx) {
           <td>${esc(n.finance_vote_heads ? n.finance_vote_heads.name : '')}</td>
           <td>${esc(n.reason || '—')}</td>
           <td class="num">${Number(n.amount || 0).toLocaleString()}</td>
-          <td>${n.reversed_at
-            ? '<span class="muted" style="font-size:12px">↩️ Reversed</span>'
-            : (n.reverses_debit_note_id || n.reverses_credit_note_id)
-              ? ''
-              : `<button class="btn ghost sm" data-reverse-note="${n.id}" data-reverse-kind="${n.kind}">↩️ Reverse</button>`}</td>
+          <td class="row-actions">
+            <button class="btn ghost sm" data-print-note="${n.id}" title="Print">🖨️</button>
+            ${n.reversed_at
+              ? '<span class="muted" style="font-size:12px">↩️ Reversed</span>'
+              : (n.reverses_debit_note_id || n.reverses_credit_note_id)
+                ? ''
+                : `<button class="btn ghost sm" data-reverse-note="${n.id}" data-reverse-kind="${n.kind}">↩️ Reverse</button>`}</td>
         </tr>`).join('') || '<tr><td colspan="6" class="muted">No debit or credit notes yet.</td></tr>'}</tbody>
       </table></div>
     </div>` : ''}
@@ -268,6 +271,16 @@ async function renderProfile(root, access, student, ctx) {
         renderProfile(root, access, student, ctx);
       }
     ));
+    // POST-BUILD AUDIT (Sidebar_Performance_Login_Audit_Fixes.docx item 6,
+    // BUG): a debit/credit note had a reverse path but no printable record
+    // at all — nothing a bursar could hand to a parent/guardian as proof a
+    // charge or discount was applied, unlike Collections (which prints a
+    // receipt) or Payment Vouchers (which print a voucher slip). Same
+    // window.open()-and-write pattern as those two.
+    root.querySelectorAll('[data-print-note]').forEach((b) => b.onclick = () => {
+      const n = notesRows.find((x) => x.id === b.dataset.printNote);
+      if (n) printNoteSlip(n, student);
+    });
   }
   const smsBtn = root.querySelector('#fst-sms');
   if (smsBtn) smsBtn.onclick = async () => {
@@ -277,6 +290,66 @@ async function renderProfile(root, access, student, ctx) {
     const res = await Db.messaging.send({ scope: 'individual_student', student_id: student.id, body: body_ });
     toast(res.ok ? 'Reminder sent.' : res.message, res.ok ? 'ok' : 'err');
   };
+}
+
+/** Printable slip for one debit/credit note — same "open a blank window,
+ *  write the HTML, print it" pattern printVoucherReceipt() (financeExpenses.
+ *  mjs) and printReceipt() (financeCollections.mjs) already use, including
+ *  the same REVERSED stamp treatment, so this behaves identically to every
+ *  other print-one-financial-record action in Finance. */
+async function printNoteSlip(note, student) {
+  if (!note) return;
+  const settingsRes = await Db.settings.get();
+  const settings = settingsRes.ok ? settingsRes.data : (state.settings || {});
+  const win = window.open('', '_blank', 'width=820,height=920');
+  if (!win) { toast('Please allow pop-ups to print this note.', 'err'); return; }
+  if (!isContactInfoComplete(settings)) {
+    win.document.write(`<html><head><title>${note.kind === 'debit' ? 'Debit' : 'Credit'} Note</title></head><body style="font-family:Arial,sans-serif;padding:40px">${missingContactInfoHtml()}</body></html>`);
+    win.document.close();
+    return;
+  }
+  const addrLines = addressLines(settings);
+  const logoHtml = settings.logo
+    ? `<img src="${esc(settings.logo)}" style="width:64px;height:64px;border-radius:10px;object-fit:cover">`
+    : `<div style="width:64px;height:64px;border-radius:10px;border:1.5px dashed #ccc;display:flex;align-items:center;justify-content:center;font-size:26px;color:#999;background:#fafbfc">🏫</div>`;
+  const isDebit = note.kind === 'debit';
+  const title = isDebit ? 'Debit Note' : 'Credit Note';
+  const voteHeadName = note.finance_vote_heads ? note.finance_vote_heads.name : '';
+  win.document.write(`
+    <html><head><title>${esc(title)} — ${esc(student.full_name)}</title>
+    <style>
+      *{box-sizing:border-box}
+      body{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:36px 40px;color:#111}
+      .dn-top{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}
+      .dn-school{font-size:19px;font-weight:800;margin:0 0 2px}
+      .dn-addr{font-size:12px;color:#555;line-height:1.5}
+      .dn-title{font-size:22px;font-weight:800;text-align:right;color:${isDebit ? '#b42318' : '#1a7f4b'}}
+      .dn-no{font-size:13px;color:#555;text-align:right}
+      table{width:100%;border-collapse:collapse;margin-top:26px}
+      td{padding:9px 4px;border-bottom:1px solid #eee;font-size:14px;vertical-align:top}
+      td.lbl{color:#666;width:170px}
+      .dn-amt{font-size:26px;font-weight:800;margin-top:22px;text-align:right;color:${isDebit ? '#b42318' : '#1a7f4b'}}
+      .dn-void{color:#c0392b;font-weight:800;font-size:15px;border:2px solid #c0392b;display:inline-block;padding:4px 14px;transform:rotate(-6deg);margin-top:18px}
+      @media print{body{padding:16px 22px}}
+    </style></head>
+    <body onload="window.print()">
+      <div class="dn-top">
+        <div style="display:flex;gap:14px;align-items:center">${logoHtml}
+          <div><p class="dn-school">${esc(settings.school_name || '')}</p><div class="dn-addr">${addrLines.map((l) => esc(l)).join('<br>')}</div></div>
+        </div>
+        <div><div class="dn-title">${esc(title)}</div><div class="dn-no">${note.created_at ? new Date(note.created_at).toLocaleDateString() : ''}</div></div>
+      </div>
+      <table>
+        <tr><td class="lbl">Student</td><td>${esc(student.full_name)} (${esc(student.admission_no)})</td></tr>
+        <tr><td class="lbl">Vote Head</td><td>${esc(voteHeadName)}</td></tr>
+        <tr><td class="lbl">Reason</td><td>${esc(note.reason || '—')}</td></tr>
+      </table>
+      <div class="dn-amt">KES ${Number(note.amount || 0).toLocaleString()}</div>
+      ${note.reversed_at ? '<div class="dn-void">REVERSED</div>' : ''}
+    </body></html>
+  `);
+  win.document.close();
+  win.focus();
 }
 
 function openRouteModal(root, access, student, ctx, routes, existing) {
