@@ -41,6 +41,9 @@ import { viewFinanceTransport } from './financeTransport.mjs';
 // judged not worth it: the actual ask here (search/add/edit/move
 // students) works identically for everyone.
 import { viewStudents } from './students.mjs';
+// Finance Expansion brief item 1.2's "Preferences or Customization" tab
+// ("almost the same as what we have as Permissions in the Exams system").
+import { viewFinancePreferences } from './financePreferences.mjs';
 
 // Next Sprint 2 §14: "Search Student" is no longer its own tab — it moved
 // up here, to the top-right of the Finance page header (same line as the
@@ -55,7 +58,8 @@ const TABS = [
   { key: 'collections', label: 'Collections' },
   { key: 'invoicing', label: 'Invoicing' },
   { key: 'reports', label: 'Reports' },
-  { key: 'transport', label: 'Transport' }
+  { key: 'transport', label: 'Transport' },
+  { key: 'preferences', label: 'Preferences' }
 ];
 
 export async function viewFinanceHub(root) {
@@ -166,6 +170,7 @@ export async function viewFinanceHub(root) {
     else if (key === 'invoicing') viewFinanceInvoicing(body, access);
     else if (key === 'collections') viewFinanceCollections(body, access);
     else if (key === 'reports') viewFinanceReports(body, access);
+    else if (key === 'preferences') viewFinancePreferences(body, access);
     else viewFinanceTransport(body, access);
   };
   root.querySelectorAll('[data-tab]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); showTab(b.dataset.tab); });

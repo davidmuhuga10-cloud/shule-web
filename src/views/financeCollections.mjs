@@ -10,6 +10,7 @@ import { esc, toast, modal, closeModal, confirmAction, loader, withBusy, state }
 import { Db } from '../lib/api/index.mjs';
 import { amountInWords } from '../lib/finance/amountInWords.mjs';
 import { addressLines, isContactInfoComplete, missingContactInfoHtml } from '../lib/printHeader.mjs';
+import { DEFAULT_RECEIPT_SMS_TEMPLATE, fillTemplate } from './financePreferences.mjs';
 
 export async function viewFinanceCollections(root, access, opts) {
   opts = opts || {};
@@ -203,6 +204,13 @@ async function openTransferModal(root, access, opts, collectionId) {
 }
 
 function openRecordModal(root, access, opts) {
+  // Finance Expansion brief item 1.2 ("Collections — SMS on Receipt"): the
+  // checkbox's CHECKED state follows the school's Preferences default
+  // (financePreferences.mjs's finance_sms_on_receipt) — state.settings
+  // already carries every settings key (fetched once at login), so this
+  // needs no extra query. The person recording the payment can still
+  // untick it for this one receipt, per the brief's "as a checkbox" ask.
+  const smsDefault = String(state.settings.finance_sms_on_receipt) === 'true';
   modal({
     title: 'Record Collection',
     body: `
@@ -219,6 +227,10 @@ function openRecordModal(root, access, opts) {
       </div>
       <div class="field"><label>Reference (optional)</label><input id="rc-reference" placeholder="e.g. M-Pesa code"></div>
       <div class="field"><label>Notes (optional)</label><input id="rc-notes"></div>
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-top:6px">
+        <input type="checkbox" id="rc-sms" ${smsDefault ? 'checked' : ''}>
+        <span>Send SMS receipt to parent</span>
+      </label>
     `,
     okLabel: 'Record & Print Receipt',
     onOk: async () => {
@@ -229,13 +241,20 @@ function openRecordModal(root, access, opts) {
       const mode = document.getElementById('rc-mode').value;
       const reference = document.getElementById('rc-reference').value;
       const notes = document.getElementById('rc-notes').value;
+      const wantsSms = document.getElementById('rc-sms').checked;
       const res = await Db.finance.collections.record(studentId, amount, mode, reference, notes);
       if (!res.ok) { toast(res.message, 'err'); return; }
       closeModal();
       toast('Collection recorded.', 'ok');
       await load(root, access, opts);
       const listRes = await Db.finance.collections.list({ student_id: studentId, limit: 1 });
-      if (listRes.ok && listRes.data[0]) printReceipt(listRes.data[0]);
+      const newCollection = listRes.ok ? listRes.data[0] : null;
+      if (newCollection) printReceipt(newCollection);
+      // SMS is best-effort and deliberately never blocks or rolls back the
+      // payment that was just recorded — a failed/slow SMS is a much
+      // smaller problem than a clerk thinking a real payment didn't go
+      // through. Its own toast, separate from "Collection recorded" above.
+      if (wantsSms && newCollection) sendReceiptSms(newCollection, studentId);
     }
   });
 
@@ -259,6 +278,30 @@ function openRecordModal(root, access, opts) {
       }, 250);
     };
   }
+}
+
+/** Finance Expansion brief item 1.2: fires the parent's payment-received
+ *  SMS through the SAME send path (Db.messaging.send, the send-message
+ *  Netlify function) every other message in the app already uses — no new
+ *  SMS channel, no separate wallet/credit accounting. Runs after the
+ *  collection is already recorded and its own toast has fired, so a
+ *  missing phone number or an SMS-provider hiccup shows its own distinct
+ *  message rather than being confused with the payment itself failing. */
+async function sendReceiptSms(collection, studentId) {
+  const balRes = await Db.finance.students.balance(studentId);
+  const balance = balRes.ok ? Number(balRes.data.balance || 0) : null;
+  const student = collection.students || {};
+  const template = state.settings.finance_sms_receipt_template || DEFAULT_RECEIPT_SMS_TEMPLATE;
+  const body = fillTemplate(template, {
+    student: student.full_name || 'the student',
+    amount: Number(collection.amount || 0).toLocaleString(),
+    receipt_no: collection.receipt_no || '',
+    balance: balance === null ? 'n/a' : balance.toLocaleString(),
+    school: state.settings.school_name || 'the school'
+  });
+  const res = await Db.messaging.send({ scope: 'individual_student', student_id: studentId, body });
+  if (!res.ok) toast(`Receipt SMS not sent: ${res.message}`, 'err');
+  else toast('Receipt SMS sent to parent.', 'ok');
 }
 
 /** Reprints a past receipt exactly as issued (brief scenario #15) — pulls
