@@ -1173,6 +1173,30 @@ table.data td.num,table.data th.num{text-align:center}
 /* ---------- Finance module ---------- */
 .fin-progress{display:inline-block;width:100px;height:8px;border-radius:5px;background:var(--line);overflow:hidden;vertical-align:middle;margin-right:6px}
 .fin-progress-fill{height:100%;background:var(--primary);border-radius:5px}
+
+/* Finance Expansion brief item 0 — the two SAMIS-inspired dashboard charts
+   (financeDashboard.mjs's budgetVsPaidChart()/classBalancesPie()). Plain
+   SVG, styled the same way the rest of Finance's cards are (.card
+   side-accent), so these read as native to this screen rather than a
+   bolted-on widget. */
+.fin-chart-row{display:grid;grid-template-columns:minmax(260px,340px) 1fr;gap:16px;margin-top:16px;align-items:stretch}
+@media screen and (max-width:860px){.fin-chart-row{grid-template-columns:1fr}}
+.chart-svg{width:100%;height:auto;display:block}
+.chart-pie{max-width:220px;margin:0 auto}
+.chart-grid{stroke:var(--line);stroke-width:1}
+.chart-axis-line{stroke:var(--line);stroke-width:1.5}
+.chart-axis-label{font-size:9.5px;fill:var(--muted);font-family:inherit}
+.chart-bar{rx:2}
+.chart-bar-budget{fill:var(--line);stroke:var(--muted);stroke-width:1;stroke-opacity:.35}
+.chart-bar-paid{fill:var(--primary)}
+.chart-legend{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin-top:10px;font-size:12px;color:var(--muted)}
+.chart-legend-pie{gap:8px 14px}
+.chart-legend span{display:inline-flex;align-items:center;gap:6px}
+.chart-legend b{color:var(--ink);font-variant-numeric:tabular-nums}
+.chart-swatch{width:10px;height:10px;border-radius:3px;display:inline-block;flex:none}
+.chart-swatch.chart-bar-budget{background:var(--line);border:1px solid var(--muted)}
+.chart-swatch.chart-bar-paid{background:var(--primary)}
+.chart-empty{padding:30px 10px;text-align:center;font-size:13px}
 .fin-statement table{width:100%;border-collapse:collapse}
 .fin-statement th,.fin-statement td{border:1px solid var(--grid-ink);padding:5px 8px;font-size:12px}
 /* Next Sprint §Finance "Redesign the Student Statement": one boxed table
