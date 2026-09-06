@@ -465,6 +465,118 @@ export function createFinanceApi(supabase) {
     }
   };
 
+  // Finance Expansion brief item 7 ("Expenses Module") — Suppliers, LPOs,
+  // Expenses/Invoices, Payment Vouchers. See migrations/0052_finance_expenses.sql
+  // for the full flow (Supplier -> LPO -> Expense -> Voucher -> Ledger) and
+  // why each RPC exists instead of a plain upsert (sequential numbering,
+  // cross-table validation, the paid/status rollup on payment).
+  const suppliers = {
+    async list() {
+      const { data, error } = await supabase.from('finance_suppliers').select('*').order('name');
+      if (error) return err(error.message);
+      return ok(data || []);
+    },
+    async save(payload) {
+      payload = payload || {};
+      if (!String(payload.name || '').trim()) return err('Supplier name is required.');
+      const row = {
+        id: payload.id || undefined, name: payload.name.trim(),
+        contact_person: payload.contact_person || null, phone: payload.phone || null,
+        email: payload.email || null, address: payload.address || null, category: payload.category || null,
+        active: payload.active !== false
+      };
+      const res = fromResult(await supabase.from('finance_suppliers').upsert(row).select().single());
+      if (res.ok) clearCache();
+      return res;
+    }
+  };
+  const lpos = {
+    async list() {
+      const { data, error } = await supabase.from('finance_lpos').select('*, finance_suppliers(name)').order('created_at', { ascending: false });
+      if (error) return err(error.message);
+      return ok(data || []);
+    },
+    /** Only 'pending' LPOs make sense to attach a new expense to — an
+     *  already-fulfilled/cancelled one shouldn't be picked again. */
+    async pendingForSupplier(supplierId) {
+      if (!supplierId) return ok([]);
+      const { data, error } = await supabase.from('finance_lpos').select('*').eq('supplier_id', supplierId).eq('status', 'pending').order('created_at', { ascending: false });
+      if (error) return err(error.message);
+      return ok(data || []);
+    },
+    async record(supplierId, description, amount, issuedDate) {
+      if (!supplierId) return err('Choose a supplier.');
+      const { data, error } = await supabase.rpc('finance_record_lpo', {
+        p_supplier_id: supplierId, p_description: description || null, p_amount: Number(amount) || 0, p_issued_date: issuedDate || null
+      });
+      if (error) return err(error.message);
+      clearCache();
+      return ok(data);
+    },
+    async cancel(id) {
+      const { error } = await supabase.from('finance_lpos').update({ status: 'cancelled' }).eq('id', id).eq('status', 'pending');
+      if (error) return err(error.message);
+      clearCache();
+      return ok(true);
+    }
+  };
+  const expenses = {
+    async list(filters) {
+      filters = filters || {};
+      let q = supabase.from('finance_expenses')
+        .select('*, finance_suppliers(name), finance_vote_heads(name), finance_lpos(lpo_no)')
+        .order('expense_date', { ascending: false });
+      if (filters.supplier_id) q = q.eq('supplier_id', filters.supplier_id);
+      if (filters.vote_head_id) q = q.eq('vote_head_id', filters.vote_head_id);
+      if (filters.status) q = q.eq('status', filters.status);
+      if (filters.from) q = q.gte('expense_date', filters.from);
+      if (filters.to) q = q.lte('expense_date', filters.to);
+      const { data, error } = await q;
+      if (error) return err(error.message);
+      return ok(data || []);
+    },
+    async record(payload) {
+      payload = payload || {};
+      if (!payload.vote_head_id) return err('Choose an expense account/votehead.');
+      if (!(Number(payload.amount) > 0)) return err('Amount must be greater than zero.');
+      const { data, error } = await supabase.rpc('finance_record_expense', {
+        p_vote_head_id: payload.vote_head_id, p_amount: Number(payload.amount), p_description: payload.description || null,
+        p_supplier_id: payload.supplier_id || null, p_lpo_id: payload.lpo_id || null, p_expense_date: payload.expense_date || null
+      });
+      if (error) return err(error.message);
+      clearCache();
+      return ok(data);
+    }
+  };
+  const paymentVouchers = {
+    async list() {
+      const { data, error } = await supabase.from('finance_payment_vouchers')
+        .select('*, finance_expenses(expense_no, description, finance_suppliers(name)), finance_accounts(name)')
+        .order('created_at', { ascending: false });
+      if (error) return err(error.message);
+      return ok(data || []);
+    },
+    async record(expenseId, accountId, amount, paymentDate, paymentMethod, notes) {
+      if (!expenseId) return err('Choose an expense to pay.');
+      if (!accountId) return err('Choose which account this is paid from.');
+      if (!(Number(amount) > 0)) return err('Amount must be greater than zero.');
+      const { data, error } = await supabase.rpc('finance_record_expense_payment', {
+        p_expense_id: expenseId, p_account_id: accountId, p_amount: Number(amount),
+        p_payment_date: paymentDate || null, p_payment_method: paymentMethod || 'bank', p_notes: notes || null
+      });
+      if (error) return err(error.message);
+      clearCache();
+      return ok(data);
+    }
+  };
+  const supplierBalances = {
+    async list() {
+      const { data, error } = await supabase.rpc('finance_supplier_balances');
+      if (error) return err(error.message);
+      return ok(data || []);
+    }
+  };
+
   return {
     /** Idempotent — call once when the Finance module is first opened;
      *  cheap no-op on every subsequent call (see migrations/0031). */
@@ -481,6 +593,7 @@ export function createFinanceApi(supabase) {
     },
     voteHeads, routes, feeStructures, invoices, debitNotes, creditNotes, collections, students, reports,
     accountTypes, accounts,
+    suppliers, lpos, expenses, paymentVouchers, supplierBalances,
     clearCache
   };
 }
