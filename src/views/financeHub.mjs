@@ -24,6 +24,23 @@ import { viewFinanceCollections } from './financeCollections.mjs';
 import { openStudentProfile } from './financeStudent.mjs';
 import { viewFinanceReports } from './financeReports.mjs';
 import { viewFinanceTransport } from './financeTransport.mjs';
+// Finance Expansion brief item 1.1 ("Student Module Under Finance"): reuse
+// the EXACT existing Students screen — same search, add/edit/move, class
+// drill-down, bulk upload entry point — as one more tab here, rather than
+// building a second, parallel students UI. viewStudents(root) is already
+// fully self-contained (it doesn't assume it's mounted at the app's own
+// top-level #view), so this is a tab-wiring change, not a new screen.
+// Known, accepted trade-off: a few of its secondary actions (Message
+// Students, Class List print view, Bulk Upload, its own "Reports" link)
+// call the app's normal go('messaging')/go('bulk-upload')/etc., which
+// navigates OUT of Finance to that screen on the main sidebar — fine for
+// an admin/bursar (those routes are already on their sidebar), but a
+// Finance Clerk (see app.js's NAV.financeOnly) doesn't have those routes
+// and would bounce straight back to Finance. Rebuilding students.mjs's
+// internal navigation to stay "Finance-aware" for that one edge case was
+// judged not worth it: the actual ask here (search/add/edit/move
+// students) works identically for everyone.
+import { viewStudents } from './students.mjs';
 
 // Next Sprint 2 §14: "Search Student" is no longer its own tab — it moved
 // up here, to the top-right of the Finance page header (same line as the
@@ -34,6 +51,7 @@ import { viewFinanceTransport } from './financeTransport.mjs';
 // Dashboard in the nav order (was 3rd).
 const TABS = [
   { key: 'dashboard', label: 'Dashboard' },
+  { key: 'students', label: 'Students' },
   { key: 'collections', label: 'Collections' },
   { key: 'invoicing', label: 'Invoicing' },
   { key: 'reports', label: 'Reports' },
@@ -144,6 +162,7 @@ export async function viewFinanceHub(root) {
     toggleFinNav(false);
     renderLoading(body, 'Loading, please wait…');
     if (key === 'dashboard') viewFinanceDashboard(body, access);
+    else if (key === 'students') viewStudents(body);
     else if (key === 'invoicing') viewFinanceInvoicing(body, access);
     else if (key === 'collections') viewFinanceCollections(body, access);
     else if (key === 'reports') viewFinanceReports(body, access);
