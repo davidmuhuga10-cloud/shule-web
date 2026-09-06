@@ -111,6 +111,7 @@ export async function openStaffModal(root, existing, onSaved) {
   let canPublish = false;
   let canFinanceCollect = false;
   let canFinanceManage = false;
+  let isFinanceClerk = false;
   // SignUp_Fixes §5: which modules THIS staff member is currently blocked
   // from (deny_* rows) — everything not listed here they get by default.
   let deniedModules = [];
@@ -120,6 +121,7 @@ export async function openStaffModal(root, existing, onSaved) {
     canPublish = caps.indexOf('publish_results') !== -1;
     canFinanceCollect = caps.indexOf('finance_record_collections') !== -1;
     canFinanceManage = caps.indexOf('finance_manage_fees') !== -1;
+    isFinanceClerk = caps.indexOf('finance_clerk') !== -1;
     deniedModules = caps.filter((c) => c.indexOf('deny_') === 0);
   }
   modal({
@@ -156,6 +158,8 @@ export async function openStaffModal(root, existing, onSaved) {
       ${existing ? `<div class="field"><label class="chk"><input type="checkbox" id="sf-publish" ${canPublish ? 'checked' : ''}> Can publish exam results (final step of the approval workflow)</label></div>` : ''}
       ${existing ? `<div class="field"><label class="chk"><input type="checkbox" id="sf-finance-collect" ${canFinanceCollect ? 'checked' : ''}> Finance: can record collections &amp; view statements</label></div>` : ''}
       ${existing ? `<div class="field"><label class="chk"><input type="checkbox" id="sf-finance-manage" ${canFinanceManage ? 'checked' : ''}> Finance: can manage fees, invoices &amp; credit/debit notes</label></div>` : ''}
+      ${existing ? `<div class="field"><label class="chk"><input type="checkbox" id="sf-finance-clerk" ${isFinanceClerk ? 'checked' : ''}> Finance Clerk — sidebar shows ONLY Finance, hides everything else (Dashboard, Exams, Students, ...)</label>
+        <div class="hint" style="margin-left:26px">Pair this with one of the two Finance permissions above — this only changes what they SEE, not what they can do inside Finance.</div></div>` : ''}
       ${existing ? `
       <details style="margin-top:4px">
         <summary style="cursor:pointer;font-weight:600;font-size:13px">Access Control — block modules (optional)</summary>
@@ -232,6 +236,13 @@ export async function openStaffModal(root, existing, onSaved) {
           const capRes = wantsFinanceManage
             ? await Db.capabilities.grant(existing.id, 'finance_manage_fees')
             : await Db.capabilities.revoke(existing.id, 'finance_manage_fees');
+          if (!capRes.ok) toast(capRes.message, 'err');
+        }
+        const wantsFinanceClerk = document.getElementById('sf-finance-clerk') && document.getElementById('sf-finance-clerk').checked;
+        if (wantsFinanceClerk !== isFinanceClerk) {
+          const capRes = wantsFinanceClerk
+            ? await Db.capabilities.grant(existing.id, 'finance_clerk')
+            : await Db.capabilities.revoke(existing.id, 'finance_clerk');
           if (!capRes.ok) toast(capRes.message, 'err');
         }
         // SignUp_Fixes §5: Access Control's module-block checkboxes — each

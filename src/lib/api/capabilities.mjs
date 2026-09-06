@@ -41,14 +41,26 @@ export const DENIABLE_MODULES = [
   { key: 'deny_timetable', route: 'my-timetable', label: 'My Timetable' }
 ];
 
+// "Finance Clerk" (Kodi-comparison follow-up): a teacher whose ENTIRE
+// sidebar becomes Finance's own sections (Dashboard/Collections/Invoicing/
+// Reports/Transport) — no general school Dashboard, no Exams, no Students,
+// nothing else, and they land straight on Finance at login. Deliberately
+// its own single capability rather than reusing DENIABLE_MODULES one-by-one
+// (an admin would otherwise have to remember to tick all six deny_* boxes,
+// and a NEW deniable module added later would silently leak into a clerk's
+// nav until someone remembered to also deny it there). Still independent
+// of finance_manage_fees/finance_record_collections — this one only
+// controls what the SIDEBAR looks like; those two still control what the
+// clerk can actually do once inside Finance, exactly as for any bursar.
 export const CAPABILITIES = [
-  'publish_results', 'finance_record_collections', 'finance_manage_fees',
+  'publish_results', 'finance_record_collections', 'finance_manage_fees', 'finance_clerk',
   ...DENIABLE_MODULES.map((m) => m.key)
 ];
 export const CAPABILITY_LABELS = {
   publish_results: 'Publish exam results',
   finance_record_collections: 'Finance: record collections & view statements',
   finance_manage_fees: 'Finance: manage fees, invoices & credit/debit notes',
+  finance_clerk: 'Finance Clerk — sidebar shows ONLY Finance, nothing else',
   ...Object.fromEntries(DENIABLE_MODULES.map((m) => [m.key, `Block access to ${m.label}`]))
 };
 

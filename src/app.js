@@ -1055,6 +1055,21 @@ const NAV = {
   ],
   parent: [
     { route: 'my-children', label: 'My Children', ico: '👨‍👩‍👧' }
+  ],
+  // Finance Clerk sketch (approved): this REPLACES a teacher's normal NAV
+  // entirely — see buildNav()/allowedRoutes()/defaultRoute() below, which
+  // all check state.profile.financeOnly (set in bootApp() from the
+  // 'finance_clerk' capability) before falling back to NAV[role]. Nothing
+  // outside Finance is reachable: no general Dashboard, no Exams, no
+  // Students. 'finance' is still the SAME viewFinanceHub() screen every
+  // admin/bursar uses — its own internal tab bar (Dashboard/Collections/
+  // Invoicing/Reports/Transport) is what a clerk actually navigates with,
+  // once the outer sidebar is hidden for them (see main.css's
+  // .finance-only-shell and bootApp() below).
+  financeOnly: [
+    { route: 'finance', label: 'Finance', ico: '💰' },
+    { section: 'Account' },
+    { route: 'my-profile', label: 'My Profile', ico: '🙍' }
   ]
 };
 
@@ -1079,6 +1094,15 @@ function routeDenyKey(route) {
 }
 
 function allowedRoutes(role) {
+  // Finance Clerk: routes are exactly NAV.financeOnly's — Finance and My
+  // Profile — full stop. Skipping HIDDEN_ALLOWED_ROUTES/deny_* here too:
+  // those exist to fine-tune a NORMAL teacher's access, but a clerk's nav
+  // was never the normal teacher list to begin with.
+  if (state.profile && state.profile.financeOnly) {
+    const set = {};
+    NAV.financeOnly.forEach((it) => { if (it.route) set[it.route] = true; });
+    return set;
+  }
   const set = {};
   (NAV[role] || []).forEach((it) => {
     if (it.route) set[it.route] = true;
@@ -1096,7 +1120,9 @@ function allowedRoutes(role) {
 }
 
 function buildNav() {
-  const items = NAV[state.profile.role] || NAV.student;
+  // Finance Clerk: a completely different, much shorter nav list overrides
+  // the role's normal one — see the NAV.financeOnly comment above.
+  const items = state.profile.financeOnly ? NAV.financeOnly : (NAV[state.profile.role] || NAV.student);
   let html = '';
   items.forEach((it) => {
     // e.g. { hideUnless: 'financeAccess' } — a per-USER gate (not per-role,
@@ -1116,12 +1142,34 @@ function buildNav() {
         <a class="parent-toggle"><span class="ico">${it.ico}</span>${esc(it.parent)}<span class="caret">▸</span></a>
         <div class="subnav">${kids}</div></div>`;
     } else {
-      html += `<a data-route="${it.route}"><span class="ico">${it.ico}</span>${esc(it.label)}</a>`;
+      // Finance opens in its own browser tab (see the standalone-tab wiring
+      // just below) for everyone EXCEPT a Finance Clerk, who is already
+      // living inside Finance full-time — no "open elsewhere" affordance
+      // makes sense on their own landing page. The ↗ mirrors the approved
+      // sketch's "opens here ⧉" hint so it isn't a silent surprise.
+      const opensStandalone = it.route === 'finance' && !state.profile.financeOnly;
+      html += `<a data-route="${it.route}"${opensStandalone ? ' data-standalone="1"' : ''}><span class="ico">${it.ico}</span>${esc(it.label)}${opensStandalone ? ' <span class="nav-ext-hint">↗</span>' : ''}</a>`;
     }
   });
   $('#nav').innerHTML = html;
   $('#nav').querySelectorAll('a[data-route]').forEach((a) => {
-    a.onclick = () => go(a.getAttribute('data-route'));
+    const route = a.getAttribute('data-route');
+    if (a.hasAttribute('data-standalone')) {
+      // Kodi-comparison follow-up: Finance is being treated as its own
+      // product ahead of eventually moving to its own domain. Opening it in
+      // a second tab (rather than swapping the current page's view, like
+      // every other module) is what makes it feel separate right now —
+      // same login/session (same origin, so Supabase's auth session in
+      // localStorage is shared), just a different window. standaloneShell()
+      // below reads ?view=finance to hide that tab's own sidebar entirely,
+      // so it opens straight into Finance full-screen with nothing else.
+      a.onclick = (e) => {
+        e.preventDefault();
+        window.open(`${location.pathname}?view=finance#/finance`, '_blank', 'noopener');
+      };
+    } else {
+      a.onclick = () => go(route);
+    }
     // Perf fix: start fetching that screen's code the moment intent shows
     // (hover on desktop, touchstart on mobile/tablet) — a deliberate click
     // usually lands after this has already finished, so the actual
@@ -1165,6 +1213,7 @@ async function router() {
   }
 }
 function defaultRoute() {
+  if (state.profile.financeOnly) return 'finance';
   if (state.profile.role === 'student') return 'my-results';
   if (state.profile.role === 'parent') return 'my-children';
   return 'dashboard';
@@ -1202,6 +1251,10 @@ window.App = {
     await authLogout();
     state.profile = null;
     state.settings = {};
+    // Otherwise a Finance Clerk's stripped-down shell would still be
+    // showing (sidebar hidden, etc.) underneath the login screen for
+    // whoever signs in next on this same tab.
+    document.body.classList.remove('finance-only-shell');
     renderAuth();
   }
 };
@@ -1249,18 +1302,41 @@ async function bootApp(prefetchedProfile) {
   // an admin — the school creator/an admin always has full access, exactly
   // like financeAccess never being checked for them above.
   state.profile.deniedModules = new Set();
+  // Finance Clerk (approved sketch): a teacher granted 'finance_clerk' gets
+  // a completely different, Finance-only sidebar — see NAV.financeOnly,
+  // buildNav(), allowedRoutes() and defaultRoute() above. Always false for
+  // an admin, same reasoning as financeAccess/deniedModules above.
+  state.profile.financeOnly = false;
   if (isTeacherWithStaffId) {
     const caps = (capsRes && capsRes.ok) ? capsRes.data : [];
     state.profile.financeAccess = caps.indexOf('finance_manage_fees') !== -1 || caps.indexOf('finance_record_collections') !== -1;
     state.profile.deniedModules = new Set(caps.filter((c) => c.indexOf('deny_') === 0));
+    state.profile.financeOnly = caps.indexOf('finance_clerk') !== -1;
   }
+  // A Finance Clerk needs Finance itself visible even without financeAccess
+  // granted separately — otherwise buildNav()'s hideUnless check would
+  // still be moot (NAV.financeOnly's Finance entry has no hideUnless), but
+  // viewFinanceHub() itself would show "No Finance access" until the admin
+  // ALSO grants finance_manage_fees/finance_record_collections. That's
+  // intentional (see the CAPABILITIES comment) — the clerk flag alone only
+  // shapes navigation, not what they can do once inside.
+  if (state.profile.financeOnly) state.profile.financeAccess = true;
+
+  // Same "own product" tab, whether reached by a clerk's normal login or by
+  // an admin/bursar opening Finance in its own tab (see buildNav()'s
+  // data-standalone wiring) — both hide the outer sidebar so Finance's own
+  // internal tab bar (Dashboard/Collections/Invoicing/Reports/Transport) is
+  // the only navigation visible. ?view=finance is set by that window.open()
+  // call; it never appears in the normal in-app URL.
+  const standaloneFinanceTab = state.profile.financeOnly || new URLSearchParams(location.search).get('view') === 'finance';
+  document.body.classList.toggle('finance-only-shell', standaloneFinanceTab);
 
   $('#auth-screen').classList.add('hidden');
   $('#app').classList.remove('hidden');
   buildNav();
   $('#avatar').textContent = initials(state.profile.name);
   $('#um-name').textContent = state.profile.name;
-  $('#um-role').textContent = ({ admin: 'Administrator', teacher: 'Teacher / Staff', student: 'Student', parent: 'Parent' })[state.profile.role] || state.profile.role;
+  $('#um-role').textContent = state.profile.financeOnly ? 'Finance Clerk' : (({ admin: 'Administrator', teacher: 'Teacher / Staff', student: 'Student', parent: 'Parent' })[state.profile.role] || state.profile.role);
   applyBranding();
 
   Db.dashboard.getActiveContext().then((active) => {

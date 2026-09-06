@@ -40,9 +40,25 @@ async function run() {
       CAPABILITIES.indexOf('publish_results') !== -1 &&
       CAPABILITIES.indexOf('finance_manage_fees') !== -1 &&
       CAPABILITIES.indexOf('finance_record_collections') !== -1);
+    check('CAPABILITIES includes finance_clerk (Finance Clerk\'s sidebar-only flag)',
+      CAPABILITIES.indexOf('finance_clerk') !== -1);
     check('CAPABILITIES also includes one deny_* key per deniable module, and nothing else',
       DENIABLE_MODULES.every((m) => CAPABILITIES.indexOf(m.key) !== -1) &&
-      CAPABILITIES.length === 3 + DENIABLE_MODULES.length);
+      CAPABILITIES.length === 4 + DENIABLE_MODULES.length);
+  }
+
+  {
+    // Kodi-comparison follow-up: finance_clerk grants/revokes exactly like
+    // any other capability — app.js reads it at boot to swap in
+    // NAV.financeOnly instead of the normal teacher nav.
+    const sb = createMockSupabase({ staff: [{ id: 'st3', full_name: 'Mr. Kamau' }] });
+    const api = createCapabilitiesApi(sb);
+    const granted = await api.grant('st3', 'finance_clerk');
+    check('finance_clerk is a known capability, not rejected', granted.ok === true);
+    const listed = await api.listForStaff('st3');
+    check('listForStaff reflects the finance_clerk grant', listed.data.indexOf('finance_clerk') !== -1);
+    const revoked = await api.revoke('st3', 'finance_clerk');
+    check('revoke removes finance_clerk', revoked.ok === true);
   }
 
   {

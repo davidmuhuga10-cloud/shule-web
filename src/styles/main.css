@@ -254,6 +254,7 @@ input[placeholder^="🔍"]{border-color:#2563eb}
 .nav a{display:flex;align-items:center;gap:11px;padding:9.5px 12px;border-radius:9px;color:#bcd6d4;
   font-weight:550;font-size:13.5px;margin-bottom:2px;cursor:pointer;transition:.12s}
 .nav a .ico{width:18px;text-align:center;opacity:.9;font-size:15px}
+.nav a .nav-ext-hint{margin-left:auto;opacity:.55;font-size:12px}
 .nav a:hover{background:rgba(255,255,255,.07);color:#fff}
 .nav a.active{background:var(--primary);color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.18)}
 /* Expandable parent menus */
@@ -269,6 +270,18 @@ input[placeholder^="🔍"]{border-color:#2563eb}
 .side-foot{padding:14px;border-top:1px solid rgba(255,255,255,.08);font-size:11.5px;color:#7ea6a4}
 
 .main{flex:1;margin-left:var(--sidebar);min-width:0;display:flex;flex-direction:column}
+/* Finance Clerk / "Finance opened in its own tab" (Kodi-comparison
+   follow-up, approved sketch): hides the OUTER app sidebar entirely so
+   Finance's own internal tab bar (.fin-side-nav, further down) is the only
+   navigation on screen — reads as its own product rather than a page
+   inside the school system. Set on <body> by app.js's bootApp(), either
+   because this login is a Finance Clerk or because this specific tab was
+   opened via the Finance nav item's "open in new tab" link
+   (?view=finance). Nothing here changes any OTHER screen's appearance —
+   every rule is scoped under this one body class. */
+body.finance-only-shell .sidebar{display:none}
+body.finance-only-shell .topbar .menu-toggle{display:none!important}
+body.finance-only-shell .main{margin-left:0}
 .topbar{height:62px;background:var(--surface);border-bottom:1px solid var(--line);display:flex;align-items:center;
   gap:14px;padding:0 24px;position:sticky;top:0;z-index:30}
 .topbar .menu-toggle{display:none}

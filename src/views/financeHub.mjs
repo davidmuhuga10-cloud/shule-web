@@ -54,9 +54,21 @@ export async function viewFinanceHub(root) {
     };
   }
   if (!access.canCollect) {
-    renderPrereq(root, 'No Finance access',
-      'You have not been granted access to the Finance module yet. Ask your school admin to grant you Finance access under Teachers and Staff.',
-      'dashboard', 'Go to Dashboard');
+    // Finance Clerk (Kodi-comparison follow-up): this person's ENTIRE
+    // sidebar is Finance — there is no Dashboard route for the usual
+    // "Go to Dashboard" button to send them to (app.js's allowedRoutes()
+    // only allows finance/my-profile for them), so a misconfigured clerk
+    // (finance_clerk granted without also granting finance_manage_fees/
+    // finance_record_collections) gets a message that actually matches
+    // their situation instead of a dead-end button.
+    if (state.profile.financeOnly) {
+      renderPrereq(root, 'No Finance access yet',
+        'Your account is set up as a Finance Clerk, but hasn\'t been given Finance permissions yet. Ask your school admin to grant "Finance: record collections" or "Finance: manage fees" under Teachers and Staff.');
+    } else {
+      renderPrereq(root, 'No Finance access',
+        'You have not been granted access to the Finance module yet. Ask your school admin to grant you Finance access under Teachers and Staff.',
+        'dashboard', 'Go to Dashboard');
+    }
     return;
   }
 
