@@ -92,7 +92,11 @@ export async function loginStaff(identifier, password, schoolCode) {
   if (!isGenuineSession(data, email)) { await supabase.auth.signOut(); return { ok: false, message: 'Incorrect username/phone or password.' }; }
   const guard = await verifySchoolMatch(schoolCode);
   if (!guard.ok) { await supabase.auth.signOut(); return guard; }
-  return { ok: true, session: data.session };
+  if (guard.profile.status !== 'active') { await supabase.auth.signOut(); return { ok: false, message: 'This account is not active. Contact your school admin.' }; }
+  // Perf fix: hand the profile straight back so the caller can pass it into
+  // bootApp(profile) instead of bootApp() re-fetching the exact same row —
+  // see verifySchoolMatch's doc comment above for the full story.
+  return { ok: true, session: data.session, profile: guard.profile };
 }
 
 /** Used right after self-serve school signup, where the frontend already
@@ -106,7 +110,11 @@ export async function loginStaffByUsername(username, password, schoolCode) {
   if (!isGenuineSession(data, email)) { await supabase.auth.signOut(); return { ok: false, message: 'Incorrect username/phone or password.' }; }
   const guard = await verifySchoolMatch(schoolCode);
   if (!guard.ok) { await supabase.auth.signOut(); return guard; }
-  return { ok: true, session: data.session };
+  if (guard.profile.status !== 'active') { await supabase.auth.signOut(); return { ok: false, message: 'This account is not active. Contact your school admin.' }; }
+  // Perf fix: hand the profile straight back so the caller can pass it into
+  // bootApp(profile) instead of bootApp() re-fetching the exact same row —
+  // see verifySchoolMatch's doc comment above for the full story.
+  return { ok: true, session: data.session, profile: guard.profile };
 }
 
 function staffEmailFor(username, schoolCode) {
@@ -121,7 +129,11 @@ export async function loginStudent(admissionNo, password, schoolCode) {
   if (!isGenuineSession(data, email)) { await supabase.auth.signOut(); return { ok: false, message: 'Incorrect admission number or password.' }; }
   const guard = await verifySchoolMatch(schoolCode);
   if (!guard.ok) { await supabase.auth.signOut(); return guard; }
-  return { ok: true, session: data.session };
+  if (guard.profile.status !== 'active') { await supabase.auth.signOut(); return { ok: false, message: 'This account is not active. Contact your school admin.' }; }
+  // Perf fix: hand the profile straight back so the caller can pass it into
+  // bootApp(profile) instead of bootApp() re-fetching the exact same row —
+  // see verifySchoolMatch's doc comment above for the full story.
+  return { ok: true, session: data.session, profile: guard.profile };
 }
 
 /** Parents sign in with the phone number their school registered them with —
@@ -135,7 +147,11 @@ export async function loginParent(phone, password, schoolCode) {
   if (!isGenuineSession(data, email)) { await supabase.auth.signOut(); return { ok: false, message: 'Incorrect phone number or password.' }; }
   const guard = await verifySchoolMatch(schoolCode);
   if (!guard.ok) { await supabase.auth.signOut(); return guard; }
-  return { ok: true, session: data.session };
+  if (guard.profile.status !== 'active') { await supabase.auth.signOut(); return { ok: false, message: 'This account is not active. Contact your school admin.' }; }
+  // Perf fix: hand the profile straight back so the caller can pass it into
+  // bootApp(profile) instead of bootApp() re-fetching the exact same row —
+  // see verifySchoolMatch's doc comment above for the full story.
+  return { ok: true, session: data.session, profile: guard.profile };
 }
 
 /**
@@ -158,25 +174,31 @@ function isGenuineSession(data, expectedEmail) {
   return true;
 }
 
-/** Defence-in-depth: confirm the just-authenticated profile really belongs to
- *  the School Code that was typed at the login screen. RLS already makes it
- *  impossible to see another school's data regardless — this only prevents
- *  the confusing UX of one person's account silently rendering under a
- *  different school's branding if they mistype/reuse an old bookmark. */
+/** Perf fix ("noticeable white space after entering login details"): every
+ *  login used to do its own school-match check with a SMALL profile query
+ *  (just school_id + code), and then bootApp() immediately re-fetched the
+ *  FULL profile from scratch via getCurrentProfile() — the exact same
+ *  `profiles` row, over the network, twice in a row, on every single
+ *  sign-in (and, via the page-reload boot path, on every page reload of an
+ *  already-signed-in session too). This now does the full-profile fetch
+ *  ONCE, right here, and hands it back to the caller (loginStaff etc.) so
+ *  it can be passed straight into bootApp() instead of being fetched again
+ *  — see bootApp(prefetchedProfile) in app.js. Same query/columns as
+ *  getCurrentProfile() so the result is a drop-in replacement for it. */
 async function verifySchoolMatch(schoolCode) {
-  if (!String(schoolCode || '').trim()) return { ok: true }; // not asked to check (e.g. tests)
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return { ok: false, message: 'Sign-in did not complete. Please try again.' };
-  const { data: profile } = await supabase
+  const { data: profile, error } = await supabase
     .from('profiles')
-    .select('school_id, schools!profiles_school_id_fkey ( code )')
+    .select('id, name, email, role, staff_id, student_id, status, school_id, schools!profiles_school_id_fkey ( code, name, category )')
     .eq('id', session.user.id)
     .maybeSingle();
-  const actualCode = profile && profile.schools ? profile.schools.code : null;
-  if (actualCode && actualCode !== String(schoolCode).trim().toLowerCase()) {
+  if (error || !profile) return { ok: false, message: 'Sign-in did not complete. Please try again.' };
+  const actualCode = profile.schools ? profile.schools.code : null;
+  if (String(schoolCode || '').trim() && actualCode && actualCode !== String(schoolCode).trim().toLowerCase()) {
     return { ok: false, message: 'That School Code does not match this account. Double-check it with your school admin.' };
   }
-  return { ok: true };
+  return { ok: true, profile };
 }
 
 export async function logout() {
