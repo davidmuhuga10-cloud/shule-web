@@ -18,7 +18,7 @@
  * Manage-only, same as Expenses/Payroll (migrations/0056's header comment
  * on why this reuses finance_can_manage() instead of a new capability).
  */
-import { esc, options, toast, modal, closeModal, loader } from '../app.js';
+import { esc, options, toast, modal, closeModal, confirmAction, loader } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 
 const SUB_TABS = [
@@ -79,14 +79,18 @@ async function renderDashboard(root) {
   const value = active.reduce((a, i) => a + Number(i.quantity) * Number(i.unit_cost || 0), 0);
 
   root.innerHTML = `
+    <!-- POST-BUILD FEEDBACK item 7 (BUG FIX): "Running Low"/"Out of Stock"
+         had the app's bordered side-accent card style; the other three
+         tiles were plain, unbordered .card pad divs — inconsistent. Every
+         tile now carries the same side-accent treatment. -->
     <div class="fin-summary-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:14px">
-      <div class="card pad"><div class="muted" style="font-size:12px">Total Items</div><div style="font-size:20px;font-weight:700">${active.length}</div></div>
-      <div class="card pad"><div class="muted" style="font-size:12px">In Stock</div><div style="font-size:20px;font-weight:700">${inStock}</div></div>
+      <div class="card pad side-accent tile-teal"><div class="muted" style="font-size:12px">Total Items</div><div style="font-size:20px;font-weight:700">${active.length}</div></div>
+      <div class="card pad side-accent tile-blue"><div class="muted" style="font-size:12px">In Stock</div><div style="font-size:20px;font-weight:700">${inStock}</div></div>
       <div class="card pad side-accent tile-amber"><div class="muted" style="font-size:12px">Running Low</div><div style="font-size:20px;font-weight:700">${low}</div></div>
       <div class="card pad side-accent tile-rose"><div class="muted" style="font-size:12px">Out of Stock</div><div style="font-size:20px;font-weight:700">${out}</div></div>
-      <div class="card pad"><div class="muted" style="font-size:12px">Estimated Stock Value</div><div style="font-size:20px;font-weight:700">KES ${num(value)}</div></div>
+      <div class="card pad side-accent tile-green"><div class="muted" style="font-size:12px">Estimated Stock Value</div><div style="font-size:20px;font-weight:700">KES ${num(value)}</div></div>
     </div>
-    <div class="fin-chart-row" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+    <div class="fin-two-col">
       <div class="card">
         <div class="card-h"><h3>Needs Attention</h3></div>
         <div class="card-b table-wrap"><table class="data">
@@ -414,50 +418,122 @@ async function renderSetup(root) {
   const [categoriesRes, unitsRes] = await Promise.all([Db.inventory.categories.list(), Db.inventory.units.list()]);
   const categories = categoriesRes.ok ? categoriesRes.data : [];
   const units = unitsRes.ok ? unitsRes.data : [];
+  // POST-BUILD FEEDBACK item 7: "if a school doesn't use certain categories
+  // or units, can they actually delete them, or is this secretly a fixed
+  // list?" Every row here can now be edited, deactivated (hides it from new
+  // Item pickers without touching items already using it), or genuinely
+  // deleted (migrations/0058 + the API's remove() — blocked with a clear
+  // message, not a raw DB error, if anything still uses it). This includes
+  // the 8 default units / 10 default categories inventory_bootstrap() seeds
+  // on first use — those are starting suggestions, not permanent fixtures.
   root.innerHTML = `
     <div class="card" style="margin-bottom:16px">
       <div class="card-h"><h3>Categories</h3><button class="btn sm" id="fset-add-cat" style="margin-left:auto">+ Add Category</button></div>
       <div class="card-b table-wrap"><table class="data">
-        <thead><tr><th>Name</th><th>Status</th></tr></thead>
-        <tbody>${categories.map((c) => `<tr><td>${esc(c.name)}</td><td>${c.active === false ? '<span class="badge amber">Inactive</span>' : '<span class="badge green">Active</span>'}</td></tr>`).join('') || '<tr><td colspan="2" class="muted">No categories yet.</td></tr>'}</tbody>
+        <thead><tr><th>Name</th><th>Status</th><th></th></tr></thead>
+        <tbody>${categories.map((c) => `<tr>
+          <td>${esc(c.name)}</td><td>${c.active === false ? '<span class="badge amber">Inactive</span>' : '<span class="badge green">Active</span>'}</td>
+          <td class="row-actions">
+            <button class="btn sm ghost" data-cat-edit="${c.id}">Edit</button>
+            <button class="btn sm ghost" data-cat-toggle="${c.id}" data-active="${c.active !== false}">${c.active === false ? 'Activate' : 'Deactivate'}</button>
+            <button class="btn sm ghost" data-cat-delete="${c.id}">Delete</button>
+          </td>
+        </tr>`).join('') || '<tr><td colspan="3" class="muted">No categories yet.</td></tr>'}</tbody>
       </table></div>
     </div>
     <div class="card">
       <div class="card-h"><h3>Units of Measurement</h3><button class="btn sm" id="fset-add-unit" style="margin-left:auto">+ Add Unit</button></div>
       <div class="card-b table-wrap"><table class="data">
-        <thead><tr><th>Name</th><th>Status</th></tr></thead>
-        <tbody>${units.map((u) => `<tr><td>${esc(u.name)}</td><td>${u.active === false ? '<span class="badge amber">Inactive</span>' : '<span class="badge green">Active</span>'}</td></tr>`).join('') || '<tr><td colspan="2" class="muted">No units yet.</td></tr>'}</tbody>
+        <thead><tr><th>Name</th><th>Status</th><th></th></tr></thead>
+        <tbody>${units.map((u) => `<tr>
+          <td>${esc(u.name)}</td><td>${u.active === false ? '<span class="badge amber">Inactive</span>' : '<span class="badge green">Active</span>'}</td>
+          <td class="row-actions">
+            <button class="btn sm ghost" data-unit-edit="${u.id}">Edit</button>
+            <button class="btn sm ghost" data-unit-toggle="${u.id}" data-active="${u.active !== false}">${u.active === false ? 'Activate' : 'Deactivate'}</button>
+            <button class="btn sm ghost" data-unit-delete="${u.id}">Delete</button>
+          </td>
+        </tr>`).join('') || '<tr><td colspan="3" class="muted">No units yet.</td></tr>'}</tbody>
       </table></div>
     </div>
   `;
-  root.querySelector('#fset-add-cat').onclick = () => {
+  const openCatModal = (existing) => {
     modal({
-      title: 'Add Category', body: `<div class="field"><label>Name</label><input id="fset-cat-name" placeholder="e.g. Uniforms"></div>`,
+      title: existing ? 'Edit Category' : 'Add Category',
+      body: `<div class="field"><label>Name</label><input id="fset-cat-name" value="${esc(existing ? existing.name : '')}" placeholder="e.g. Uniforms"></div>`,
       okLabel: 'Save',
       onOk: async () => {
         const name = document.getElementById('fset-cat-name').value.trim();
         if (!name) { toast('Enter a name.', 'err'); return; }
-        const res = await Db.inventory.categories.save({ name });
+        const res = await Db.inventory.categories.save({ id: existing ? existing.id : undefined, name, active: existing ? existing.active : true });
         if (!res.ok) { toast(res.message, 'err'); return; }
         closeModal();
-        toast('Category added.', 'ok');
+        toast(existing ? 'Category updated.' : 'Category added.', 'ok');
         await renderSetup(root);
       }
     });
   };
-  root.querySelector('#fset-add-unit').onclick = () => {
+  const openUnitModal = (existing) => {
     modal({
-      title: 'Add Unit', body: `<div class="field"><label>Name</label><input id="fset-unit-name" placeholder="e.g. Dozens"></div>`,
+      title: existing ? 'Edit Unit' : 'Add Unit',
+      body: `<div class="field"><label>Name</label><input id="fset-unit-name" value="${esc(existing ? existing.name : '')}" placeholder="e.g. Dozens"></div>`,
       okLabel: 'Save',
       onOk: async () => {
         const name = document.getElementById('fset-unit-name').value.trim();
         if (!name) { toast('Enter a name.', 'err'); return; }
-        const res = await Db.inventory.units.save({ name });
+        const res = await Db.inventory.units.save({ id: existing ? existing.id : undefined, name, active: existing ? existing.active : true });
         if (!res.ok) { toast(res.message, 'err'); return; }
         closeModal();
-        toast('Unit added.', 'ok');
+        toast(existing ? 'Unit updated.' : 'Unit added.', 'ok');
         await renderSetup(root);
       }
     });
   };
+  root.querySelector('#fset-add-cat').onclick = () => openCatModal(null);
+  root.querySelector('#fset-add-unit').onclick = () => openUnitModal(null);
+  root.querySelectorAll('[data-cat-edit]').forEach((b) => b.onclick = () => openCatModal(categories.find((c) => c.id === b.dataset.catEdit)));
+  root.querySelectorAll('[data-unit-edit]').forEach((b) => b.onclick = () => openUnitModal(units.find((u) => u.id === b.dataset.unitEdit)));
+  root.querySelectorAll('[data-cat-toggle]').forEach((b) => b.onclick = () => {
+    const c = categories.find((x) => x.id === b.dataset.catToggle);
+    const willActivate = b.dataset.active === 'false';
+    confirmAction(
+      willActivate ? `"${c.name}" will be selectable again when adding items.` : `"${c.name}" will no longer be selectable for NEW items. Items already using it are untouched.`,
+      async () => {
+        const res = await Db.inventory.categories.save({ id: c.id, name: c.name, active: willActivate });
+        if (!res.ok) { toast(res.message, 'err'); return; }
+        toast(willActivate ? 'Category activated.' : 'Category deactivated.', 'ok');
+        await renderSetup(root);
+      }
+    );
+  });
+  root.querySelectorAll('[data-unit-toggle]').forEach((b) => b.onclick = () => {
+    const u = units.find((x) => x.id === b.dataset.unitToggle);
+    const willActivate = b.dataset.active === 'false';
+    confirmAction(
+      willActivate ? `"${u.name}" will be selectable again when adding items.` : `"${u.name}" will no longer be selectable for NEW items. Items already using it are untouched.`,
+      async () => {
+        const res = await Db.inventory.units.save({ id: u.id, name: u.name, active: willActivate });
+        if (!res.ok) { toast(res.message, 'err'); return; }
+        toast(willActivate ? 'Unit activated.' : 'Unit deactivated.', 'ok');
+        await renderSetup(root);
+      }
+    );
+  });
+  root.querySelectorAll('[data-cat-delete]').forEach((b) => b.onclick = () => {
+    const c = categories.find((x) => x.id === b.dataset.catDelete);
+    confirmAction(`Delete category "${c.name}"? This cannot be undone. If any item still uses it, deletion will be blocked instead.`, async () => {
+      const res = await Db.inventory.categories.remove(c.id);
+      if (!res.ok) { toast(res.message, 'err'); return; }
+      toast('Category deleted.', 'ok');
+      await renderSetup(root);
+    }, true);
+  });
+  root.querySelectorAll('[data-unit-delete]').forEach((b) => b.onclick = () => {
+    const u = units.find((x) => x.id === b.dataset.unitDelete);
+    confirmAction(`Delete unit "${u.name}"? This cannot be undone. If any item still uses it, deletion will be blocked instead.`, async () => {
+      const res = await Db.inventory.units.remove(u.id);
+      if (!res.ok) { toast(res.message, 'err'); return; }
+      toast('Unit deleted.', 'ok');
+      await renderSetup(root);
+    }, true);
+  });
 }

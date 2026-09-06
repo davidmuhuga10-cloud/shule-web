@@ -1,16 +1,36 @@
 /**
  * financeExpenses.mjs — Finance Expansion brief item 7 ("Expenses Module").
- * Five sub-tabs mirroring the brief's own flow: Suppliers -> LPOs ->
- * Expenses (record + pay) -> Payments (voucher history) -> Supplier
- * Balances. Manage-only throughout (see migrations/0052's header comment
- * for why) — this whole screen is gated the same way financeAccounting.mjs
- * gates itself.
+ * Five sub-tabs mirroring the real sequence of events at a school: Suppliers
+ * -> LPOs -> Payment Voucher (goods delivered, awaiting payment; pay it and
+ * get a receipt) -> Payments (voucher history, printable/reversible) ->
+ * Supplier Balances. Manage-only throughout (see migrations/0052's header
+ * comment for why) — this whole screen is gated the same way
+ * financeAccounting.mjs gates itself.
+ *
+ * POST-BUILD FEEDBACK item 5:
+ *  - Renamed the first sub-tab from "Expenses" to "Payment Voucher" — that's
+ *    genuinely what this screen represents: an LPO becomes this the moment
+ *    a supplier actually delivers, sitting as "awaiting payment" until it's
+ *    settled (see the workflow note on record()/openExpenseModal() below).
+ *  - Supplier is now a REQUIRED field here (was "optional — miscellaneous
+ *    expense"). A real Payment Voucher always traces back to a real
+ *    supplier — a school still records true one-off/no-supplier costs (fuel,
+ *    utilities) as a plain Expense elsewhere; this screen models the
+ *    LPO-driven delivery/payment cycle specifically, so a vague
+ *    "miscellaneous, no supplier" entry no longer fits it.
+ *  - Payments now have a real correction path: each voucher is printable
+ *    (see printVoucherReceipt()) and reversible (see reverse() below) — a
+ *    reversal posts an offsetting ledger entry and decrements the linked
+ *    expense's paid_amount, which is exactly what Supplier Balances reads
+ *    from, so the supplier's outstanding balance corrects itself with no
+ *    separate bookkeeping.
  */
-import { esc, options, toast, modal, closeModal, confirmAction, loader } from '../app.js';
+import { esc, options, toast, modal, closeModal, confirmAction, loader, state } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
+import { addressLines, isContactInfoComplete, missingContactInfoHtml } from '../lib/printHeader.mjs';
 
 const SUB_TABS = [
-  { key: 'expenses', label: 'Expenses' },
+  { key: 'expenses', label: 'Payment Voucher' },
   { key: 'suppliers', label: 'Suppliers' },
   { key: 'lpos', label: 'LPOs' },
   { key: 'vouchers', label: 'Payments' },
@@ -27,7 +47,11 @@ const STATUS_BADGE = {
   // Payroll Expansion §3.7 — a reversed payroll voids its posted expense
   // rather than deleting it (see migrations/0054). Shown distinctly so it
   // reads as "never actually owed," not just another unpaid bill.
-  void: '<span class="badge">Voided</span>'
+  void: '<span class="badge">Voided</span>',
+  // POST-BUILD FEEDBACK item 5 — a reversed Payment Voucher, same "never
+  // delete, always show what changed" convention as everywhere else.
+  reversed: '<span class="badge">Reversed</span>',
+  active: '<span class="badge green">Active</span>'
 };
 
 export async function viewFinanceExpenses(root, access) {
@@ -79,7 +103,7 @@ async function loadExpenses(root, suppliers, voteHeads, filters) {
         </select></div>
       </div>
       <div class="spacer"></div>
-      <button class="btn" id="fe-add">+ Record Expense</button>
+      <button class="btn" id="fe-add">+ Record Payment Voucher</button>
     </div>
     <div id="fe-list">${loader()}</div>
   `;
@@ -93,22 +117,27 @@ async function loadExpenses(root, suppliers, voteHeads, filters) {
     const res = await Db.finance.expenses.list(f);
     const rows = res.ok ? res.data : [];
     const totalOwed = rows.filter((r) => r.status !== 'void').reduce((a, r) => a + (Number(r.amount) - Number(r.paid_amount)), 0);
+    // POST-BUILD FEEDBACK item 5 ("follow Collections/Balances' compact
+    // style, not big bulky rows"): `class="num"` right-aligns the money
+    // columns and `data compact` (same class Messaging's history table
+    // already uses) tightens row padding — same visual density as
+    // Collections' own table.
     listEl.innerHTML = `
-      <div class="card pad" style="margin-bottom:10px"><b>${rows.length}</b> expense(s) shown · Outstanding across them: <b>KES ${totalOwed.toLocaleString()}</b></div>
-      <div class="card side-accent tile-teal"><div class="card-b table-wrap"><table class="data">
-        <thead><tr><th>Date</th><th>Expense No.</th><th>Supplier/Payee</th><th>Description</th><th>Votehead</th><th>LPO</th><th>Amount</th><th>Paid</th><th>Status</th><th></th></tr></thead>
+      <div class="fin-toolbar no-print" style="margin-bottom:8px"><span class="muted"><b>${rows.length}</b> voucher(s) shown · Outstanding: <b>KES ${totalOwed.toLocaleString()}</b></span></div>
+      <div class="card side-accent tile-teal"><div class="card-b table-wrap"><table class="data compact">
+        <thead><tr><th>Date</th><th>Voucher No.</th><th>Supplier</th><th>Description</th><th>Votehead</th><th>LPO</th><th class="num">Amount</th><th class="num">Paid</th><th>Status</th><th></th></tr></thead>
         <tbody>${rows.map((r) => `<tr>
           <td>${esc(r.expense_date)}</td>
           <td>${esc(r.expense_no)}</td>
-          <td>${esc(r.finance_suppliers ? r.finance_suppliers.name : 'Miscellaneous')}</td>
+          <td>${esc(r.finance_suppliers ? r.finance_suppliers.name : '—')}</td>
           <td>${esc(r.description || '—')}</td>
           <td>${esc(r.finance_vote_heads ? r.finance_vote_heads.name : '')}</td>
           <td>${esc(r.finance_lpos ? r.finance_lpos.lpo_no : '—')}</td>
-          <td>KES ${Number(r.amount).toLocaleString()}</td>
-          <td>KES ${Number(r.paid_amount).toLocaleString()}</td>
+          <td class="num">${Number(r.amount).toLocaleString()}</td>
+          <td class="num">${Number(r.paid_amount).toLocaleString()}</td>
           <td>${STATUS_BADGE[r.status] || esc(r.status)}</td>
-          <td>${r.status !== 'paid' && r.status !== 'void' ? `<button class="btn secondary sm" data-pay="${r.id}">Record Payment</button>` : ''}</td>
-        </tr>`).join('') || '<tr><td colspan="10" class="muted">No expenses match these filters.</td></tr>'}</tbody>
+          <td class="row-actions">${r.status !== 'paid' && r.status !== 'void' ? `<button class="btn secondary sm" data-pay="${r.id}">Record Payment</button>` : ''}</td>
+        </tr>`).join('') || '<tr><td colspan="10" class="muted">No payment vouchers match these filters.</td></tr>'}</tbody>
       </table></div></div>
     `;
     listEl.querySelectorAll('[data-pay]').forEach((b) => b.onclick = () => {
@@ -124,11 +153,16 @@ async function loadExpenses(root, suppliers, voteHeads, filters) {
 }
 
 function openExpenseModal(suppliers, voteHeads, onSaved) {
+  // POST-BUILD FEEDBACK item 5: Supplier is now a compulsory field — a
+  // Payment Voucher represents a real supplier's delivery awaiting payment,
+  // not a vague "miscellaneous" line. A school still needs Suppliers added
+  // first, exactly like LPOs already require one.
+  if (!suppliers.length) { toast('Add a Supplier first — every Payment Voucher is tied to one.', 'err'); return; }
   modal({
-    title: 'Record an Expense / Supplier Invoice',
+    title: 'Record Payment Voucher — Goods/Services Delivered',
     body: `
-      <div class="field"><label>Supplier (optional — leave blank for a miscellaneous expense like fuel, transport, utilities)</label>
-        <select id="fe-supplier"><option value="">— Miscellaneous / no supplier —</option>${options(suppliers.filter((s) => s.active !== false), 'id', 'name')}</select>
+      <div class="field"><label>Supplier</label>
+        <select id="fe-supplier">${options(suppliers.filter((s) => s.active !== false), 'id', 'name')}</select>
       </div>
       <div class="field" id="fe-lpo-field" style="display:none"><label>LPO (optional — only pending LPOs for this supplier show up)</label>
         <select id="fe-lpo"><option value="">— No LPO —</option></select>
@@ -138,16 +172,18 @@ function openExpenseModal(suppliers, voteHeads, onSaved) {
         <div class="field"><label>Amount (KES)</label><input id="fe-amount" type="number" min="0" step="0.01"></div>
       </div>
       <div class="grid2">
-        <div class="field"><label>Date</label><input id="fe-date" type="date" value="${new Date().toISOString().slice(0, 10)}"></div>
-        <div class="field"><label>Description</label><input id="fe-desc" placeholder="e.g. Electricity bill — June"></div>
+        <div class="field"><label>Date Delivered</label><input id="fe-date" type="date" value="${new Date().toISOString().slice(0, 10)}"></div>
+        <div class="field"><label>Description</label><input id="fe-desc" placeholder="e.g. 10 reams photocopy paper"></div>
       </div>
     `,
-    okLabel: 'Record Expense',
+    okLabel: 'Record — Awaiting Payment',
     onOk: async () => {
+      const supplierId = document.getElementById('fe-supplier').value;
+      if (!supplierId) { toast('Choose a supplier.', 'err'); return; }
       const amount = Number(document.getElementById('fe-amount').value);
       if (!(amount > 0)) { toast('Enter an amount greater than zero.', 'err'); return; }
       const res = await Db.finance.expenses.record({
-        supplier_id: document.getElementById('fe-supplier').value || null,
+        supplier_id: supplierId,
         lpo_id: document.getElementById('fe-lpo').value || null,
         vote_head_id: document.getElementById('fe-vh').value,
         amount, expense_date: document.getElementById('fe-date').value,
@@ -155,14 +191,14 @@ function openExpenseModal(suppliers, voteHeads, onSaved) {
       });
       if (!res.ok) { toast(res.message, 'err'); return; }
       closeModal();
-      toast(`Expense ${res.data.expense_no} recorded.`, 'ok');
+      toast(`${res.data.expense_no} recorded — awaiting payment.`, 'ok');
       onSaved();
     },
     onOpen: () => {
       const supplierSel = document.getElementById('fe-supplier');
       const lpoField = document.getElementById('fe-lpo-field');
       const lpoSel = document.getElementById('fe-lpo');
-      supplierSel.onchange = async () => {
+      const loadPending = async () => {
         const supplierId = supplierSel.value;
         if (!supplierId) { lpoField.style.display = 'none'; lpoSel.innerHTML = ''; return; }
         const res = await Db.finance.lpos.pendingForSupplier(supplierId);
@@ -170,6 +206,8 @@ function openExpenseModal(suppliers, voteHeads, onSaved) {
         lpoField.style.display = pending.length ? '' : 'none';
         lpoSel.innerHTML = '<option value="">— No LPO —</option>' + pending.map((l) => `<option value="${l.id}">${esc(l.lpo_no)} — KES ${Number(l.amount).toLocaleString()}</option>`).join('');
       };
+      supplierSel.onchange = loadPending;
+      loadPending();
     }
   });
 }
@@ -338,19 +376,106 @@ async function renderVouchers(root) {
   root.innerHTML = `
     <div class="card">
       <div class="card-h"><h3>Payment History</h3></div>
-      <div class="card-b table-wrap"><table class="data">
-        <thead><tr><th>Date</th><th>Voucher No.</th><th>Supplier/Payee</th><th>Expense Ref.</th><th>Amount</th><th>Method</th><th>Account</th></tr></thead>
+      <div class="card-b table-wrap"><table class="data compact">
+        <thead><tr><th>Date</th><th>Voucher No.</th><th>Supplier</th><th>Expense Ref.</th><th class="num">Amount</th><th>Method</th><th>Account</th><th>Status</th><th></th></tr></thead>
         <tbody>${rows.map((v) => `<tr>
           <td>${esc(v.payment_date)}</td><td>${esc(v.voucher_no)}</td>
-          <td>${esc(v.finance_expenses && v.finance_expenses.finance_suppliers ? v.finance_expenses.finance_suppliers.name : 'Miscellaneous')}</td>
+          <td>${esc(v.finance_expenses && v.finance_expenses.finance_suppliers ? v.finance_expenses.finance_suppliers.name : '—')}</td>
           <td>${esc(v.finance_expenses ? v.finance_expenses.expense_no : '')}${v.finance_expenses && v.finance_expenses.description ? ` — ${esc(v.finance_expenses.description)}` : ''}</td>
-          <td>KES ${Number(v.amount).toLocaleString()}</td>
+          <td class="num">${Number(v.amount).toLocaleString()}</td>
           <td style="text-transform:capitalize">${esc(v.payment_method)}</td>
           <td>${esc(v.finance_accounts ? v.finance_accounts.name : '')}</td>
-        </tr>`).join('') || '<tr><td colspan="7" class="muted">No payments recorded yet.</td></tr>'}</tbody>
+          <td>${STATUS_BADGE[v.status] || esc(v.status)}</td>
+          <td class="row-actions">
+            <button class="icon-btn" data-print="${v.id}" title="Print receipt">🖨️</button>
+            ${v.status === 'active' ? `<button class="icon-btn warn" data-reverse="${v.id}" title="Reverse payment">↩️</button>` : ''}
+          </td>
+        </tr>`).join('') || '<tr><td colspan="9" class="muted">No payments recorded yet.</td></tr>'}</tbody>
       </table></div>
     </div>
   `;
+  root.querySelectorAll('[data-print]').forEach((b) => b.onclick = () => printVoucherReceipt(rows.find((v) => v.id === b.dataset.print)));
+  root.querySelectorAll('[data-reverse]').forEach((b) => b.onclick = () => {
+    const v = rows.find((x) => x.id === b.dataset.reverse);
+    confirmAction(
+      `Reverse Payment Voucher ${v.voucher_no} (KES ${Number(v.amount).toLocaleString()})? This posts an offsetting entry and puts the linked expense back to owing — nothing is deleted, and this cannot be undone.`,
+      async () => {
+        const res = await Db.finance.paymentVouchers.reverse(v.id, 'Reversed from Payments screen');
+        if (!res.ok) { toast(res.message, 'err'); return; }
+        toast('Payment voucher reversed.', 'ok');
+        await renderVouchers(root);
+      },
+      true
+    );
+  });
+}
+
+/** Printable/downloadable receipt for one Payment Voucher — same popup-
+ *  window + inline-CSS pattern as financeCollections.mjs's printReceipt()
+ *  and financePayroll.mjs's printPayslip(), reusing the exact same school
+ *  header/contact-info utilities so every printed Finance document looks
+ *  like it belongs to the same system. POST-BUILD FEEDBACK item 5: "once
+ *  paid, can the user actually download/print a receipt?" — until now,
+ *  no. The browser's own Print dialog (Ctrl+P / the print button) covers
+ *  "download as PDF" the same way every other Finance printout in this app
+ *  already does. */
+async function printVoucherReceipt(voucher) {
+  if (!voucher) return;
+  const settingsRes = await Db.settings.get();
+  const settings = settingsRes.ok ? settingsRes.data : (state.settings || {});
+  const win = window.open('', '_blank', 'width=820,height=920');
+  if (!win) { toast('Please allow pop-ups to print the receipt.', 'err'); return; }
+  if (!isContactInfoComplete(settings)) {
+    win.document.write(`<html><head><title>Payment Voucher</title></head><body style="font-family:Arial,sans-serif;padding:40px">${missingContactInfoHtml()}</body></html>`);
+    win.document.close();
+    return;
+  }
+  const addrLines = addressLines(settings);
+  const logoHtml = settings.logo
+    ? `<img src="${esc(settings.logo)}" style="width:64px;height:64px;border-radius:10px;object-fit:cover">`
+    : `<div style="width:64px;height:64px;border-radius:10px;border:1.5px dashed #ccc;display:flex;align-items:center;justify-content:center;font-size:26px;color:#999;background:#fafbfc">🏫</div>`;
+  const supplierName = voucher.finance_expenses && voucher.finance_expenses.finance_suppliers ? voucher.finance_expenses.finance_suppliers.name : '—';
+  const expenseRef = voucher.finance_expenses ? voucher.finance_expenses.expense_no : '';
+  const desc = voucher.finance_expenses && voucher.finance_expenses.description ? voucher.finance_expenses.description : '';
+  win.document.write(`
+    <html><head><title>Payment Voucher ${esc(voucher.voucher_no)}</title>
+    <style>
+      *{box-sizing:border-box}
+      body{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:36px 40px;color:#111}
+      .pv-top{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}
+      .pv-school{font-size:19px;font-weight:800;margin:0 0 2px}
+      .pv-addr{font-size:12px;color:#555;line-height:1.5}
+      .pv-title{font-size:22px;font-weight:800;text-align:right;color:#15343a}
+      .pv-no{font-size:13px;color:#555;text-align:right}
+      table{width:100%;border-collapse:collapse;margin-top:26px}
+      td{padding:9px 4px;border-bottom:1px solid #eee;font-size:14px;vertical-align:top}
+      td.lbl{color:#666;width:170px}
+      .pv-amt{font-size:26px;font-weight:800;margin-top:22px;text-align:right}
+      .pv-void{color:#c0392b;font-weight:800;font-size:15px;border:2px solid #c0392b;display:inline-block;padding:4px 14px;transform:rotate(-6deg);margin-top:18px}
+      @media print{body{padding:16px 22px}}
+    </style></head>
+    <body>
+      <div class="pv-top">
+        <div style="display:flex;gap:14px;align-items:center">${logoHtml}
+          <div><p class="pv-school">${esc(settings.school_name || '')}</p><div class="pv-addr">${addrLines.map((l) => esc(l)).join('<br>')}</div></div>
+        </div>
+        <div><div class="pv-title">Payment Voucher</div><div class="pv-no">${esc(voucher.voucher_no)}</div></div>
+      </div>
+      <table>
+        <tr><td class="lbl">Date</td><td>${esc(voucher.payment_date)}</td></tr>
+        <tr><td class="lbl">Paid To</td><td>${esc(supplierName)}</td></tr>
+        <tr><td class="lbl">For</td><td>${esc(expenseRef)}${desc ? ` — ${esc(desc)}` : ''}</td></tr>
+        <tr><td class="lbl">Payment Method</td><td style="text-transform:capitalize">${esc(voucher.payment_method)}</td></tr>
+        <tr><td class="lbl">Paid From Account</td><td>${esc(voucher.finance_accounts ? voucher.finance_accounts.name : '')}</td></tr>
+        ${voucher.notes ? `<tr><td class="lbl">Notes</td><td>${esc(voucher.notes)}</td></tr>` : ''}
+      </table>
+      <div class="pv-amt">KES ${Number(voucher.amount).toLocaleString()}</div>
+      ${voucher.status === 'reversed' ? '<div class="pv-void">REVERSED</div>' : ''}
+    </body></html>
+  `);
+  win.document.close();
+  win.focus();
+  win.print();
 }
 
 /* --------------------------------------------------------- Supplier Balances */

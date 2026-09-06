@@ -37,7 +37,9 @@ export async function viewFinanceStudent(root, access) {
       if (!q.length) { resultsEl.innerHTML = ''; return; }
       const r = await Db.finance.students.search(q);
       const list = r.ok ? r.data : [];
-      resultsEl.innerHTML = list.map((s) => `<div class="search-hit" data-id="${s.id}">${esc(s.full_name)} <span class="muted">${esc(s.admission_no)} · ${esc(s.classes ? s.classes.name : '')}</span></div>`).join('') || `<div class="muted" style="padding:6px">No student found matching "${esc(q)}".</div>`;
+      resultsEl.innerHTML = list.map((s) => `<div class="search-hit" data-id="${s.id}">${esc(s.full_name)} <span class="muted">${esc(s.admission_no)} · ${esc(s.classes ? s.classes.name : '')}</span></div>`).join('')
+        + (list.length === 30 ? `<div class="muted" style="padding:6px;font-style:italic">Showing first 30 matches — type more of the name or admission number to narrow it down.</div>` : '')
+        || `<div class="muted" style="padding:6px">No student found matching "${esc(q)}".</div>`;
       resultsEl.querySelectorAll('[data-id]').forEach((h) => h.onclick = () => {
         const student = list.find((s) => s.id === h.dataset.id);
         resultsEl.innerHTML = '';
@@ -147,7 +149,9 @@ function openTransferOverpaymentModal(student, bal, ctx, onDone) {
           if (!q.length) { resultsEl.innerHTML = ''; return; }
           const r = await Db.finance.students.search(q);
           const list = (r.ok ? r.data : []).filter((s) => s.id !== student.id);
-          resultsEl.innerHTML = list.map((s) => `<div class="search-hit" data-id="${s.id}">${esc(s.full_name)} <span class="muted">${esc(s.admission_no)} · ${esc(s.classes ? s.classes.name : '')}</span></div>`).join('') || `<div class="muted" style="padding:6px">No student found matching "${esc(q)}".</div>`;
+          resultsEl.innerHTML = list.map((s) => `<div class="search-hit" data-id="${s.id}">${esc(s.full_name)} <span class="muted">${esc(s.admission_no)} · ${esc(s.classes ? s.classes.name : '')}</span></div>`).join('')
+            + (list.length === 30 ? `<div class="muted" style="padding:6px;font-style:italic">Showing first 30 matches — type more of the name or admission number to narrow it down.</div>` : '')
+            || `<div class="muted" style="padding:6px">No student found matching "${esc(q)}".</div>`;
           resultsEl.querySelectorAll('[data-id]').forEach((h) => h.onclick = () => {
             toStudent = list.find((s) => s.id === h.dataset.id);
             resultsEl.innerHTML = '';
@@ -456,7 +460,13 @@ async function renderStatement(root, student, years, terms) {
     Db.finance.invoices.forStudent(student.id),
     Db.finance.debitNotes.forStudent(student.id),
     Db.finance.creditNotes.forStudent(student.id),
-    Db.finance.collections.list({ student_id: student.id, limit: 500 }),
+    // POST-BUILD AUDIT (Task #49): 500 was tight enough that a long-enrolled
+    // student with frequent small payments (e.g. weekly transport top-ups
+    // over several years) could hit it and have their statement silently
+    // truncate with no indication anything was missing. Raised well past any
+    // realistic single-student history; the exact-cap check below still
+    // warns if a school somehow blows past even this.
+    Db.finance.collections.list({ student_id: student.id, limit: 5000 }),
     Promise.all((years || []).map((y) => Db.finance.students.openingBalance(student.id, y.id)))
   ]);
   // finance_invoice_items don't carry academic_year_id/term_id themselves
@@ -467,14 +477,21 @@ async function renderStatement(root, student, years, terms) {
     (inv.finance_invoice_items || []).map((it) => ({ ...it, academic_year_id: inv.academic_year_id, term_id: inv.term_id }))
   );
   const openingBalances = obResList.filter((r) => r.ok).map((r) => r.data).filter(Boolean);
+  const collections = colRes.ok ? colRes.data : [];
   const rows = buildStatement({
     openingBalance: openingBalances,
-    invoiceItems, debitNotes: dnRes.ok ? dnRes.data : [], creditNotes: cnRes.ok ? cnRes.data : [], collections: colRes.ok ? colRes.data : []
+    invoiceItems, debitNotes: dnRes.ok ? dnRes.data : [], creditNotes: cnRes.ok ? cnRes.data : [], collections
   });
   const groups = groupByTerm(rows, { terms: terms || [], academicYears: years || [] });
   const schoolName = (state.settings && state.settings.school_name) || 'ShuleTop';
 
-  root.innerHTML = statementSheetHtml(schoolName, student, groups);
+  // Hitting the cap exactly means there may be older payments this
+  // statement never fetched — say so rather than silently showing an
+  // incomplete financial record.
+  const truncatedNotice = collections.length >= 5000
+    ? '<div class="card pad" style="border-color:#e0a800;background:#fff8e6;margin-bottom:12px">This statement only shows the most recent 5,000 payments — contact support if you need older history included.</div>'
+    : '';
+  root.innerHTML = truncatedNotice + statementSheetHtml(schoolName, student, groups);
   wireMobileStatementTabs(root);
   // BUG FIX: this used to pass root.querySelector('#fss-sheet') here, but
   // the print button (id="fss-print-btn", from printOptionsHtml()) lives in

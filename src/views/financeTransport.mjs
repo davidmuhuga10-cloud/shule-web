@@ -1,62 +1,90 @@
 /**
  * financeTransport.mjs — brief §Transport: Routes (name, pickup point,
- * one-way/two-way pricing) and student route assignment. Deliberately
- * excludes fleet/vehicle management per the brief — a route here is just a
- * priced billing line, not a dispatch record.
+ * one-way/two-way pricing), student route assignment, and invoicing.
+ * Deliberately excludes fleet/vehicle management per the brief — a route
+ * here is just a priced billing line, not a dispatch record.
  *
- * Round 2 §8 — clicking into a route now opens its own detail screen: the
- * roster of students currently assigned to it for a term, a way to add
- * more students directly (rather than only from a student's own profile),
- * and a bulk "Invoice" button that invoices everyone on the route not yet
- * invoiced for that term — skipping anyone already invoiced is enforced
- * server-side (finance_invoice_route in migrations/0032), not just hidden
- * client-side.
+ * POST-BUILD FEEDBACK item 8 (BUG FIX): this used to be one flat screen —
+ * a route list that you clicked INTO to see its roster and invoice it,
+ * with no separate view of "who's invoiced vs not" anywhere, and no
+ * standalone reporting. Split into three simple sub-tabs, same
+ * SUB_TABS/`.fin-tabs`/show() pattern every other Finance module already
+ * uses:
+ *   - Routes: route setup only (add/edit name, pickup point, pricing) —
+ *     "make any needed adjustments" per the review's own phrasing.
+ *   - Invoicing: pick a route (+ year/term), see every assigned student
+ *     with a real Invoiced/Not Invoiced badge per row — not just a bulk
+ *     button and a guess — then invoice directly from there. Double-
+ *     invoicing was already blocked server-side (finance_invoice_route,
+ *     migrations/0032); this is what makes that visible BEFORE clicking,
+ *     via the new finance_route_invoiced_students() read (migrations/0060).
+ *   - Reports: one compact table, every route's assigned/invoiced/pending
+ *     counts for the selected term — not nine screens, just the numbers
+ *     that answer "did we invoice everyone yet."
+ *
+ * Route changes mid-term (§5.4/5.6, unchanged this pass): finance_assign_
+ * route() always applies the NEW route/direction's charge going forward;
+ * promptChargeAdjustment() below is the "or keep the old negotiated
+ * charge" escape hatch. Nothing about a past invoice is ever rewritten —
+ * only the assignment row (which route a student is currently on) changes,
+ * so charges already billed under the old route stay exactly as invoiced.
  */
 import { esc, options, toast, modal, closeModal, confirmAction, loader } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 
+const SUB_TABS = [
+  { key: 'routes', label: 'Routes' },
+  { key: 'invoicing', label: 'Invoicing' },
+  { key: 'reports', label: 'Reports' }
+];
+
 export async function viewFinanceTransport(root, access) {
+  let active = 'routes';
+  root.innerHTML = `
+    <div class="fin-tabs wrap-tabs">
+      ${SUB_TABS.map((t) => `<button data-ttab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</button>`).join('')}
+    </div>
+    <div id="ft-body" style="margin-top:12px">${loader()}</div>
+  `;
+  const body = root.querySelector('#ft-body');
+  const show = (key) => {
+    active = key;
+    root.querySelectorAll('[data-ttab]').forEach((b) => b.classList.toggle('active', b.dataset.ttab === key));
+    if (key === 'routes') renderRoutesTab(body, access);
+    else if (key === 'invoicing') renderInvoicingTab(body, access);
+    else renderReportsTab(body, access);
+  };
+  root.querySelectorAll('[data-ttab]').forEach((b) => b.onclick = () => show(b.dataset.ttab));
+  show(active);
+}
+
+/* --------------------------------------------------------------- Routes */
+async function renderRoutesTab(root, access) {
   root.innerHTML = loader();
   const res = await Db.finance.routes.list();
   const routes = res.ok ? res.data : [];
-  renderRoutesList(root, access, routes);
-}
-
-function renderRoutesList(root, access, routes) {
   root.innerHTML = `
-    <div class="fin-toolbar"><p class="hint" style="margin:0">Click a route to see who's assigned to it and invoice them in bulk.</p>
+    <div class="fin-toolbar no-print"><p class="hint" style="margin:0">Route setup and pricing. Assigning students and invoicing happens under the Invoicing tab.</p>
       <div class="spacer"></div>
       ${access.canManage ? '<button class="btn" id="ft-add">+ Add Route</button>' : ''}
     </div>
-    <div class="card side-accent tile-teal"><div class="card-b table-wrap"><table class="data">
+    <div class="card side-accent tile-teal"><div class="card-b table-wrap"><table class="data compact">
       <thead><tr><th>Route</th><th>Pickup Point</th><th class="num">One-way</th><th class="num">Two-way</th><th>Status</th><th></th></tr></thead>
       <tbody>${routes.map((r) => `<tr>
-        <td><a href="javascript:void(0)" data-open="${r.id}">${esc(r.name)}</a></td><td>${esc(r.pickup_point || '')}</td>
+        <td>${esc(r.name)}</td><td>${esc(r.pickup_point || '—')}</td>
         <td class="num">${Number(r.one_way_amount || 0).toLocaleString()}</td><td class="num">${Number(r.two_way_amount || 0).toLocaleString()}</td>
         <td>${r.active === false ? '<span class="badge grey">Inactive</span>' : '<span class="badge green">Active</span>'}</td>
-        <td>
-          <button class="btn secondary sm" data-open="${r.id}">View</button>
-          ${access.canManage ? `<button class="btn secondary sm" data-edit="${r.id}">Edit</button>` : ''}
-        </td>
-      </tr>`).join('') || '<tr><td colspan="6" class="muted">No routes yet.</td></tr>'}</tbody>
+        <td>${access.canManage ? `<button class="btn secondary sm" data-edit="${r.id}">Edit</button>` : ''}</td>
+      </tr>`).join('') || '<tr><td colspan="6" class="muted">No routes yet — add one to start assigning and invoicing students.</td></tr>'}</tbody>
     </table></div></div>
   `;
-
-  root.querySelectorAll('[data-open]').forEach((b) => b.onclick = () => {
-    const r = routes.find((x) => x.id === b.dataset.open);
-    viewRouteDetail(root, access, r, routes);
-  });
   if (access.canManage) {
-    root.querySelector('#ft-add').onclick = () => openRouteModal(root, access, routes, null, () => viewFinanceTransport(root, access));
-    root.querySelectorAll('[data-edit]').forEach((b) => b.onclick = (e) => {
-      e.stopPropagation();
-      const r = routes.find((x) => x.id === b.dataset.edit);
-      openRouteModal(root, access, routes, r, () => viewFinanceTransport(root, access));
-    });
+    root.querySelector('#ft-add').onclick = () => openRouteModal(routes, null, () => renderRoutesTab(root, access));
+    root.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => openRouteModal(routes, routes.find((r) => r.id === b.dataset.edit), () => renderRoutesTab(root, access)));
   }
 }
 
-function openRouteModal(root, access, routes, existing, onSaved) {
+function openRouteModal(routes, existing, onSaved) {
   modal({
     title: existing ? 'Edit Route' : 'Add Route',
     body: `
@@ -87,84 +115,89 @@ function openRouteModal(root, access, routes, existing, onSaved) {
   });
 }
 
-/* --------------------------------------------------------- route detail --- */
-async function viewRouteDetail(root, access, route, routes) {
+/* ------------------------------------------------------------ Invoicing */
+async function renderInvoicingTab(root, access) {
   root.innerHTML = loader();
-  const [yearsRes, termsRes] = await Promise.all([Db.academicYears.list(), Db.terms.list()]);
+  const [routesRes, yearsRes, termsRes] = await Promise.all([Db.finance.routes.list(), Db.academicYears.list(), Db.terms.list()]);
+  const routes = (routesRes.ok ? routesRes.data : []).filter((r) => r.active !== false);
   const years = yearsRes.ok ? yearsRes.data : [];
   const terms = termsRes.ok ? termsRes.data : [];
   const activeYear = years.find((y) => y.status === 'active') || years[0];
   const activeTerm = terms.find((t) => t.status === 'active') || terms[0];
-  await loadRouteDetail(root, access, route, routes, years, terms, {
-    academic_year_id: activeYear ? activeYear.id : '', term_id: activeTerm ? activeTerm.id : ''
+  await loadInvoicing(root, access, routes, years, terms, {
+    route_id: routes[0] ? routes[0].id : '', academic_year_id: activeYear ? activeYear.id : '', term_id: activeTerm ? activeTerm.id : ''
   });
 }
 
-async function loadRouteDetail(root, access, route, routes, years, terms, sel) {
+async function loadInvoicing(root, access, routes, years, terms, sel) {
   root.innerHTML = `
     <div class="fin-toolbar no-print">
-      <div><a href="javascript:void(0)" id="ft-back" class="back-link">← All routes</a></div>
-      <div class="spacer"></div>
       <div class="fin-filters">
-        <div class="field"><label>Academic Year</label><select id="ftd-year">${options(years, 'id', 'name', sel.academic_year_id)}</select></div>
-        <div class="field"><label>Term</label><select id="ftd-term">${options(terms.filter((t) => !sel.academic_year_id || t.academic_year_id === sel.academic_year_id), 'id', 'name', sel.term_id)}</select></div>
+        <div class="field"><label>Route</label><select id="fti-route">${routes.length ? options(routes, 'id', 'name', sel.route_id) : '<option value="">No routes yet — add one under Routes</option>'}</select></div>
+        <div class="field"><label>Academic Year</label><select id="fti-year">${options(years, 'id', 'name', sel.academic_year_id)}</select></div>
+        <div class="field"><label>Term</label><select id="fti-term">${options(terms.filter((t) => !sel.academic_year_id || t.academic_year_id === sel.academic_year_id), 'id', 'name', sel.term_id)}</select></div>
       </div>
-    </div>
-    <div class="card pad">
-      <h2 style="margin:0 0 4px">${esc(route.name)}</h2>
-      <p class="muted" style="margin:0">${esc(route.pickup_point || 'No pickup point set')} · One-way KES ${Number(route.one_way_amount || 0).toLocaleString()} · Two-way KES ${Number(route.two_way_amount || 0).toLocaleString()}</p>
-    </div>
-    <div class="fin-toolbar" style="margin-top:14px">
-      <p class="hint" style="margin:0">Students below are assigned to this route for the selected term.</p>
       <div class="spacer"></div>
-      ${access.canManage ? `<button class="btn secondary" id="ftd-add-student">+ Add Student</button>
-      <button class="btn" id="ftd-invoice">Invoice this route</button>` : ''}
+      ${access.canManage && routes.length ? `<button class="btn secondary" id="fti-add-student">+ Add Student</button>
+      <button class="btn" id="fti-invoice">Invoice this route</button>` : ''}
     </div>
-    <div id="ftd-roster">${loader()}</div>
+    <div id="fti-roster">${loader()}</div>
   `;
+  if (!routes.length) { root.querySelector('#fti-roster').innerHTML = ''; return; }
+  root.querySelector('#fti-route').onchange = (e) => loadInvoicing(root, access, routes, years, terms, { ...sel, route_id: e.target.value });
+  root.querySelector('#fti-year').onchange = (e) => loadInvoicing(root, access, routes, years, terms, { ...sel, academic_year_id: e.target.value, term_id: '' });
+  root.querySelector('#fti-term').onchange = (e) => loadInvoicing(root, access, routes, years, terms, { ...sel, term_id: e.target.value });
 
-  root.querySelector('#ft-back').onclick = () => renderRoutesList(root, access, routes);
-  root.querySelector('#ftd-year').onchange = (e) => loadRouteDetail(root, access, route, routes, years, terms, { academic_year_id: e.target.value, term_id: '' });
-  root.querySelector('#ftd-term').onchange = (e) => loadRouteDetail(root, access, route, routes, years, terms, { ...sel, term_id: e.target.value });
-
-  const rosterEl = root.querySelector('#ftd-roster');
+  const route = routes.find((r) => r.id === sel.route_id);
+  const rosterEl = root.querySelector('#fti-roster');
   let lastRoster = [];
+  let notInvoicedCount = 0;
   const refreshRoster = async () => {
-    if (!sel.academic_year_id || !sel.term_id) { rosterEl.innerHTML = '<div class="card pad muted">Choose an academic year and term.</div>'; lastRoster = []; return []; }
-    const res = await Db.finance.routes.studentsOnRoute(route.id, sel.academic_year_id, sel.term_id);
-    const rows = res.ok ? res.data : [];
+    if (!route || !sel.academic_year_id || !sel.term_id) { rosterEl.innerHTML = '<div class="card pad muted">Choose a route, academic year and term.</div>'; lastRoster = []; return; }
+    const [rosterRes, invoicedRes] = await Promise.all([
+      Db.finance.routes.studentsOnRoute(route.id, sel.academic_year_id, sel.term_id),
+      Db.finance.routes.invoicedStudentIds(route.id, sel.academic_year_id, sel.term_id)
+    ]);
+    const rows = rosterRes.ok ? rosterRes.data : [];
+    const invoicedIds = new Set(invoicedRes.ok ? invoicedRes.data : []);
     lastRoster = rows;
+    notInvoicedCount = rows.filter((r) => !invoicedIds.has(r.student_id)).length;
+    // POST-BUILD FEEDBACK item 8: "can I, right now, look at a list and
+    // tell which students have already been invoiced this term and which
+    // haven't?" — this column is that answer, per student, not a guess.
     rosterEl.innerHTML = `
-      <div class="card side-accent tile-teal"><div class="card-b table-wrap"><table class="data">
-        <thead><tr><th>Student</th><th>Class</th><th>Direction</th></tr></thead>
+      <div class="fin-toolbar no-print" style="margin-bottom:8px"><span class="muted"><b>${rows.length}</b> assigned · <b>${rows.length - notInvoicedCount}</b> invoiced · <b>${notInvoicedCount}</b> not yet invoiced</span></div>
+      <div class="card side-accent tile-teal"><div class="card-b table-wrap"><table class="data compact">
+        <thead><tr><th>Student</th><th>Class</th><th>Direction</th><th>Invoiced This Term?</th></tr></thead>
         <tbody>${rows.map((r) => `<tr>
           <td>${esc(r.students ? r.students.full_name : '')} <span class="muted">${esc(r.students ? r.students.admission_no : '')}</span></td>
           <td>${esc(r.students && r.students.classes ? r.students.classes.name : '')}</td>
           <td>${r.direction === 'two_way' ? 'Two-way' : 'One-way'}</td>
-        </tr>`).join('') || '<tr><td colspan="3" class="muted">No students assigned to this route for this term yet.</td></tr>'}</tbody>
+          <td>${invoicedIds.has(r.student_id) ? '<span class="badge green">Invoiced</span>' : '<span class="badge amber">Not invoiced</span>'}</td>
+        </tr>`).join('') || '<tr><td colspan="4" class="muted">No students assigned to this route for this term yet.</td></tr>'}</tbody>
       </table></div></div>
     `;
-    return rows;
   };
   await refreshRoster();
 
-  if (access.canManage) {
-    root.querySelector('#ftd-add-student').onclick = () => openAddStudentModal(route, routes, sel, async () => { await refreshRoster(); });
+  if (access.canManage && route) {
+    root.querySelector('#fti-add-student').onclick = () => openAddStudentModal(route, routes, sel, async () => { await refreshRoster(); });
     // Finance Expansion §5.7/Phase 5 — "ask before invoicing" instead of
-    // silently billing everyone on the route the moment the button is
-    // clicked. The bulk RPC already skips anyone already invoiced
-    // server-side, so the confirmation only needs to set expectations, not
-    // duplicate that check client-side.
-    root.querySelector('#ftd-invoice').onclick = () => {
-      if (!sel.academic_year_id || !sel.term_id) { toast('Choose an academic year and term first.', 'err'); return; }
+    // silently billing everyone the moment the button is clicked. The bulk
+    // RPC already skips anyone already invoiced server-side (so a second
+    // click can never double-charge); the roster above now also shows that
+    // per-student, before anyone even reaches for the button.
+    root.querySelector('#fti-invoice').onclick = () => {
       const term = terms.find((t) => t.id === sel.term_id);
       const termLabel = term ? term.name : 'the selected term';
+      if (!notInvoicedCount) { toast('Everyone currently assigned to this route has already been invoiced for this term.', 'ok'); return; }
       confirmAction(
-        `Invoice ${route.name} transport for ${termLabel} now? This adds a transport charge to the invoice of every student on this route (${lastRoster.length} currently assigned) who hasn't already been charged for it this term.`,
+        `Invoice ${route.name} transport for ${termLabel} now? This adds a transport charge for the ${notInvoicedCount} student(s) above not yet invoiced. Anyone already invoiced is skipped automatically — this can't double-charge.`,
         async () => {
           const res = await Db.finance.routes.invoiceRoute(route.id, sel.academic_year_id, sel.term_id);
           if (!res.ok) { toast(res.message, 'err'); return; }
           toast(`Invoiced ${res.data.invoiced_count} student(s)${res.data.skipped_count ? `, skipped ${res.data.skipped_count} already invoiced` : ''}.`, 'ok');
+          await refreshRoster();
         }
       );
     };
@@ -183,14 +216,16 @@ function routeAmount(route, direction) {
  * only when there's actually a decision to make (an existing assignment
  * this term whose charge would change). fnProceed(amountOverride) is
  * called with either a number (keep current charge) or null (apply the
- * new standard charge) — the caller does the actual save.
+ * new standard charge) — the caller does the actual save. A past invoice
+ * is never touched either way — only which route/charge applies GOING
+ * FORWARD changes.
  */
 function promptChargeAdjustment(studentName, oldAmount, newAmount, fnProceed) {
   const verb = newAmount > oldAmount ? 'increase' : 'reduce';
   modal({
     title: 'Transport Charge Changed',
     body: `
-      <p style="margin-top:0">${esc(studentName)}'s new route/direction changes their transport charge from <b>KES ${oldAmount.toLocaleString()}</b> to <b>KES ${newAmount.toLocaleString()}</b> (a ${verb}).</p>
+      <p style="margin-top:0">${esc(studentName)}'s new route/direction changes their transport charge from <b>KES ${oldAmount.toLocaleString()}</b> to <b>KES ${newAmount.toLocaleString()}</b> (a ${verb}). Anything already invoiced under the old route is untouched — this only affects the charge applied going forward.</p>
       <div class="field">
         <label class="chk" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin:8px 0">
           <input type="radio" name="ars-charge" value="new" checked style="margin-top:3px">
@@ -266,7 +301,9 @@ function openAddStudentModal(route, routes, sel, onSaved) {
       if (!q.length) { resultsEl.innerHTML = ''; return; }
       const r = await Db.finance.students.search(q);
       const list = r.ok ? r.data : [];
-      resultsEl.innerHTML = list.map((s) => `<div class="search-hit" data-id="${s.id}">${esc(s.full_name)} <span class="muted">${esc(s.admission_no)} · ${esc(s.classes ? s.classes.name : '')}</span></div>`).join('') || `<div class="muted" style="padding:6px">No student found matching "${esc(q)}".</div>`;
+      resultsEl.innerHTML = list.map((s) => `<div class="search-hit" data-id="${s.id}">${esc(s.full_name)} <span class="muted">${esc(s.admission_no)} · ${esc(s.classes ? s.classes.name : '')}</span></div>`).join('')
+        + (list.length === 30 ? `<div class="muted" style="padding:6px;font-style:italic">Showing first 30 matches — type more of the name or admission number to narrow it down.</div>` : '')
+        || `<div class="muted" style="padding:6px">No student found matching "${esc(q)}".</div>`;
       resultsEl.querySelectorAll('[data-id]').forEach((h) => h.onclick = () => {
         selectedStudent = list.find((s) => s.id === h.dataset.id);
         resultsEl.innerHTML = '';
@@ -274,4 +311,58 @@ function openAddStudentModal(route, routes, sel, onSaved) {
       });
     }, 250);
   };
+}
+
+/* -------------------------------------------------------------- Reports */
+async function renderReportsTab(root, access) {
+  root.innerHTML = loader();
+  const [routesRes, yearsRes, termsRes] = await Promise.all([Db.finance.routes.list(), Db.academicYears.list(), Db.terms.list()]);
+  const routes = routesRes.ok ? routesRes.data : [];
+  const years = yearsRes.ok ? yearsRes.data : [];
+  const terms = termsRes.ok ? termsRes.data : [];
+  const activeYear = years.find((y) => y.status === 'active') || years[0];
+  const activeTerm = terms.find((t) => t.status === 'active') || terms[0];
+  await loadReport(root, routes, years, terms, { academic_year_id: activeYear ? activeYear.id : '', term_id: activeTerm ? activeTerm.id : '' });
+}
+
+async function loadReport(root, routes, years, terms, sel) {
+  root.innerHTML = `
+    <div class="fin-toolbar no-print">
+      <div class="fin-filters">
+        <div class="field"><label>Academic Year</label><select id="ftr-year">${options(years, 'id', 'name', sel.academic_year_id)}</select></div>
+        <div class="field"><label>Term</label><select id="ftr-term">${options(terms.filter((t) => !sel.academic_year_id || t.academic_year_id === sel.academic_year_id), 'id', 'name', sel.term_id)}</select></div>
+      </div>
+    </div>
+    <div id="ftr-table">${loader()}</div>
+  `;
+  root.querySelector('#ftr-year').onchange = (e) => loadReport(root, routes, years, terms, { academic_year_id: e.target.value, term_id: '' });
+  root.querySelector('#ftr-term').onchange = (e) => loadReport(root, routes, years, terms, { ...sel, term_id: e.target.value });
+
+  const tableEl = root.querySelector('#ftr-table');
+  if (!sel.academic_year_id || !sel.term_id) { tableEl.innerHTML = '<div class="card pad muted">Choose an academic year and term.</div>'; return; }
+  // Consolidates what would otherwise be several separate report screens
+  // into one table — per-route assigned/invoiced/pending counts for the
+  // selected term. Small schools rarely have more than a handful of
+  // routes, so one request per route stays cheap; Promise.all keeps it to
+  // a single round trip's worth of latency either way.
+  const rows = await Promise.all(routes.map(async (r) => {
+    const [rosterRes, invoicedRes] = await Promise.all([
+      Db.finance.routes.studentsOnRoute(r.id, sel.academic_year_id, sel.term_id),
+      Db.finance.routes.invoicedStudentIds(r.id, sel.academic_year_id, sel.term_id)
+    ]);
+    const assigned = rosterRes.ok ? rosterRes.data.length : 0;
+    const invoiced = invoicedRes.ok ? invoicedRes.data.length : 0;
+    return { route: r, assigned, invoiced, pending: Math.max(0, assigned - invoiced) };
+  }));
+  const totalPending = rows.reduce((a, r) => a + r.pending, 0);
+  tableEl.innerHTML = `
+    <div class="fin-toolbar no-print" style="margin-bottom:8px"><span class="muted">${totalPending ? `<b>${totalPending}</b> student(s) across all routes still need invoicing this term.` : 'Everyone currently assigned to a route has been invoiced this term.'}</span></div>
+    <div class="card side-accent tile-teal"><div class="card-b table-wrap"><table class="data compact">
+      <thead><tr><th>Route</th><th class="num">Assigned</th><th class="num">Invoiced</th><th class="num">Pending</th></tr></thead>
+      <tbody>${rows.map((r) => `<tr>
+        <td>${esc(r.route.name)}</td><td class="num">${r.assigned}</td><td class="num">${r.invoiced}</td>
+        <td class="num">${r.pending ? `<span class="badge amber">${r.pending}</span>` : '<span class="badge green">0</span>'}</td>
+      </tr>`).join('') || '<tr><td colspan="4" class="muted">No routes yet.</td></tr>'}</tbody>
+    </table></div></div>
+  `;
 }

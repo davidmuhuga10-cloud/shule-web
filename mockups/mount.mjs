@@ -99,6 +99,14 @@ async function mount() {
   } else if (view === 'examDesk') {
     const { viewExamDesk } = await import('/src/views/examDesk.mjs');
     await viewExamDesk(root);
+  } else if (view === 'finance') {
+    // Real app.js hides the outer app sidebar entirely while Finance is
+    // open (body.finance-only-shell — see main.css) since Finance has its
+    // own standalone side nav; mirror that here so the harness doesn't show
+    // two side navs stacked, which the real app never does.
+    document.body.classList.add('finance-only-shell');
+    const { viewFinanceHub } = await import('/src/views/financeHub.mjs');
+    await viewFinanceHub(root);
   }
   window.__mockMounted = true;
 }

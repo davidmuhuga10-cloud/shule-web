@@ -30,6 +30,19 @@ export function createInventoryApi(supabase) {
       const res = fromResult(await supabase.from('inventory_categories').upsert(row).select().single());
       if (res.ok) clearCache();
       return res;
+    },
+    // POST-BUILD FEEDBACK item 7: a real hard delete — the DB's own
+    // `on delete restrict` (migrations/0056) already guarantees this fails
+    // loudly instead of orphaning items, so the only job here is turning
+    // that into a friendly message rather than a raw Postgres error.
+    async remove(id) {
+      const { error } = await supabase.from('inventory_categories').delete().eq('id', id);
+      if (error) {
+        if (error.code === '23503') return err('This category is used by at least one inventory item — deactivate it instead, or move those items to a different category first.');
+        return err(error.message);
+      }
+      clearCache();
+      return ok(true);
     }
   };
 
@@ -48,6 +61,15 @@ export function createInventoryApi(supabase) {
       const res = fromResult(await supabase.from('inventory_units').upsert(row).select().single());
       if (res.ok) clearCache();
       return res;
+    },
+    async remove(id) {
+      const { error } = await supabase.from('inventory_units').delete().eq('id', id);
+      if (error) {
+        if (error.code === '23503') return err('This unit is used by at least one inventory item — deactivate it instead, or update those items to a different unit first.');
+        return err(error.message);
+      }
+      clearCache();
+      return ok(true);
     }
   };
 

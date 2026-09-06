@@ -130,6 +130,15 @@ export function createFinanceApi(supabase) {
       if (error) return err(error.message);
       clearCache();
       return ok(data);
+    },
+    // POST-BUILD FEEDBACK item 8: which students on this route already have
+    // a transport charge for this term — see migrations/0060.
+    async invoicedStudentIds(routeId, academicYearId, termId) {
+      const { data, error } = await supabase.rpc('finance_route_invoiced_students', {
+        p_route_id: routeId, p_academic_year_id: academicYearId, p_term_id: termId
+      });
+      if (error) return err(error.message);
+      return ok((data || []).map((r) => r.student_id));
     }
   };
 
@@ -154,7 +163,13 @@ export function createFinanceApi(supabase) {
       if (error) return err(error.message);
       return ok([...new Set((data || []).map((r) => r.fee_structure_id))]);
     },
-    /** payload: { id?, academic_year_id, term_id, name, class_ids: [], items: [{vote_head_id, amount}] } */
+    /** payload: { id?, academic_year_id, term_id, name, class_ids: [], items: [{vote_head_id, amount}] }
+     *  POST-BUILD AUDIT (Task #49) — this used to be four separate client
+     *  round-trips (update/insert header, delete old classes+items, insert
+     *  new classes+items). A dropped connection or a single failed insert
+     *  between those steps could leave a structure tagged to classes with
+     *  zero vote-head amounts, which "Invoice Now" would then turn into real
+     *  zero-amount invoices. Now it's one atomic RPC — see migrations/0061. */
     async save(payload) {
       payload = payload || {};
       if (!String(payload.name || '').trim()) return err('Fee structure name is required.');
@@ -162,30 +177,18 @@ export function createFinanceApi(supabase) {
       if (!payload.class_ids || !payload.class_ids.length) return err('Choose at least one class this fee structure applies to.');
       if (!payload.items || !payload.items.length) return err('Add at least one vote head amount.');
 
-      let structureId = payload.id;
-      if (structureId) {
-        const upd = await supabase.from('finance_fee_structures').update({ name: payload.name.trim(), academic_year_id: payload.academic_year_id, term_id: payload.term_id }).eq('id', structureId);
-        if (upd.error) return err(upd.error.message);
-        await supabase.from('finance_fee_structure_classes').delete().eq('fee_structure_id', structureId);
-        await supabase.from('finance_fee_structure_items').delete().eq('fee_structure_id', structureId);
-      } else {
-        const ins = await supabase.from('finance_fee_structures').insert({
-          name: payload.name.trim(), academic_year_id: payload.academic_year_id, term_id: payload.term_id
-        }).select().single();
-        if (ins.error) return err(ins.error.message);
-        structureId = ins.data.id;
-      }
-
-      const classRows = payload.class_ids.map((class_id) => ({ fee_structure_id: structureId, class_id }));
-      const itemRows = payload.items.filter((it) => it.vote_head_id && Number(it.amount) >= 0).map((it) => ({ fee_structure_id: structureId, vote_head_id: it.vote_head_id, amount: Number(it.amount) }));
-      const [c1, c2] = await Promise.all([
-        supabase.from('finance_fee_structure_classes').insert(classRows),
-        supabase.from('finance_fee_structure_items').insert(itemRows)
-      ]);
-      if (c1.error) return err(c1.error.message);
-      if (c2.error) return err(c2.error.message);
+      const items = payload.items.filter((it) => it.vote_head_id && Number(it.amount) >= 0).map((it) => ({ vote_head_id: it.vote_head_id, amount: Number(it.amount) }));
+      const { data, error } = await supabase.rpc('finance_save_fee_structure', {
+        p_id: payload.id || null,
+        p_name: payload.name.trim(),
+        p_academic_year_id: payload.academic_year_id,
+        p_term_id: payload.term_id,
+        p_class_ids: payload.class_ids,
+        p_items: items
+      });
+      if (error) return err(error.message);
       clearCache();
-      return ok({ id: structureId });
+      return ok({ id: data });
     },
     /** Bulk-invoices this structure into its tagged classes (all active
      *  students), or just the given student_ids when passed — same RPC
@@ -347,6 +350,18 @@ export function createFinanceApi(supabase) {
       const { data, error } = await supabase.from('finance_opening_balances').select('*').eq('student_id', studentId).eq('academic_year_id', academicYearId).maybeSingle();
       if (error) return err(error.message);
       return ok(data || null);
+    },
+    /** POST-BUILD AUDIT (Task #49) — the Opening Balances template download
+     *  used to fire one openingBalance() round trip PER STUDENT via
+     *  Promise.all (500 students = 500 requests, with the button showing no
+     *  busy state, inviting a double-click that doubles the whole storm).
+     *  One query for the whole year, mapped by student_id client-side. */
+    async openingBalancesForYear(academicYearId) {
+      const { data, error } = await supabase.from('finance_opening_balances').select('student_id, amount').eq('academic_year_id', academicYearId);
+      if (error) return err(error.message);
+      const byStudent = {};
+      (data || []).forEach((r) => { byStudent[r.student_id] = r.amount; });
+      return ok(byStudent);
     },
     /** Bulk-upserts opening balances (brief scenario #9) — rows: [{student_id, amount, notes?}]. */
     async bulkOpeningBalances(rows, academicYearId) {
@@ -564,6 +579,17 @@ export function createFinanceApi(supabase) {
         p_expense_id: expenseId, p_account_id: accountId, p_amount: Number(amount),
         p_payment_date: paymentDate || null, p_payment_method: paymentMethod || 'bank', p_notes: notes || null
       });
+      if (error) return err(error.message);
+      clearCache();
+      return ok(data);
+    },
+    // POST-BUILD FEEDBACK item 5: "can they reverse it, and does that
+    // reversal correctly update the supplier's balance?" — see
+    // migrations/0057's finance_reverse_payment_voucher() for why this
+    // posts an offsetting ledger entry rather than deleting anything.
+    async reverse(voucherId, reason) {
+      if (!voucherId) return err('Missing payment voucher.');
+      const { data, error } = await supabase.rpc('finance_reverse_payment_voucher', { p_voucher_id: voucherId, p_reason: reason || null });
       if (error) return err(error.message);
       clearCache();
       return ok(data);

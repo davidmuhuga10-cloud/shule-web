@@ -102,7 +102,9 @@ function renderStudentTarget(targetEl, bodyEl, schoolName) {
       if (!q.length) { resultsEl.innerHTML = ''; return; }
       const r = await Db.finance.students.search(q);
       const list = r.ok ? r.data : [];
-      resultsEl.innerHTML = list.map((s) => `<div class="search-hit" data-id="${s.id}">${esc(s.full_name)} <span class="muted">${esc(s.admission_no)} · ${esc(s.classes ? s.classes.name : '')}</span></div>`).join('') || `<div class="muted" style="padding:6px">No student found matching "${esc(q)}".</div>`;
+      resultsEl.innerHTML = list.map((s) => `<div class="search-hit" data-id="${s.id}">${esc(s.full_name)} <span class="muted">${esc(s.admission_no)} · ${esc(s.classes ? s.classes.name : '')}</span></div>`).join('')
+        + (list.length === 30 ? `<div class="muted" style="padding:6px;font-style:italic">Showing first 30 matches — type more of the name or admission number to narrow it down.</div>` : '')
+        || `<div class="muted" style="padding:6px">No student found matching "${esc(q)}".</div>`;
       resultsEl.querySelectorAll('[data-id]').forEach((h) => h.onclick = async () => {
         selected = list.find((s) => s.id === h.dataset.id);
         resultsEl.innerHTML = '';
@@ -154,14 +156,23 @@ function renderClassTarget(targetEl, bodyEl, classes, schoolName, sel) {
   const classSel = targetEl.querySelector('#fm-class');
   const previewEl = targetEl.querySelector('#fm-class-preview');
 
+  // POST-BUILD AUDIT (Task #49): switching classes fast (or editing the
+  // template while a fetch for the previous class was still in flight)
+  // could let a slower, stale response land AFTER a newer one and overwrite
+  // the preview — showing class A's recipients under a Send button that's
+  // now labeled for class B. This generation counter makes a stale response
+  // a no-op instead of a silent data mismatch.
+  let loadGeneration = 0;
   const load = async () => {
     const classId = classSel.value;
+    const myGen = ++loadGeneration;
     if (!classId) { previewEl.innerHTML = ''; return; }
     previewEl.innerHTML = loader();
     const [balancesRes, studentsRes] = await Promise.all([
       Db.finance.reports.classBalances(classId, 0),
       Db.students.list({ class_id: classId })
     ]);
+    if (myGen !== loadGeneration) return; // a newer load has since started — discard this stale result
     const owing = balancesRes.ok ? balancesRes.data : [];
     const contactById = new Map((studentsRes.ok ? studentsRes.data : []).map((s) => [s.id, s.guardian_contact]));
     const recipients = owing

@@ -1,8 +1,26 @@
 /**
  * financePayroll.mjs — Finance Expansion brief item 3 ("Payroll Module").
- * Four sub-tabs following the brief's own process (§3.8): Staff Payroll
- * (profiles) -> Run Payroll (create/review/edit/finalize) -> History
- * (past months + per-employee history) -> Reports.
+ * Four sub-tabs following the real order of events: Setup (payroll
+ * profiles — has to exist before anything else) -> Run Payroll (create/
+ * review/edit/finalize) -> History (past months + per-employee history) ->
+ * Reports.
+ *
+ * POST-BUILD FEEDBACK item 6 (BUG FIX): "Run Payroll" used to be the FIRST
+ * tab, ahead of Setup — you can't run a payroll that hasn't been set up.
+ * Reordered so Setup leads, and Run Payroll now hard-blocks (rather than
+ * silently creating a payroll with zero employees) when nothing's been set
+ * up yet — see the "no active profiles" branch in loadRun() below.
+ *
+ * On "what happens to a mistake found after finalization": already decided
+ * and now fully wired end-to-end. finance_payroll_reverse() only allows
+ * reversing a finalized run while its posted expense is still unpaid
+ * (migrations/0054) — if it's already been paid, the RPC's own error
+ * message ("Correct it from Expenses instead") points at the real fix:
+ * reverse the linked Payment Voucher first (financeExpenses.mjs, added
+ * this same review pass — migrations/0057), which brings that expense back
+ * to unpaid, and only THEN does reversing the payroll run itself become
+ * possible. Nothing about this is left undefined; openReverseModal() below
+ * spells out both paths explicitly.
  *
  * Manage-only, same as Expenses (migrations/0054's header comment) — this
  * whole screen is gated the same way financeAccounting.mjs/
@@ -13,8 +31,8 @@ import { Db } from '../lib/api/index.mjs';
 import { printHeaderHtml, addressLines, isContactInfoComplete, missingContactInfoHtml } from '../lib/printHeader.mjs';
 
 const SUB_TABS = [
+  { key: 'profiles', label: 'Setup' },
   { key: 'run', label: 'Run Payroll' },
-  { key: 'profiles', label: 'Staff Payroll' },
   { key: 'history', label: 'History' },
   { key: 'reports', label: 'Reports' }
 ];
@@ -28,7 +46,15 @@ export async function viewFinancePayroll(root, access) {
     root.innerHTML = `<div class="card pad">You don't have permission to manage Payroll — ask your school admin for full Finance access.</div>`;
     return;
   }
-  let active = 'run';
+  // POST-BUILD FEEDBACK item 6: Setup is genuinely the first thing a new
+  // user sees now, not just first in the tab order — this only changes to
+  // 'run' automatically once at least one payroll profile exists (see the
+  // check right below), so a bursar who's already set Payroll up still
+  // lands somewhere useful instead of back at an empty Setup screen every
+  // time.
+  const profilesRes = await Db.finance.payrollProfiles.list();
+  const hasProfiles = profilesRes.ok && profilesRes.data.some((p) => p.active !== false);
+  let active = hasProfiles ? 'run' : 'profiles';
   root.innerHTML = `
     <div class="fin-tabs wrap-tabs">
       ${SUB_TABS.map((t) => `<button data-ptab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</button>`).join('')}
@@ -39,7 +65,7 @@ export async function viewFinancePayroll(root, access) {
   const show = (key) => {
     active = key;
     root.querySelectorAll('[data-ptab]').forEach((b) => b.classList.toggle('active', b.dataset.ptab === key));
-    if (key === 'run') renderRun(body);
+    if (key === 'run') renderRun(body, () => show('profiles'));
     else if (key === 'profiles') renderProfiles(body);
     else if (key === 'history') renderHistory(body);
     else renderReports(body);
@@ -123,16 +149,17 @@ async function renderProfiles(root) {
 }
 
 /* -------------------------------------------------------------- Run Payroll */
-async function renderRun(root) {
+async function renderRun(root, goToSetup) {
   const now = new Date();
-  await loadRun(root, { year: now.getFullYear(), month: now.getMonth() + 1 });
+  await loadRun(root, { year: now.getFullYear(), month: now.getMonth() + 1 }, goToSetup);
 }
 
-async function loadRun(root, sel) {
+async function loadRun(root, sel, goToSetup) {
   root.innerHTML = loader();
-  const runsRes = await Db.finance.payrollRuns.list();
+  const [runsRes, profilesRes] = await Promise.all([Db.finance.payrollRuns.list(), Db.finance.payrollProfiles.list()]);
   const runs = runsRes.ok ? runsRes.data : [];
   const existing = runs.find((r) => r.period_year === sel.year && r.period_month === sel.month);
+  const hasProfiles = profilesRes.ok && profilesRes.data.some((p) => p.active !== false);
 
   root.innerHTML = `
     <div class="fin-toolbar no-print">
@@ -141,26 +168,37 @@ async function loadRun(root, sel) {
         <div class="field"><label>Year</label><input id="fpr-year" type="number" value="${sel.year}" style="width:100px"></div>
       </div>
       <div class="spacer"></div>
-      ${!existing ? '<button class="btn" id="fpr-create">Create Payroll</button>' : ''}
+      ${!existing && hasProfiles ? '<button class="btn" id="fpr-create">Create Payroll</button>' : ''}
     </div>
     <div id="fpr-content">${loader()}</div>
   `;
-  root.querySelector('#fpr-month').onchange = (e) => loadRun(root, { ...sel, month: Number(e.target.value) });
-  root.querySelector('#fpr-year').onchange = (e) => loadRun(root, { ...sel, year: Number(e.target.value) || sel.year });
+  root.querySelector('#fpr-month').onchange = (e) => loadRun(root, { ...sel, month: Number(e.target.value) }, goToSetup);
+  root.querySelector('#fpr-year').onchange = (e) => loadRun(root, { ...sel, year: Number(e.target.value) || sel.year }, goToSetup);
 
   const contentEl = root.querySelector('#fpr-content');
+  // POST-BUILD FEEDBACK item 6 ("can someone click Run Payroll before Setup
+  // has been completed? what happens if they try?"): a hard block, not a
+  // payroll silently created for zero people. Setup is one tab away.
+  if (!hasProfiles) {
+    contentEl.innerHTML = `<div class="card pad" style="text-align:center;padding:32px 20px">
+      <p style="margin:0 0 12px;font-size:15px">Payroll hasn't been set up yet — there's nothing to run.</p>
+      <p class="muted" style="margin:0 0 16px">Add at least one Payroll Profile (basic salary, allowances, deductions per staff member) under <b>Setup</b> first.</p>
+      <button class="btn" id="fpr-goto-setup">Go to Setup</button>
+    </div>`;
+    contentEl.querySelector('#fpr-goto-setup').onclick = () => goToSetup && goToSetup();
+    return;
+  }
   if (!existing) {
     contentEl.innerHTML = `<div class="card pad muted">No payroll created yet for ${MONTHS[sel.month - 1]} ${sel.year}. Click "Create Payroll" to bring in every active payroll profile.</div>`;
     root.querySelector('#fpr-create').onclick = async () => {
       const res = await Db.finance.payrollRuns.create(sel.year, sel.month);
       if (!res.ok) { toast(res.message, 'err'); return; }
-      if (!res.data.employee_count) toast('Payroll created, but no staff have a payroll profile yet — add some under Staff Payroll first.', 'err');
-      else toast(`Payroll created for ${res.data.employee_count} employee(s).`, 'ok');
-      await loadRun(root, sel);
+      toast(`Payroll created for ${res.data.employee_count} employee(s).`, 'ok');
+      await loadRun(root, sel, goToSetup);
     };
     return;
   }
-  await renderRunDetail(contentEl, existing, sel, () => loadRun(root, sel));
+  await renderRunDetail(contentEl, existing, sel, () => loadRun(root, sel, goToSetup));
 }
 
 async function renderRunDetail(root, run, sel, onRefresh) {
@@ -264,7 +302,7 @@ function openReverseModal(run, onDone) {
   modal({
     title: 'Reverse Payroll',
     body: `
-      <p style="margin-top:0">This voids the posted Finance expense and marks ${MONTHS[run.period_month - 1]} ${run.period_year}'s payroll as reversed. Nothing is deleted — it stays visible in History for the record. Only possible because no payment has been recorded against it yet.</p>
+      <p style="margin-top:0">This voids the posted Finance expense and marks ${MONTHS[run.period_month - 1]} ${run.period_year}'s payroll as reversed. Nothing is deleted — it stays visible in History for the record. Only possible while no payment has been recorded against it yet — if it's already been paid, reverse that Payment Voucher first (Expenses &gt; Payments), which is exactly what puts it back to "unpaid" and unlocks this.</p>
       <div class="field"><label>Reason (optional)</label><textarea id="frev-reason" rows="2" placeholder="e.g. Two staff omitted, recreating with correct list"></textarea></div>
     `,
     okLabel: 'Reverse Payroll',

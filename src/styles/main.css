@@ -1187,6 +1187,16 @@ table.data td.num,table.data th.num{text-align:center}
    bolted-on widget. */
 .fin-chart-row{display:grid;grid-template-columns:minmax(260px,340px) 1fr;gap:16px;margin-top:16px;align-items:stretch}
 @media screen and (max-width:860px){.fin-chart-row{grid-template-columns:1fr}}
+/* POST-BUILD AUDIT (Task #49, mobile pass) — Inventory's dashboard used to
+   reuse .fin-chart-row (built for an asymmetric chart+table pairing) with
+   an inline style="grid-template-columns:1fr 1fr" override for its two
+   equal-width tables. The inline style out-specificities .fin-chart-row's
+   own mobile breakpoint, so it never collapsed to one column below 860px —
+   the two tables stayed side by side and forced the whole page to scroll
+   sideways on a phone. This is the equal-width equivalent, with its own
+   working breakpoint, so no inline override is needed. */
+.fin-two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px;align-items:stretch}
+@media screen and (max-width:860px){.fin-two-col{grid-template-columns:1fr}}
 .chart-svg{width:100%;height:auto;display:block}
 .chart-pie{max-width:220px;margin:0 auto}
 .chart-grid{stroke:var(--line);stroke-width:1}
@@ -1285,6 +1295,14 @@ table.data td.num,table.data th.num{text-align:center}
 @media print{
   #fb-table .frb-desktop-view{display:none!important}
   #fb-table .fb-print-full{display:block!important}
+}
+/* Cashbook pagination — same pattern as Balances above: screen shows
+   PAGE_SIZE rows, print/export always gets the full filtered range. Scoped
+   to #fcb-table so it doesn't affect other reports sharing .rcb-desktop-view. */
+.fcb-print-full{display:none}
+@media print{
+  #fcb-table .rcb-desktop-view{display:none!important}
+  #fcb-table .fcb-print-full{display:block!important}
 }
 /* Balances — one card per student with a Paid-vs-Expected progress bar
    (approved "Style 3"), balance colored red if still owing, green if
@@ -1407,64 +1425,50 @@ table.data td.num,table.data th.num{text-align:center}
 /* ---------- Finance Nav B: dedicated left side-nav ----------
    Brief item 8 (approved option B): Finance gets its own side-nav instead
    of the top .fin-tabs strip, shown only while inside the Finance module
-   (never on the main app shell before Finance is opened). On desktop it's
-   a simple sticky column; on mobile it collapses into a slide-in drawer,
-   mirroring the main .sidebar's own open/scrim pattern exactly so the
-   interaction is already familiar. .fin-tabs itself is left in place
-   above (still used by Timetable Setup's sub-tabs, unrelated to this). */
-/* Desktop redesign (Finance_Dashboard_Desktop_Design_Standard.docx item 1):
-   fixed + floats OVER page content instead of a sticky column that reserves
-   space in the flex row — collapsed by default as a slim rail showing only
-   a right-pointing arrow (no label, the icon communicates "expand" on its
-   own), expands on click to the full labelled list without pushing
-   .fin-side-body to the right. Background now runs the full viewport
-   height (not just wrapping the 6 links) and uses a distinct cool tone
-   (--fin-nav-bg) instead of white, kept as its own variable since the
-   exact hue is still pending sign-off — swap this one line to retune it. */
-:root{--fin-nav-bg:#15343a}
+   (never on the main app shell before Finance is opened). .fin-tabs itself
+   is left in place above (still used by Timetable Setup's sub-tabs,
+   unrelated to this).
+   POST-BUILD FEEDBACK item 1/3 (BUG FIX): this used to be a fixed rail that
+   FLOATED over content, offset from the left edge by var(--sidebar) (the
+   OUTER app sidebar's width) and collapsed to a 46px arrow-only strip that
+   expanded on click/hover. That made sense when Finance rendered inside the
+   main app shell, next to that outer sidebar — but Finance now ALWAYS opens
+   in its own standalone tab (body.finance-only-shell, see .main's rule
+   above), which hides the outer sidebar entirely. Left un-updated, this
+   nav kept reserving that now-empty gap, reading as "centered floating"
+   over the page with wasted space on both sides — exactly what the review
+   flagged. Fixed here to mirror the main app's own .sidebar exactly: fixed
+   flush to the true left edge, full width, always showing every label,
+   never collapsing — one static column, not a widget floating over
+   content. .fin-side-body/.fin-page-head take the same var(--sidebar)
+   margin .main uses for the identical reason. */
 .fin-side-toggle{display:none}
-/* On mobile this sits directly under the global sidebar's own ☰ toggle in
-   the topbar (both left-aligned at the same x) — reading as one duplicated
-   button stacked vertically. Nudging it right offsets it from that column
-   without changing its plain icon-btn styling. */
-.fin-side-toggle{margin-left:8px}
-.fin-shell{display:flex;align-items:flex-start;gap:10px}
-.fin-side-nav a{display:block;padding:10px 14px;border-radius:8px;color:#cfe3e2;font-weight:600;
-  font-size:13px;cursor:pointer;margin:2px 6px;transition:background .12s;white-space:nowrap}
+.fin-shell{display:flex;align-items:flex-start}
+.fin-side-nav{background:var(--brand)}
+.fin-side-nav a{display:flex;align-items:center;padding:10px 14px;border-radius:8px;color:#cfe3e2;font-weight:600;
+  font-size:13.5px;cursor:pointer;margin:2px 10px;transition:background .12s;white-space:nowrap}
 .fin-side-nav a:hover{background:rgba(255,255,255,.1);color:#fff}
 .fin-side-nav a.active{background:var(--primary);color:#fff}
-.fin-side-nav a.fin-nav-msg{margin-top:10px;padding-top:14px;border-top:1px solid rgba(255,255,255,.12)}
+/* item 2 (BUG FIX): Messages used to carry a border-top + extra margin here,
+   reading as a separate, standalone category rather than one more Finance
+   tab. It's a regular nav link like any other — no divider. */
+.fin-side-nav a.fin-nav-msg{margin-top:2px;padding-top:10px;border-top:none}
 .fin-side-nav .fin-rail-arrow{display:none}
 .fin-side-body{flex:1;min-width:0}
-/* Desktop-only: fixed rail that overlays content instead of a sticky column
-   that reserves row space — scoped to min-width:961px so it can never
-   collide with the mobile drawer rules below (which use a different toggle
-   class, .open, and must always show full labels). */
 @media screen and (min-width:961px){
-  .fin-side-nav{position:fixed;top:62px;bottom:0;left:calc(var(--sidebar) + 6px);width:46px;
-    background:var(--fin-nav-bg);border-radius:0 14px 14px 0;padding:14px 0;z-index:32;overflow:hidden;
-    transition:width .18s ease;box-shadow:2px 0 12px rgba(0,0,0,.12);cursor:pointer}
-  .fin-side-nav.expanded{width:150px;cursor:default}
-  .fin-side-nav .fin-rail-arrow{display:flex;width:46px;height:28px;align-items:center;justify-content:center;
-    color:#cfe3e2;font-size:15px;flex-shrink:0;transition:transform .18s}
-  .fin-side-nav.expanded .fin-rail-arrow{transform:rotate(180deg)}
-  .fin-side-nav:not(.expanded) a{pointer-events:none;opacity:0}
-  /* .fin-side-body's margin only accounts for the COLLAPSED rail width — the
-     expanded nav overlays on top rather than reflowing this. */
-  .fin-side-body{flex:1;min-width:0;margin-left:56px}
+  .fin-side-nav{position:fixed;top:0;bottom:0;left:0;width:var(--sidebar);padding:16px 0;z-index:32;overflow-y:auto}
+  .fin-side-body{margin-left:var(--sidebar)}
   /* The page header (title + search bar) sits ABOVE .fin-shell as its own
-     sibling, so it doesn't inherit .fin-side-body's margin — without this
-     the fixed rail overlapped "Finance" and the search box. */
-  .fin-page-head{margin-left:56px}
+     sibling, so it doesn't inherit .fin-side-body's margin. */
+  .fin-page-head{margin-left:var(--sidebar)}
 }
 @media screen and (max-width:960px){
   .fin-side-toggle{display:inline-flex}
   .fin-shell{gap:0}
-  .fin-side-nav{position:fixed;top:0;bottom:0;left:0;width:230px;border-radius:0;background:var(--brand);
+  .fin-side-nav{position:fixed;top:0;bottom:0;left:0;width:230px;border-radius:0;
     z-index:40;overflow-y:auto;transform:translateX(-100%);transition:transform .25s;box-shadow:var(--shadow);
     padding:14px 0}
-  .fin-side-nav .fin-rail-arrow{display:none}
-  .fin-side-nav a{opacity:1;pointer-events:auto;font-size:13.5px;padding:10px 13px}
+  .fin-side-nav a{font-size:13.5px;padding:10px 13px}
   .fin-side-nav.open{transform:none}
   .fin-side-body{margin-left:0}
 }

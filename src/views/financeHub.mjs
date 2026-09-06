@@ -124,7 +124,6 @@ export async function viewFinanceHub(root) {
     <div class="fin-shell">
       <div class="scrim no-print" id="fin-scrim"></div>
       <nav class="fin-side-nav no-print" id="fin-side-nav">
-        <div class="fin-rail-arrow">▸</div>
         ${TABS.map((t) => `<a data-tab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</a>`).join('')}
         <a class="fin-nav-msg" data-msg="1">💬 Messages</a>
       </nav>
@@ -137,38 +136,21 @@ export async function viewFinanceHub(root) {
   const sideNav = root.querySelector('#fin-side-nav');
   const finScrim = root.querySelector('#fin-scrim');
 
-  // Same open/close/scrim pattern as the main app sidebar (App.toggleSidebar
-  // in app.js), scoped to this module's own side-nav — Finance's nav is only
-  // ever shown while inside Finance, never on the main shell. On mobile this
-  // toggles the slide-in drawer (.open); on desktop the same function
-  // toggles the fixed rail's expanded/collapsed state (.expanded) instead —
-  // "fixed, floats over content, collapses to a slim arrow-only rail" per
-  // the design standard brief item 1.
-  const isDesktop = () => window.innerWidth > 960;
+  // POST-BUILD FEEDBACK items 1/3 (BUG FIX): Finance's nav is now a plain
+  // static column fixed to the left edge — same as the main app's own
+  // .sidebar — with no desktop expand/collapse state at all (that floating,
+  // collapsible-rail behavior was the "centered floating over content" bug
+  // this review flagged; see main.css's Finance Nav B comment for the full
+  // story). The only thing left to toggle is the MOBILE slide-in drawer,
+  // same open/close/scrim pattern as the main app sidebar's own
+  // App.toggleSidebar.
   const toggleFinNav = (force) => {
-    const cls = isDesktop() ? 'expanded' : 'open';
-    const open = typeof force === 'boolean' ? force : !sideNav.classList.contains(cls);
-    sideNav.classList.toggle(cls, open);
-    if (!isDesktop()) finScrim.classList.toggle('show', open);
+    const open = typeof force === 'boolean' ? force : !sideNav.classList.contains('open');
+    sideNav.classList.toggle('open', open);
+    finScrim.classList.toggle('show', open);
   };
   root.querySelector('#fin-menu-toggle').onclick = () => toggleFinNav();
   finScrim.onclick = () => toggleFinNav(false);
-  // Desktop: clicking the collapsed rail itself expands it (no separate
-  // hamburger button on desktop — the rail IS the toggle); clicking
-  // anywhere outside it while expanded collapses it again.
-  sideNav.onclick = (e) => {
-    if (isDesktop() && !sideNav.classList.contains('expanded')) toggleFinNav(true);
-  };
-  // BUG FIX: this view re-runs its whole render every time Finance is
-  // opened, so a plain `document.addEventListener` here would pile up a new
-  // listener (referencing an already-discarded sideNav) on every visit —
-  // remove the previous instance's listener first, same one-listener
-  // discipline the rest of the app already follows for cross-render leaks.
-  if (window.__finNavOutsideClick) document.removeEventListener('click', window.__finNavOutsideClick);
-  window.__finNavOutsideClick = (e) => {
-    if (isDesktop() && sideNav.classList.contains('expanded') && !sideNav.contains(e.target)) toggleFinNav(false);
-  };
-  document.addEventListener('click', window.__finNavOutsideClick);
 
   const showTab = (key) => {
     active = key;
@@ -216,7 +198,14 @@ export async function viewFinanceHub(root) {
       if (!q.length) { resultsEl.innerHTML = ''; return; }
       const r = await Db.finance.students.search(q);
       const list = r.ok ? r.data : [];
-      resultsEl.innerHTML = list.map((s) => `<div class="search-hit" data-id="${s.id}">${esc(s.full_name)} <span class="muted">${esc(s.admission_no)} · ${esc(s.classes ? s.classes.name : '')}</span></div>`).join('') || `<div class="muted" style="padding:6px">No student found matching "${esc(q)}".</div>`;
+      // POST-BUILD AUDIT (Task #49): the search is capped at 30 matches
+      // server-side (finance.mjs students.search) — a common surname at a
+      // 500+ student school could exceed that with no indication the list
+      // was cut off. Say so rather than letting the 31st+ match silently
+      // never appear.
+      resultsEl.innerHTML = list.map((s) => `<div class="search-hit" data-id="${s.id}">${esc(s.full_name)} <span class="muted">${esc(s.admission_no)} · ${esc(s.classes ? s.classes.name : '')}</span></div>`).join('')
+        + (list.length === 30 ? `<div class="muted" style="padding:6px;font-style:italic">Showing first 30 matches — type more of the name or admission number to narrow it down.</div>` : '')
+        || `<div class="muted" style="padding:6px">No student found matching "${esc(q)}".</div>`;
       resultsEl.querySelectorAll('[data-id]').forEach((h) => h.onclick = () => {
         const student = list.find((s) => s.id === h.dataset.id);
         resultsEl.innerHTML = '';

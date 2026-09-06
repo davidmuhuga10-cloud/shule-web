@@ -376,7 +376,9 @@ async function loadNotes(root, kind, ctx, sel) {
         if (!q.length) { resultsEl.innerHTML = ''; return; }
         const r = await Db.finance.students.search(q);
         const list = r.ok ? r.data : [];
-        resultsEl.innerHTML = list.map((s) => `<div class="search-hit" data-id="${s.id}">${esc(s.full_name)} <span class="muted">${esc(s.admission_no)} · ${esc(s.classes ? s.classes.name : '')}</span></div>`).join('') || `<div class="muted" style="padding:6px">No student found matching "${esc(q)}".</div>`;
+        resultsEl.innerHTML = list.map((s) => `<div class="search-hit" data-id="${s.id}">${esc(s.full_name)} <span class="muted">${esc(s.admission_no)} · ${esc(s.classes ? s.classes.name : '')}</span></div>`).join('')
+          + (list.length === 30 ? `<div class="muted" style="padding:6px;font-style:italic">Showing first 30 matches — type more of the name or admission number to narrow it down.</div>` : '')
+          || `<div class="muted" style="padding:6px">No student found matching "${esc(q)}".</div>`;
         resultsEl.querySelectorAll('[data-id]').forEach((h) => h.onclick = async () => {
           const student = list.find((s) => s.id === h.dataset.id);
           resultsEl.innerHTML = '';
@@ -450,16 +452,41 @@ async function loadNotes(root, kind, ctx, sel) {
         const studentsRes = await Db.students.list(filters);
         const students = studentsRes.ok ? studentsRes.data : [];
         if (!students.length) { toast('No active students match that selection.', 'err'); return; }
-        statusEl.textContent = `Issuing to ${students.length} student(s)…`;
-        let okCount = 0;
-        for (const s of students) { const r = await issueOne(s.id); if (r.ok) okCount++; }
-        toast(`${isDebit ? 'Debit' : 'Credit'} note issued to ${okCount}/${students.length} student(s).`, okCount === students.length ? 'ok' : 'warn');
+        await issueToList(students);
       }
       root.querySelector('#fn-amount').value = '';
       root.querySelector('#fn-reason').value = '';
-      statusEl.textContent = '';
     } finally {
       btn.disabled = false;
+    }
+
+    // POST-BUILD AUDIT (Task #49): a class/stream note used to just loop
+    // silently and report "issued to 40/120" with no way to see or fix the
+    // other 80 — a partial failure (network blip mid-loop, one student's
+    // vote head somehow invalid) left the bursar with no path forward short
+    // of re-running the whole batch and re-charging everyone who succeeded.
+    // Now the failed students are named on screen with a one-click retry
+    // that only re-targets them.
+    async function issueToList(students) {
+      statusEl.textContent = `Issuing to ${students.length} student(s)…`;
+      let okCount = 0;
+      const failed = [];
+      for (const s of students) {
+        const r = await issueOne(s.id);
+        if (r.ok) okCount++; else failed.push(s);
+      }
+      if (!failed.length) {
+        toast(`${isDebit ? 'Debit' : 'Credit'} note issued to ${okCount}/${students.length} student(s).`, 'ok');
+        statusEl.textContent = '';
+        return;
+      }
+      toast(`${isDebit ? 'Debit' : 'Credit'} note issued to ${okCount}/${students.length} student(s) — ${failed.length} failed.`, 'warn');
+      statusEl.innerHTML = `<div class="hint" style="color:#b42318">
+        Failed for: ${failed.map((s) => esc(s.full_name)).join(', ')}.
+        <button type="button" class="btn secondary sm" id="fn-retry-failed" style="margin-left:6px">Retry failed</button>
+      </div>`;
+      const retryBtn = statusEl.querySelector('#fn-retry-failed');
+      if (retryBtn) retryBtn.onclick = () => { retryBtn.disabled = true; issueToList(failed); };
     }
   };
 }

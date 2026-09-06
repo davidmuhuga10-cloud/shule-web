@@ -95,11 +95,12 @@ async function loadBalances(root, settings, classes, sel) {
   const refilter = (patch) => loadBalances(root, settings, classes, { ...sel, ...patch });
   root.querySelector('#fb-class').onchange = (e) => refilter({ class_id: e.target.value, stream_name: '', page: 1 });
   root.querySelector('#fb-min').oninput = (e) => refilter({ min_balance: e.target.value, page: 1 });
-  root.querySelector('#fb-xlsx').onclick = async () => {
+  const fbXlsxBtn = root.querySelector('#fb-xlsx');
+  fbXlsxBtn.onclick = () => withBusy(fbXlsxBtn, async () => {
     const res = await Db.finance.reports.classBalances(sel.class_id || null, sel.min_balance || null);
     const rows = (res.ok ? res.data : []).filter((r) => !sel.stream_name || r.stream_name === sel.stream_name);
     downloadXlsxAOA('Balances.xlsx', buildBalancesAoa({ settings, rows, title: 'Balances' }), 'Balances');
-  };
+  }, 'Preparing…');
 
   const tableEl = root.querySelector('#fb-table');
   if (!isContactInfoComplete(settings)) {
@@ -274,10 +275,11 @@ async function loadVoteHead(root, settings, years, terms, sel) {
   `;
   root.querySelector('#fv-year').onchange = (e) => loadVoteHead(root, settings, years, terms, { academic_year_id: e.target.value, term_id: '' });
   root.querySelector('#fv-term').onchange = (e) => loadVoteHead(root, settings, years, terms, { ...sel, term_id: e.target.value });
-  root.querySelector('#fv-xlsx').onclick = async () => {
+  const fvXlsxBtn = root.querySelector('#fv-xlsx');
+  fvXlsxBtn.onclick = () => withBusy(fvXlsxBtn, async () => {
     const res = await Db.finance.reports.voteHeadCollections(sel.academic_year_id || null, sel.term_id || null);
     downloadXlsxAOA('Vote-Head-Collections.xlsx', buildVoteHeadCollectionsAoa({ settings, rows: res.ok ? res.data : [], title: 'Collections Per Vote Head' }), 'Vote Heads');
-  };
+  }, 'Preparing…');
 
   const tableEl = root.querySelector('#fv-table');
   if (!isContactInfoComplete(settings)) { tableEl.innerHTML = missingContactInfoHtml(); wireGotoSettings(tableEl); return; }
@@ -315,10 +317,11 @@ async function loadCashbook(root, settings, sel) {
     <div id="fcb-table" style="margin-top:14px">${loader()}</div>
   `;
   root.querySelector('#fcb-apply').onclick = () => loadCashbook(root, settings, { from: root.querySelector('#fcb-from').value, to: root.querySelector('#fcb-to').value });
-  root.querySelector('#fcb-xlsx').onclick = async () => {
+  const xlsxBtn = root.querySelector('#fcb-xlsx');
+  xlsxBtn.onclick = () => withBusy(xlsxBtn, async () => {
     const res = await Db.finance.reports.cashbook(sel.from, sel.to);
     downloadXlsxAOA('Cashbook.xlsx', buildCashbookAoa({ settings, rows: res.ok ? res.data : [], from: sel.from, to: sel.to }), 'Cashbook');
-  };
+  }, 'Preparing…');
 
   const tableEl = root.querySelector('#fcb-table');
   if (!isContactInfoComplete(settings)) { tableEl.innerHTML = missingContactInfoHtml(); wireGotoSettings(tableEl); return; }
@@ -326,16 +329,43 @@ async function loadCashbook(root, settings, sel) {
   const res = await Db.finance.reports.cashbook(sel.from, sel.to);
   const rows = res.ok ? res.data : [];
   const total = rows.reduce((a, r) => a + Number(r.amount || 0), 0);
-  const desktopTable = `<div class="rcb-desktop-view"><table class="print-grid">
-      <thead><tr><th>Date</th><th>Receipt No</th><th>Student</th><th>Adm. No.</th><th>Mode</th><th class="num">Amount</th></tr></thead>
-      <tbody>${rows.map((r) => `<tr>
+
+  // POST-BUILD AUDIT (Task #49): a wide date range (a full term/year) on a
+  // school with heavy daily collection volume used to dump every row into
+  // one on-screen table with no paging — same fix already applied to
+  // Balances: page the screen view, keep print/export on the full list.
+  const PAGE_SIZE = 25;
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const page = Math.min(Math.max(1, sel.page || 1), totalPages);
+  const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const cbRow = (r) => `<tr>
         <td>${esc(r.collection_date)}</td><td>${esc(r.receipt_no)}</td><td>${esc(r.student_name)}</td><td>${esc(r.admission_no)}</td><td>${esc(r.mode)}</td><td class="num">${Number(r.amount || 0).toLocaleString()}</td>
-      </tr>`).join('') || '<tr><td colspan="6" class="muted">No collections in this range.</td></tr>'}</tbody>
+      </tr>`;
+  const cbHead = `<thead><tr><th>Date</th><th>Receipt No</th><th>Student</th><th>Adm. No.</th><th>Mode</th><th class="num">Amount</th></tr></thead>`;
+  const noMatch = '<tr><td colspan="6" class="muted">No collections in this range.</td></tr>';
+  const desktopTable = `<div class="rcb-desktop-view"><table class="print-grid">
+      ${cbHead}
+      <tbody>${pageRows.map(cbRow).join('') || noMatch}</tbody>
+    </table>
+    ${totalPages > 1 ? `<div class="pagination no-print">
+      <button class="btn sm secondary" id="fcb-page-prev" ${page <= 1 ? 'disabled' : ''}>‹ Prev</button>
+      <span class="muted">Page ${page} of ${totalPages} (${rows.length} entr${rows.length === 1 ? 'y' : 'ies'})</span>
+      <button class="btn sm secondary" id="fcb-page-next" ${page >= totalPages ? 'disabled' : ''}>Next ›</button>
+    </div>` : ''}
+  </div>`;
+  // Print/export always gets the FULL filtered range, never just the page on screen.
+  const printTable = `<div class="fcb-print-full"><table class="print-grid">
+      ${cbHead}
+      <tbody>${rows.map(cbRow).join('') || noMatch}</tbody>
       <tfoot><tr><td colspan="5"><b>Total</b></td><td class="num"><b>${total.toLocaleString()}</b></td></tr></tfoot>
     </table></div>`;
-  const mobileList = `<div class="rcb-mobile-view no-print">${rows.length ? rows.map(cashbookRowHtml).join('') : '<p class="muted center" style="margin:20px 0">No collections in this range.</p>'}${rows.length ? `<div class="rcb-row" style="font-weight:700"><span>Total</span><span>${total.toLocaleString()}</span></div>` : ''}</div>`;
-  tableEl.innerHTML = reportSheetHtml('fcb-sheet', settings, `Cashbook — ${sel.from} to ${sel.to}`, `${desktopTable}${mobileList}`);
+  const mobileList = `<div class="rcb-mobile-view no-print">${pageRows.length ? pageRows.map(cashbookRowHtml).join('') : '<p class="muted center" style="margin:20px 0">No collections in this range.</p>'}${pageRows.length ? `<div class="rcb-row" style="font-weight:700"><span>Total (this page)</span><span>${pageRows.reduce((a, r) => a + Number(r.amount || 0), 0).toLocaleString()}</span></div>` : ''}</div>`;
+  tableEl.innerHTML = reportSheetHtml('fcb-sheet', settings, `Cashbook — ${sel.from} to ${sel.to}`, `${desktopTable}${printTable}${mobileList}`);
   wirePrintOptions(root, 'fcb', `Cashbook ${sel.from} to ${sel.to}`);
+  const prevBtn = root.querySelector('#fcb-page-prev');
+  const nextBtn = root.querySelector('#fcb-page-next');
+  if (prevBtn) prevBtn.onclick = () => loadCashbook(root, settings, { ...sel, page: page - 1 });
+  if (nextBtn) nextBtn.onclick = () => loadCashbook(root, settings, { ...sel, page: page + 1 });
 }
 
 /** Cashbook mobile view — one plain feed line per entry (date, student +
@@ -377,10 +407,11 @@ async function loadTrial(root, settings, years, terms, sel) {
   `;
   root.querySelector('#ft-year').onchange = (e) => loadTrial(root, settings, years, terms, { academic_year_id: e.target.value, term_id: '' });
   root.querySelector('#ft-term').onchange = (e) => loadTrial(root, settings, years, terms, { ...sel, term_id: e.target.value });
-  root.querySelector('#ft-xlsx').onclick = async () => {
+  const ftXlsxBtn = root.querySelector('#ft-xlsx');
+  ftXlsxBtn.onclick = () => withBusy(ftXlsxBtn, async () => {
     const res = await Db.finance.reports.trialBalance(sel.academic_year_id || null, sel.term_id || null);
     downloadXlsxAOA('Trial-Balance.xlsx', buildTrialBalanceAoa({ settings, rows: res.ok ? res.data : [] }), 'Trial Balance');
-  };
+  }, 'Preparing…');
 
   const tableEl = root.querySelector('#ft-table');
   if (!isContactInfoComplete(settings)) { tableEl.innerHTML = missingContactInfoHtml(); wireGotoSettings(tableEl); return; }
@@ -446,15 +477,17 @@ async function loadOpeningBalances(root, years, students, sel) {
   const yearSelect = root.querySelector('#ob-year');
   yearSelect.onchange = (e) => loadOpeningBalances(root, years, students, { academic_year_id: e.target.value });
 
-  root.querySelector('#ob-template').onclick = async () => {
+  const templateBtn = root.querySelector('#ob-template');
+  templateBtn.onclick = () => withBusy(templateBtn, async () => {
     const yearId = yearSelect.value;
-    const existingRes = yearId ? await Promise.all(students.map((s) => Db.finance.students.openingBalance(s.id, yearId))) : [];
-    const rows = students.map((s, i) => ({
+    const existingRes = yearId ? await Db.finance.students.openingBalancesForYear(yearId) : { ok: true, data: {} };
+    const byStudent = existingRes.ok ? existingRes.data : {};
+    const rows = students.map((s) => ({
       admission_no: s.admission_no, full_name: s.full_name, class_name: s.class_name || '', stream_name: s.stream_name || '',
-      amount: existingRes[i] && existingRes[i].ok && existingRes[i].data ? existingRes[i].data.amount : ''
+      amount: byStudent[s.id] != null ? byStudent[s.id] : ''
     }));
     downloadXlsx('shuletop-opening-balances-template.xlsx', rows, OB_TEMPLATE_COLUMNS, 'Opening Balances');
-  };
+  }, 'Preparing…');
 
   let pendingRows = null;
   const previewBtn = root.querySelector('#ob-preview');

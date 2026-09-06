@@ -71,6 +71,22 @@ export function renderPrereq(root, title, text, route, label) {
   </div></div></div>`;
 }
 
+// Mirrors app.js's real renderPrereqOrConnectivity() — students.mjs (reused
+// as-is under Finance's Students tab) needs this too.
+export function renderPrereqOrConnectivity(root, { ok, title, text, route, label, onRetry }) {
+  if (!ok) {
+    root.innerHTML = `<div class="card"><div class="card-b"><div class="empty warn">
+      <div class="e-ico">📡</div><h3>Couldn't load — check your connection</h3>
+      <p>We couldn't reach the server just now. Try again once you're back online.</p>
+      <button class="btn" id="prereq-retry">Try again</button>
+    </div></div></div>`;
+    const b = root.querySelector('#prereq-retry');
+    if (b) b.onclick = () => { if (onRetry) onRetry(); };
+    return;
+  }
+  renderPrereq(root, title, text, route, label);
+}
+
 export function options(list, valKey, labKey, selected, placeholder) {
   let html = placeholder ? `<option value="">${esc(placeholder)}</option>` : '';
   (list || []).forEach((it) => {
