@@ -164,6 +164,10 @@ export function groupByTerm(rows, { terms = [], academicYears = [] } = {}) {
   }
 }
 
+// Finance Expansion brief item 1.3: kept in sync with financeCollections.mjs's
+// own modeLabel() — a student statement line for a payment-in-kind/bursary
+// collection should read the same as the receipt did, not fall back to the
+// raw 'kind'/'bursary' database value.
 function modeLabel(mode) {
-  return { cash: 'Cash', paybill: 'Paybill', bank: 'Bank', other: 'Other' }[mode] || mode || '';
+  return { cash: 'Cash', paybill: 'Paybill', bank: 'Bank', other: 'Other', kind: 'Payment in Kind', bursary: 'Bursary' }[mode] || mode || '';
 }

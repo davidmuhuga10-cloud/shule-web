@@ -179,7 +179,11 @@ async function load(root, access, opts) {
   }
 }
 
-function modeLabel(mode) { return { cash: 'Cash', paybill: 'Paybill', bank: 'Bank', other: 'Other' }[mode] || mode || ''; }
+// Finance Expansion brief item 1.3 ("Payment in Kind & Bursary"): two more
+// modes alongside cash/paybill/bank/other — not a separate parallel
+// payment system, just two more values this SAME field can hold (see
+// migrations/0049_payment_in_kind_bursary.sql).
+function modeLabel(mode) { return { cash: 'Cash', paybill: 'Paybill', bank: 'Bank', other: 'Other', kind: 'Payment in Kind', bursary: 'Bursary' }[mode] || mode || ''; }
 function fmtShortDate(iso) {
   try { return new Date(iso).toLocaleDateString(undefined, { day: '2-digit', month: 'short' }); } catch (e) { return ''; }
 }
@@ -222,10 +226,16 @@ function openRecordModal(root, access, opts) {
       <div class="grid2">
         <div class="field"><label>Amount (KES)</label><input id="rc-amount" type="number" min="0.01" step="0.01"></div>
         <div class="field"><label>Mode</label><select id="rc-mode">
-          <option value="cash">Cash</option><option value="paybill">Paybill / M-Pesa</option><option value="bank">Bank</option><option value="other">Other</option>
+          <option value="cash">Cash</option><option value="paybill">Paybill / M-Pesa</option><option value="bank">Bank</option>
+          <option value="kind">Payment in Kind</option><option value="bursary">Bursary</option><option value="other">Other</option>
         </select></div>
       </div>
-      <div class="field"><label>Reference (optional)</label><input id="rc-reference" placeholder="e.g. M-Pesa code"></div>
+      <div class="field" id="rc-kind-field" style="display:none">
+        <label>What was received</label>
+        <input id="rc-kind-desc" placeholder="e.g. 10 bags of firewood, estimated at this amount">
+        <div class="hint" style="margin:4px 0 0">No cash changed hands — this credits the student's fee balance for the value received. The printed receipt records what was given instead of a payment mode.</div>
+      </div>
+      <div class="field" id="rc-reference-field"><label id="rc-reference-label">Reference (optional)</label><input id="rc-reference" placeholder="e.g. M-Pesa code"></div>
       <div class="field"><label>Notes (optional)</label><input id="rc-notes"></div>
       <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-top:6px">
         <input type="checkbox" id="rc-sms" ${smsDefault ? 'checked' : ''}>
@@ -241,8 +251,10 @@ function openRecordModal(root, access, opts) {
       const mode = document.getElementById('rc-mode').value;
       const reference = document.getElementById('rc-reference').value;
       const notes = document.getElementById('rc-notes').value;
+      const kindDesc = document.getElementById('rc-kind-desc').value;
+      if (mode === 'kind' && !kindDesc.trim()) { toast('Describe what was received.', 'err'); return; }
       const wantsSms = document.getElementById('rc-sms').checked;
-      const res = await Db.finance.collections.record(studentId, amount, mode, reference, notes);
+      const res = await Db.finance.collections.record(studentId, amount, mode, reference, notes, mode === 'kind' ? kindDesc : null);
       if (!res.ok) { toast(res.message, 'err'); return; }
       closeModal();
       toast('Collection recorded.', 'ok');
@@ -257,6 +269,24 @@ function openRecordModal(root, access, opts) {
       if (wantsSms && newCollection) sendReceiptSms(newCollection, studentId);
     }
   });
+
+  // Finance Expansion brief item 1.3: Payment in Kind needs a description
+  // of what was actually received instead of a reference/mode; Bursary
+  // reuses the plain Reference field (same way Paybill reuses it for an
+  // M-Pesa code) but relabeled so it's obvious it means the sponsor, not a
+  // transaction code.
+  const modeEl = document.getElementById('rc-mode');
+  const kindFieldEl = document.getElementById('rc-kind-field');
+  const refFieldEl = document.getElementById('rc-reference-field');
+  const refLabelEl = document.getElementById('rc-reference-label');
+  const refInputEl = document.getElementById('rc-reference');
+  modeEl.onchange = () => {
+    const m = modeEl.value;
+    kindFieldEl.style.display = m === 'kind' ? '' : 'none';
+    refFieldEl.style.display = m === 'kind' ? 'none' : '';
+    if (m === 'bursary') { refLabelEl.textContent = 'Sponsor / Bursary source'; refInputEl.placeholder = 'e.g. CDF, NGO name, or sponsor'; }
+    else { refLabelEl.textContent = 'Reference (optional)'; refInputEl.placeholder = 'e.g. M-Pesa code'; }
+  };
 
   if (!opts.studentId) {
     const qEl = document.getElementById('rc-student-q');
@@ -396,7 +426,9 @@ async function printReceipt(collection) {
         <div class="rcpt-box">
           <div class="lab">Payment Info</div>
           <div style="font-size:13px"><b>Mode of Payment:</b> ${esc(modeLabel(collection.mode))}</div>
-          ${collection.reference ? `<div style="font-size:13px"><b>Reference:</b> ${esc(collection.reference)}</div>` : ''}
+          ${collection.mode === 'kind' && collection.in_kind_description ? `<div style="font-size:13px"><b>Received:</b> ${esc(collection.in_kind_description)}</div>` : ''}
+          ${collection.mode === 'bursary' && collection.reference ? `<div style="font-size:13px"><b>Sponsor:</b> ${esc(collection.reference)}</div>` : ''}
+          ${collection.mode !== 'bursary' && collection.reference ? `<div style="font-size:13px"><b>Reference:</b> ${esc(collection.reference)}</div>` : ''}
         </div>
       </div>
 

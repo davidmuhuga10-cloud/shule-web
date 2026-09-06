@@ -287,9 +287,14 @@ export function createFinanceApi(supabase) {
       if (error) return err(error.message);
       return ok(data || []);
     },
-    async record(studentId, amount, mode, reference, notes) {
+    // inKindDescription: Finance Expansion brief item 1.3 — only meaningful
+    // when mode === 'kind' (what was actually received, e.g. "10 bags of
+    // firewood"); null for every other mode, including the pre-existing
+    // cash/paybill/bank/other callers that never pass a 6th argument at all.
+    async record(studentId, amount, mode, reference, notes, inKindDescription) {
       const { data, error } = await supabase.rpc('finance_record_collection', {
-        p_student_id: studentId, p_amount: Number(amount), p_mode: mode, p_reference: reference || null, p_notes: notes || null
+        p_student_id: studentId, p_amount: Number(amount), p_mode: mode, p_reference: reference || null, p_notes: notes || null,
+        p_in_kind_description: inKindDescription || null
       });
       if (error) return err(error.message);
       clearCache();
