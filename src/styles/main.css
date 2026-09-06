@@ -576,6 +576,12 @@ table.data td.num,table.data th.num{text-align:center}
    the same light-grey pill every other neutral badge uses (--grid-text is
    the pure-black token these reports already use throughout). */
 .badge.grade{background:#eef1f5;color:var(--grid-text)}
+/* Finance Expansion brief item 4 (Inventory): stocktake movements get their
+   own neutral-but-distinct variant so they read differently from
+   receive/issue/adjustment (green/red/amber) at a glance in the movement
+   history table — a stocktake isn't a "gain" or "loss" per se, it's a
+   correction, so it gets a color outside that in/out semantic set. */
+.badge.purple{background:#f1e9fb;color:#7c3aed}
 
 /* ---------- Status buttons (attendance marking) ---------- */
 .status-btn{border:1px solid var(--line);background:#fff;color:var(--muted);padding:6px 12px;border-radius:7px;
