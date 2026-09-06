@@ -24,6 +24,7 @@ import { viewFinanceCollections } from './financeCollections.mjs';
 import { openStudentProfile } from './financeStudent.mjs';
 import { viewFinanceReports } from './financeReports.mjs';
 import { viewFinanceAccounting } from './financeAccounting.mjs';
+import { viewFinanceMessaging } from './financeMessaging.mjs';
 import { viewFinanceTransport } from './financeTransport.mjs';
 // Finance Expansion brief item 1.1 ("Student Module Under Finance"): reuse
 // the EXACT existing Students screen — same search, add/edit/move, class
@@ -61,6 +62,7 @@ const TABS = [
   { key: 'accounting', label: 'Accounting' },
   { key: 'reports', label: 'Reports' },
   { key: 'transport', label: 'Transport' },
+  { key: 'reminders', label: 'Reminders' },
   { key: 'preferences', label: 'Preferences' }
 ];
 
@@ -174,6 +176,7 @@ export async function viewFinanceHub(root) {
     else if (key === 'collections') viewFinanceCollections(body, access);
     else if (key === 'reports') viewFinanceReports(body, access);
     else if (key === 'preferences') viewFinancePreferences(body, access);
+    else if (key === 'reminders') viewFinanceMessaging(body, access);
     else viewFinanceTransport(body, access);
   };
   root.querySelectorAll('[data-tab]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); showTab(b.dataset.tab); });
