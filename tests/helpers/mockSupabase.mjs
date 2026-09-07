@@ -99,6 +99,14 @@ export function createMockSupabase(initialTables) {
       },
       order(col, opts) { state.order = { col, ascending: !opts || opts.ascending !== false }; return api; },
       limit() { return api; },
+      // Supports selectAllRows()'s pagination (src/lib/api/_util.mjs) — a
+      // real PostgREST row cap has no equivalent here (this mock never
+      // truncates on its own), so .range() is implemented for real rather
+      // than as a no-op specifically so a test CAN exercise multi-page
+      // pagination if it wants to (see results.test.mjs's selectAllRows
+      // coverage) instead of every call silently returning everything in
+      // one "page" regardless of what range was asked for.
+      range(from, to) { state.range = [from, to]; return api; },
       async single() {
         const r = await finalize();
         if (r.error) return r;
@@ -159,8 +167,13 @@ export function createMockSupabase(initialTables) {
           return (av > bv ? 1 : -1) * (ascending ? 1 : -1);
         });
       }
+      const totalCount = hit.length;
+      if (state.range) {
+        const [from, to] = state.range;
+        hit = hit.slice(from, to + 1);
+      }
       hit = applyEmbeds(hit, state.cols);
-      return { data: hit, error: null, count: hit.length };
+      return { data: hit, error: null, count: totalCount };
     }
 
     return api;

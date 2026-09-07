@@ -20,7 +20,7 @@
  *                      result_submissions in schema.sql. Staff always see
  *                      everything in their own school regardless of status.
  */
-import { ok, err, byAdmissionNo, admissionNumberValue, indexById, createMemoCache, clearAllCaches } from './_util.mjs';
+import { ok, err, byAdmissionNo, admissionNumberValue, indexById, createMemoCache, clearAllCaches, selectAllRows } from './_util.mjs';
 import { getEffectiveClassSubjectIds, getEffectiveClassSubjectIdsBatch } from './assignments.mjs';
 
 // Same short-window in-memory memoization pattern as finance.mjs/students.mjs
@@ -138,7 +138,10 @@ async function effectiveSubjectScores(supabase, examId, classId) {
   const { data: exam } = await supabase.from('exams').select('*').eq('id', examId).maybeSingle();
   if (!exam) return err('Exam not found.');
   const [{ data: results }, { data: papers }] = await Promise.all([
-    supabase.from('results').select('student_id, subject_id, paper_id, score').eq('exam_id', examId).eq('class_id', classId),
+    // selectAllRows: see _util.mjs — an unbounded select here silently
+    // truncates at PostgREST's row cap once this class+exam's result count
+    // passes it.
+    selectAllRows((from, to) => supabase.from('results').select('student_id, subject_id, paper_id, score').eq('exam_id', examId).eq('class_id', classId).range(from, to)),
     supabase.from('subject_papers').select('id, weight, out_of').eq('exam_id', examId).eq('class_id', classId)
   ]);
   const paperById = indexById(papers || []);
@@ -192,7 +195,9 @@ async function computeClassAverage(supabase, examId, classId) {
   // class within this same exam, is irrelevant here.
   const { data: papers } = await supabase.from('subject_papers').select('*').eq('exam_id', examId).eq('class_id', classId).in('subject_id', subjectIds);
   const paperById = indexById(papers || []);
-  const { data: results } = await supabase.from('results').select('*').eq('exam_id', examId).eq('class_id', classId);
+  // selectAllRows: see _util.mjs — same unbounded-select truncation risk as
+  // every other whole-class results read in this file.
+  const { data: results } = await selectAllRows((from, to) => supabase.from('results').select('*').eq('exam_id', examId).eq('class_id', classId).range(from, to));
   const byStudent = {};
   (results || []).forEach((r) => {
     if (r.score === null || r.score === undefined) return;
@@ -635,9 +640,15 @@ export function createResultsApi(supabase, gradingApi) {
       const { data: students } = await studentQuery;
       const sorted = (students || []).slice().sort(byAdmissionNo);
 
-      let existingQuery = supabase.from('results').select('*').eq('exam_id', q.exam_id).eq('subject_id', q.subject_id);
-      existingQuery = q.paper_id ? existingQuery.eq('paper_id', q.paper_id) : existingQuery.is('paper_id', null);
-      const { data: existing } = await existingQuery;
+      // selectAllRows: see _util.mjs — this reads every result for this
+      // subject/paper across the WHOLE EXAM (every class), not just this
+      // one class, which is exactly the shape that outgrows PostgREST's
+      // row cap first on a school with several classes sharing a subject.
+      const { data: existing } = await selectAllRows((from, to) => {
+        let existingQuery = supabase.from('results').select('*').eq('exam_id', q.exam_id).eq('subject_id', q.subject_id);
+        existingQuery = q.paper_id ? existingQuery.eq('paper_id', q.paper_id) : existingQuery.is('paper_id', null);
+        return existingQuery.range(from, to);
+      });
       const byStudent = {};
       (existing || []).forEach((r) => { byStudent[r.student_id] = r; });
 
@@ -790,10 +801,22 @@ export function createResultsApi(supabase, gradingApi) {
       // visible on screen and in the console instead of being swallowed.
       try {
 
-      // System Fixes brief §12/§13: these three don't depend on each other
-      // — used to be three sequential round trips before anything else
-      // could start, now one wave.
-      const [{ data: exam }, { data: examClass }, subjectIdsFromAssignments] = await Promise.all([
+      // Round 7 perf pass: this function is the shared engine behind the
+      // Mark List, Report Card, and Exam Analysis, and it had grown into a
+      // chain of ~10 sequential round trips as feature after feature
+      // (Learning Area Papers, Subject Combinations, min-subjects grading,
+      // Overall Grading System overrides) each added one more await instead
+      // of joining a batch that already existed. None of exam/examClass/
+      // subjectIdsFromAssignments/students/results/combos/the min-subjects
+      // setting actually depend on each other — every one of them only
+      // needs q.exam_id/q.class_id/q.stream_id, all known up front — so all
+      // seven now fire in one wave instead of being spread across the
+      // function (System Fixes brief §12/§13 already made this same call
+      // for the first three; this extends it to the rest).
+      const [
+        { data: exam }, { data: examClass }, subjectIdsFromAssignments,
+        { data: studentsRaw }, { data: results }, { data: combos }, { data: minSettingRow }
+      ] = await Promise.all([
         supabase.from('exams').select('*').eq('id', q.exam_id).maybeSingle(),
         // Step 10: publish-time settings for this (exam, class) — ranking
         // criteria, deviation exam, overall grading system, minimum learning
@@ -801,7 +824,25 @@ export function createResultsApi(supabase, gradingApi) {
         // screen. All optional; a class that's never been through that
         // step falls back to exactly today's single global behaviour below.
         supabase.from('exam_classes').select('*').eq('exam_id', q.exam_id).eq('class_id', q.class_id).maybeSingle(),
-        getEffectiveClassSubjectIds(supabase, q.class_id)
+        getEffectiveClassSubjectIds(supabase, q.class_id),
+        (q.stream_id
+          ? supabase.from('students').select('*').eq('class_id', q.class_id).eq('status', 'active').eq('stream_id', q.stream_id)
+          : supabase.from('students').select('*').eq('class_id', q.class_id).eq('status', 'active')),
+        // selectAllRows: see _util.mjs — BUG FIX (live report, "Report
+        // Cards printing with empty marks" + Review & Publish undercounting
+        // entered marks): a plain unbounded select here silently truncates
+        // at PostgREST's row cap once this class's exam has more than that
+        // many result rows (students x subjects x papers — a single
+        // 106-student, ~10-subject class already crosses it), so whichever
+        // students/subjects happened to sort past the cutoff would render
+        // with blank marks with zero indication anything was cut off.
+        selectAllRows((from, to) => supabase.from('results').select('*').eq('exam_id', q.exam_id).eq('class_id', q.class_id).range(from, to)),
+        supabase.from('subject_combinations').select('*').eq('exam_id', q.exam_id),
+        // Only ever USED as a fallback, once examClass is known (below) — but
+        // it's cheap, and firing it now instead of after examClass resolves
+        // saves a whole extra round trip in the common case where no
+        // per-exam-class override exists.
+        supabase.from('settings').select('value').eq('key', 'min_subjects_for_ranking').maybeSingle()
       ]);
       if (!exam) return err('Exam not found.');
       // Round 3 §12: an admin picking a class/exam combo that was never
@@ -817,65 +858,15 @@ export function createResultsApi(supabase, gradingApi) {
       if (!examClass) return err('No exams found — this class was not selected to sit this exam.');
       const examOutOf = Number(exam.out_of) || 100;
 
+      // subjectIds: the assignment-based list, or — when that's empty —
+      // every subject actually scored for this exam/class, derived from the
+      // `results` rows fetched above instead of a second, near-identical
+      // query (same exam_id + class_id filter `results` already used) that
+      // used to fire here on its own.
       let subjectIds = subjectIdsFromAssignments;
       if (!subjectIds.length) {
-        const { data: examResults } = await supabase.from('results').select('subject_id').eq('exam_id', q.exam_id).eq('class_id', q.class_id);
-        subjectIds = [...new Set((examResults || []).map((r) => r.subject_id))];
+        subjectIds = [...new Set((results || []).map((r) => r.subject_id))];
       }
-      let subjects = [];
-      if (subjectIds.length) {
-        const { data } = await supabase.from('subjects').select('*').in('id', subjectIds);
-        subjects = (data || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
-      }
-
-      const { data: submissions } = subjects.length
-        ? await supabase.from('result_submissions').select('*').eq('exam_id', q.exam_id).eq('class_id', q.class_id).in('subject_id', subjects.map((s) => s.id))
-        : { data: [] };
-      const statusBySubject = {};
-      const maxMarksBySubject = {};
-      (submissions || []).forEach((s) => {
-        statusBySubject[s.subject_id] = s.status;
-        if (s.max_marks !== null && s.max_marks !== undefined) maxMarksBySubject[s.subject_id] = Number(s.max_marks);
-      });
-
-      // Feature brief §5: the Mark List should only ever show a subject once
-      // its results are actually published — a subject still in
-      // draft/submitted/approved isn't shown at all (not as a "Draft"
-      // column), rather than surfacing work that hasn't cleared the
-      // approval workflow yet. staff previewing progress still see
-      // everything unfiltered on the Publish Results screen
-      // (listSubmissions() above is untouched) — this filter is specific to
-      // the printable Mark List/broadsheet.
-      if (!q.includeUnpublished) {
-        subjects = subjects.filter((s) => statusBySubject[s.id] === 'published');
-      }
-
-      // Learning Area Papers: scoped to THIS exam AND this class
-      // (0020_learning_area_papers.sql, 0021_learning_area_papers_per_class.sql)
-      // — a subject's paper setup from a different exam, OR from a
-      // different class sitting the same exam, is never relevant to THIS
-      // Mark List (Grade 1 may be single-mark while Grade 8 is 3 papers,
-      // same subject, same exam). A subject with zero rows here (for this
-      // class) is shown as a single combined column, exactly as before this
-      // feature existed.
-      const { data: papers } = subjects.length
-        ? await supabase.from('subject_papers').select('*').eq('exam_id', q.exam_id).eq('class_id', q.class_id).in('subject_id', subjects.map((s) => s.id))
-        : { data: [] };
-      const paperById = indexById(papers || []);
-      const papersBySubject = {};
-      (papers || []).forEach((p) => { (papersBySubject[p.subject_id] = papersBySubject[p.subject_id] || []).push(p); });
-      Object.values(papersBySubject).forEach((list) => list.sort((a, b) => a.paper_no - b.paper_no));
-
-      let studentQuery = supabase.from('students').select('*').eq('class_id', q.class_id).eq('status', 'active');
-      if (q.stream_id) studentQuery = studentQuery.eq('stream_id', q.stream_id);
-      // System Fixes brief §12/§13: `students` and `results` don't depend on
-      // each other (or on subjects/submissions/papers above) — fired
-      // together instead of `results` waiting its turn after streamMap is
-      // built below, even though nothing in between actually needs it yet.
-      const [{ data: studentsRaw }, { data: results }] = await Promise.all([
-        studentQuery,
-        supabase.from('results').select('*').eq('exam_id', q.exam_id).eq('class_id', q.class_id)
-      ]);
 
       // Next Sprint 2 §9 (BUG): "Newly added students (added after exam
       // creation) auto-appear on that exam's merit list as grade 'X' —
@@ -903,10 +894,74 @@ export function createResultsApi(supabase, gradingApi) {
       });
 
       const streamIds = [...new Set((students || []).map((s) => s.stream_id).filter(Boolean))];
-      const { data: streamRows } = streamIds.length
-        ? await supabase.from('streams').select('id, name').in('id', streamIds)
-        : { data: [] };
+
+      // Second wave: subjects (needs subjectIds, just computed above),
+      // streams (needs `students`, also just computed above — no query
+      // required for that half), Subject Combination members (needs only
+      // the combo ids already fetched in the first wave), and the grading
+      // scale's bands (needs only examClass, also already known) — four
+      // more round trips that don't depend on one another, fired together
+      // instead of one after another.
+      const [{ data: subjectsData }, { data: streamRows }, { data: comboMembers }, bands] = await Promise.all([
+        subjectIds.length ? supabase.from('subjects').select('*').in('id', subjectIds) : Promise.resolve({ data: [] }),
+        streamIds.length ? supabase.from('streams').select('id, name').in('id', streamIds) : Promise.resolve({ data: [] }),
+        (combos || []).length
+          ? supabase.from('subject_combination_members').select('*').in('combination_id', combos.map((c) => c.id))
+          : Promise.resolve({ data: [] }),
+        gradingApi && gradingApi.scaleBands ? gradingApi.scaleBands(examClass && examClass.grading_scale_id) : Promise.resolve([])
+      ]);
+      let subjects = (subjectsData || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
       const streamMap = {}; (streamRows || []).forEach((s) => { streamMap[s.id] = s.name; });
+
+      // Third wave: submissions and Learning Area Papers both depend only on
+      // the FULL candidate subject id list, not the publish-filtered one
+      // below — fetching papers for every candidate subject instead of
+      // waiting for the publish-status filter (which itself needs
+      // submissions to have already arrived) lets the two run together. A
+      // filtered-out subject's papers just never get looked up afterward
+      // (papersBySubject is only ever read via subjects still left in
+      // `subjects` post-filter), so this is a pure timing change, not a
+      // behaviour one.
+      const allSubjectIds = subjects.map((s) => s.id);
+      const [{ data: submissions }, { data: papers }] = await Promise.all([
+        allSubjectIds.length
+          ? supabase.from('result_submissions').select('*').eq('exam_id', q.exam_id).eq('class_id', q.class_id).in('subject_id', allSubjectIds)
+          : Promise.resolve({ data: [] }),
+        // Learning Area Papers: scoped to THIS exam AND this class
+        // (0020_learning_area_papers.sql, 0021_learning_area_papers_per_class.sql)
+        // — a subject's paper setup from a different exam, OR from a
+        // different class sitting the same exam, is never relevant to THIS
+        // Mark List (Grade 1 may be single-mark while Grade 8 is 3 papers,
+        // same subject, same exam). A subject with zero rows here (for this
+        // class) is shown as a single combined column, exactly as before this
+        // feature existed.
+        allSubjectIds.length
+          ? supabase.from('subject_papers').select('*').eq('exam_id', q.exam_id).eq('class_id', q.class_id).in('subject_id', allSubjectIds)
+          : Promise.resolve({ data: [] })
+      ]);
+      const statusBySubject = {};
+      const maxMarksBySubject = {};
+      (submissions || []).forEach((s) => {
+        statusBySubject[s.subject_id] = s.status;
+        if (s.max_marks !== null && s.max_marks !== undefined) maxMarksBySubject[s.subject_id] = Number(s.max_marks);
+      });
+
+      // Feature brief §5: the Mark List should only ever show a subject once
+      // its results are actually published — a subject still in
+      // draft/submitted/approved isn't shown at all (not as a "Draft"
+      // column), rather than surfacing work that hasn't cleared the
+      // approval workflow yet. staff previewing progress still see
+      // everything unfiltered on the Publish Results screen
+      // (listSubmissions() above is untouched) — this filter is specific to
+      // the printable Mark List/broadsheet.
+      if (!q.includeUnpublished) {
+        subjects = subjects.filter((s) => statusBySubject[s.id] === 'published');
+      }
+
+      const paperById = indexById(papers || []);
+      const papersBySubject = {};
+      (papers || []).forEach((p) => { (papersBySubject[p.subject_id] = papersBySubject[p.subject_id] || []).push(p); });
+      Object.values(papersBySubject).forEach((list) => list.sort((a, b) => a.paper_no - b.paper_no));
 
       // Combine per-paper rows into one effective score per (student, subject) —
       // normalize each paper's own out_of, apply its weight, scale to the
@@ -949,9 +1004,9 @@ export function createResultsApi(supabase, gradingApi) {
       // `subjects`. Every downstream total/mean/ranking/"subjects done"
       // count only ever iterates over `subjects`, so this one substitution
       // is all that's needed — nothing below has to know combos exist.
-      const { data: combos } = await supabase.from('subject_combinations').select('*').eq('exam_id', q.exam_id);
+      // (`combos` and `comboMembers` are both already fetched above — see
+      // the first and second waves.)
       if ((combos || []).length) {
-        const { data: comboMembers } = await supabase.from('subject_combination_members').select('*').in('combination_id', combos.map((c) => c.id));
         const membersByCombo = {};
         (comboMembers || []).forEach((m) => { (membersByCombo[m.combination_id] = membersByCombo[m.combination_id] || []).push(m); });
 
@@ -992,13 +1047,14 @@ export function createResultsApi(supabase, gradingApi) {
 
       // Step 1: per-(exam,class) "minimum learning areas" (exam_classes.
       // min_subjects) takes precedence when set; falls back to the existing
-      // school-wide `min_subjects_for_ranking` setting exactly as before.
+      // school-wide `min_subjects_for_ranking` setting exactly as before —
+      // that setting was already fetched eagerly in the first wave above,
+      // so no extra round trip happens here even in the fallback case.
       let minSubjects = 0;
       if (examClass && examClass.min_subjects !== null && examClass.min_subjects !== undefined) {
         minSubjects = Number(examClass.min_subjects) || 0;
       } else {
-        const { data: minSetting } = await supabase.from('settings').select('value').eq('key', 'min_subjects_for_ranking').maybeSingle();
-        minSubjects = Number((minSetting || {}).value) || 0;
+        minSubjects = Number((minSettingRow || {}).value) || 0;
       }
 
       // Zeraki-style Mark List (Phase 2i / feature-brief "Merit List Design"):
@@ -1013,7 +1069,7 @@ export function createResultsApi(supabase, gradingApi) {
       // is_default scale for this exam+class only — scaleBands() falls back
       // to the default scale when it's unset, so this is a no-op change of
       // behaviour for any class that's never been through publish settings.
-      const bands = gradingApi && gradingApi.scaleBands ? await gradingApi.scaleBands(examClass && examClass.grading_scale_id) : [];
+      // (`bands` itself was already fetched in the second wave above.)
       const grade = (score) => (gradingApi && gradingApi.gradeScore ? gradingApi.gradeScore(score, bands) : { grade_label: '', points: '' });
 
       const rows = (students || []).map((s) => {
@@ -1198,7 +1254,15 @@ export function createResultsApi(supabase, gradingApi) {
       if (!classId) return err('Please choose a class.');
       const [assignedIds, { data: examResults }] = await Promise.all([
         getEffectiveClassSubjectIds(supabase, classId),
-        supabase.from('results').select('subject_id, student_id').eq('exam_id', examId).eq('class_id', classId)
+        // selectAllRows: see _util.mjs — BUG FIX (live report: "Review &
+        // Publish shows subjects as 0/incomplete even though the marks are
+        // actually there"). This is exactly the query that undercounted:
+        // a plain select silently truncates at PostgREST's row cap once
+        // this class's exam has more result rows than that (confirmed live
+        // — a 106-student, 10-subject class already sits past 1000), so
+        // whichever subjects' rows sorted past the cutoff read as having
+        // zero/partial marks entered even though every one was fully saved.
+        selectAllRows((from, to) => supabase.from('results').select('subject_id, student_id').eq('exam_id', examId).eq('class_id', classId).range(from, to))
       ]);
       const resultSubjectIds = [...new Set((examResults || []).map((r) => r.subject_id))];
       const subjectIds = [...new Set([...assignedIds, ...resultSubjectIds])];
@@ -1296,7 +1360,12 @@ export function createResultsApi(supabase, gradingApi) {
       const { data: classes } = await supabase.from('classes').select('id, name').in('id', classIds);
       const classMap = indexById(classes || []);
 
-      const { data: examResults } = await supabase.from('results').select('class_id, subject_id').eq('exam_id', examId).in('class_id', classIds);
+      // selectAllRows: see _util.mjs — this spans EVERY class in the exam at
+      // once, the single biggest truncation risk of any query in this file
+      // (a whole exam's worth of students x subjects x papers); a plain
+      // select here would misreport marks-entry progress for whichever
+      // classes' rows sorted past PostgREST's row cap.
+      const { data: examResults } = await selectAllRows((from, to) => supabase.from('results').select('class_id, subject_id').eq('exam_id', examId).in('class_id', classIds).range(from, to));
       const withMarksByClass = {};
       (examResults || []).forEach((r) => {
         (withMarksByClass[r.class_id] = withMarksByClass[r.class_id] || new Set()).add(r.subject_id);
@@ -1474,7 +1543,10 @@ export function createResultsApi(supabase, gradingApi) {
         }
       }
 
-      const { data: examResults } = await supabase.from('results').select('subject_id').eq('exam_id', examId).eq('class_id', classId);
+      // selectAllRows: see _util.mjs — used as a publish-gate ("only N
+      // subject(s) have marks so far"); an unbounded select could
+      // under-report and wrongly block publishing on a large class.
+      const { data: examResults } = await selectAllRows((from, to) => supabase.from('results').select('subject_id').eq('exam_id', examId).eq('class_id', classId).range(from, to));
       const subjectIds = [...new Set((examResults || []).map((r) => r.subject_id))];
       if (!subjectIds.length) return err('No marks have been entered for this class yet.');
 

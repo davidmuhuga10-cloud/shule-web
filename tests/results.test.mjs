@@ -724,6 +724,36 @@ async function run() {
     check('listSubmissions marks a subject complete once every active student has a mark', list2.data.find((r) => r.subject_id === 'su1').complete === true);
   }
 
+  // ---- selectAllRows pagination (live bug fix, Version 36): PostgREST caps a
+  // plain select at its configured max rows (this project's default is
+  // 1000), silently — a class/exam whose result count crosses that (real
+  // life: a 106-student, ~10-subject class already sits at 1272 rows) used
+  // to read back as PARTIAL data with zero indication anything was cut off.
+  // listSubmissions() undercounting entered marks was the exact live report
+  // ("Review & Publish shows subjects as incomplete/0 uploaded even though
+  // the marks are actually there"); getBroadsheet() hitting the same cap is
+  // what caused Report Cards to print with blank marks. This seeds a single
+  // class/subject with MORE than 1000 result rows (well past one page) and
+  // confirms listSubmissions() still reports the true, complete count. -----
+  {
+    const manyStudents = [];
+    const manyResults = [];
+    for (let i = 0; i < 1200; i++) {
+      const sid = `big-s${i}`;
+      manyStudents.push({ id: sid, admission_no: String(i), full_name: `Student ${i}`, gender: i % 2 ? 'Male' : 'Female', class_id: 'c1', stream_id: 'str1', status: 'active' });
+      manyResults.push({ id: `big-r${i}`, exam_id: 'big-exam', class_id: 'c1', subject_id: 'su1', student_id: sid, score: 50 });
+    }
+    const { results } = freshApis({
+      exams: [{ id: 'big-exam', name: 'Big Exam', academic_year_id: 'y1', term_id: 't1', out_of: 100 }],
+      students: manyStudents,
+      results: manyResults
+    });
+    const list = await results.listSubmissions('big-exam', 'c1');
+    const maths = list.ok && list.data.find((r) => r.subject_id === 'su1');
+    check('listSubmissions counts every entered mark past the 1000-row page boundary, not just the first page', !!maths && maths.entered_count === 1200);
+    check('listSubmissions correctly reports a >1000-row subject as complete', !!maths && maths.complete === true);
+  }
+
   // ---- listExamClasses (the Manage Exams board's data source, Phase 2h) -----------
   {
     const { sb, results } = freshApis({

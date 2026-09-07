@@ -95,6 +95,48 @@ export function titleCase(str) {
   }).join(' ');
 }
 
+/** PERF/CORRECTNESS FIX (live bug report — "Review & Publish shows subjects
+ *  as incomplete/0 uploaded even though the marks are actually there" +
+ *  "Report Cards printing with empty marks"): Supabase/PostgREST caps a
+ *  single `.select()` at its configured max-rows (this project's default is
+ *  1000) — SILENTLY, no error, no warning, no truncation flag in the
+ *  response. Every plain `supabase.from('results').select(...)` that scopes
+ *  by exam+class (or worse, a whole exam across every class) grows with
+ *  (students x subjects x papers) and can walk straight past 1000 rows once
+ *  a class is big enough or has enough subjects/papers — a real 106-student
+ *  Grade 6 class with ~10 subjects (several 2-paper) already sits at 1272
+ *  rows for ONE exam. A plain select there quietly returns only the FIRST
+ *  1000 of those rows with no indication anything was cut off, so whichever
+ *  subjects' rows happen to sort past that cutoff look like they have zero
+ *  (or partial) marks even though every one of them is fully saved in the
+ *  database — exactly the live symptom (listSubmissions() undercounting
+ *  entered marks; getBroadsheet() silently dropping some students'/subjects'
+ *  scores out of Mark List/Report Card/Exam Analysis).
+ *
+ *  Fix: page through with .range() until a page comes back shorter than
+ *  pageSize, accumulating every row regardless of table size — the same
+ *  fix as any other "unbounded API list" pagination problem. `buildQuery` is
+ *  called fresh for each page (a supabase-js query builder is single-use
+ *  once awaited) and must return a NEW query with `.range(from, to)` applied
+ *  on top of the same filters, e.g.:
+ *    selectAllRows((from, to) => supabase.from('results').select('*')
+ *      .eq('exam_id', examId).eq('class_id', classId).range(from, to))
+ *  Every one of this file's callers already destructures `{ data, error }`
+ *  the same way a plain awaited query does, so this is a drop-in swap. */
+export async function selectAllRows(buildQuery, pageSize = 1000) {
+  let from = 0;
+  const all = [];
+  for (;;) {
+    const { data, error } = await buildQuery(from, from + pageSize - 1);
+    if (error) return { data: null, error };
+    const rows = data || [];
+    all.push(...rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+  return { data: all, error: null };
+}
+
 export function indexById(rows) {
   const map = {};
   (rows || []).forEach((r) => { map[r.id] = r; });
