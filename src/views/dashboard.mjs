@@ -258,19 +258,27 @@ export async function viewDashboard(root) {
 
 async function loadExamGraph(el) {
   if (!el) return;
-  const [examsRes, classesRes] = await Promise.all([Db.results.listExams(), Db.classes.list()]);
+  const [examsRes, classesRes, lastPublishedRes] = await Promise.all([
+    Db.results.listExams(), Db.classes.list(), Db.results.lastPublishedExamClass()
+  ]);
   const exams = examsRes.ok ? examsRes.data : [];
   const classes = classesRes.ok ? classesRes.data : [];
-  // listExams() already sorts newest-first, so [0] is the most recently
-  // created exam — the best available stand-in for "last exam analyzed"
-  // without a separate "last published/analyzed at" timestamp to sort by.
   if (!exams.length || !classes.length) {
     el.innerHTML = `<div class="card-h"><h3>Last Exam Analyzed</h3></div>
       <div class="card-b"><div class="empty"><div class="e-ico">📊</div><h3>No exams found</h3>
       <p>Once you create and publish an exam, subject performance shows up here.</p></div></div>`;
     return;
   }
-  const exam = exams[0];
+  // BUG FIX (see lastPublishedExamClass()'s own comment in results.mjs):
+  // prefer the exam that ACTUALLY has the most recently published results
+  // anywhere in the school, not just the most recently CREATED exam —
+  // otherwise a brand-new, not-yet-published exam permanently shadows an
+  // older exam's real, fully analyzed results. Falls back to the old
+  // newest-exam guess only when nothing has ever been published at all.
+  const lastPublished = lastPublishedRes.ok ? lastPublishedRes.data : null;
+  const examForLastPublished = lastPublished && exams.find((e) => e.id === lastPublished.exam_id);
+  const exam = examForLastPublished || exams[0];
+  const defaultClassId = examForLastPublished ? lastPublished.class_id : await pickDefaultExamClassId(exam, classes);
   const renderForClass = async (classId) => {
     el.innerHTML = `
       <div class="card-h" style="justify-content:space-between">
@@ -296,20 +304,21 @@ async function loadExamGraph(el) {
         <div class="dash-eg-val">${s.mean_marks.toFixed(1)}</div>
       </div>`).join('');
   };
-  await renderForClass(await pickDefaultExamClassId(exam, classes));
+  await renderForClass(defaultClassId);
 }
 
-/** Which class should "Last Exam Analyzed" open on by default?
- *  Bug fix: this used to always be classes[0] — and Db.classes.list()
- *  sorts by level_order ascending, so classes[0] is always the YOUNGEST
- *  class (Daycare/Playgroup), which realistically can go a whole year
- *  without ever sitting an exam. An admin opening the dashboard almost
- *  always landed on "No published results yet" for a class nobody
- *  expected to see results for in the first place.
- *  New order of preference:
+/** Which class should "Last Exam Analyzed" open on by default, for the ONE
+ *  exam being shown? loadExamGraph() above now only calls this as a
+ *  fallback for the specific exam it already picked (either the exam with
+ *  the school's most recently published results overall, via
+ *  lastPublishedExamClass(), or — only when NOTHING has ever been
+ *  published anywhere — the most recently created exam). So step 1 here
+ *  is mostly a defensive re-check for that one exam; steps 2/3 are the
+ *  genuine "nothing published yet at all" guesses:
  *   1. A class actually assigned to this exam with published/released
- *      results — the one case where there's real data to show — picking
- *      the most recently published if more than one qualifies.
+ *      results — picking the most recently published if more than one
+ *      qualifies (kept for exactly the still-published-but-exam-no-longer-
+ *      listed edge case; normally already covered by the caller).
  *   2. A "Grade 6"-ish class (by name), a reasonable stand-in default
  *      for "the class most likely to have exams" even before anything's
  *      been published yet this term.

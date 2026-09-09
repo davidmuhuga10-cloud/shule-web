@@ -416,6 +416,14 @@ export const Db = {
     }
   },
   assignments: {
+    // Harness-only proxy (same precedent as listExamsForClass elsewhere in
+    // this file): marksEntry.mjs's loadSubjectTabs() calls
+    // getClassSubjects(classId) directly (Phase 2g's per-stream assignment
+    // model), which predates this shim and was never added here. Reuses
+    // getStreamSubjects()'s fixture data shaped as { subject_id }.
+    async getClassSubjects(classId) {
+      return { ok: true, data: SUBJECTS.map((s) => ({ subject_id: s.id })) };
+    },
     async getStreamSubjects(streamId) {
       return {
         ok: true,
@@ -510,6 +518,15 @@ export const Db = {
   },
   results: {
     async listExams() { return { ok: true, data: [{ id: EXAM_ID, name: 'End Term 2 Exam' }, { id: 'exam-0', name: 'Mid Term 2 Exam' }] }; },
+    // Harness-only fixture (same precedent as listExamsForClass/
+    // getClassSubjects elsewhere in this file): Dashboard's "Last Exam
+    // Analyzed" widget now calls this directly (see dashboard.mjs's
+    // loadExamGraph / results.mjs's lastPublishedExamClass) instead of
+    // just assuming the newest exam — points the harness at the same
+    // (EXAM_ID, CLASS_ID) pair getBroadsheet's own fixture below actually
+    // has data for, so the widget renders instead of showing "No published
+    // results yet" in the offline harness.
+    async lastPublishedExamClass() { return { ok: true, data: { exam_id: EXAM_ID, class_id: CLASS_ID, published_at: '2026-08-02T10:15:00Z' } }; },
     // Harness-only stand-in for the real per-class exam scoping (reportForms.mjs)
     // — this shim predates that feature; just proxy to listExams() so the
     // Report Forms screenshot flow (Class -> Exam -> Student) works.

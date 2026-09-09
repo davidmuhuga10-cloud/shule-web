@@ -144,6 +144,7 @@ export async function viewFinanceHub(root) {
         <div class="fin-nav-scroll">
           ${TABS.map((t) => `<a data-tab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</a>`).join('')}
           <a class="fin-nav-msg" data-msg="1">💬 Messages</a>
+          ${!state.profile.financeOnly ? `<a class="fin-nav-msg" data-back-academic="1">🎓 Back to Academic</a>` : ''}
         </div>
         <div class="fin-side-foot">ShuleTop &copy; 2026</div>
       </nav>
@@ -204,6 +205,19 @@ export async function viewFinanceHub(root) {
   };
   root.querySelectorAll('[data-tab]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); showTab(b.dataset.tab); });
   root.querySelector('[data-msg]').onclick = (e) => { e.stopPropagation(); go('messaging'); };
+  // BUG FIX (live report — an admin who ends up in Finance with no OTHER
+  // tab open, e.g. straight after school signup, had no obvious way back
+  // to the Academic side at all: Finance opens as its own standalone shell
+  // with the outer app sidebar hidden, and "💬 Messages" was the only exit,
+  // which doesn't read as "go back to Academics" to someone who's never
+  // used it before. Mirrors the Academic sidebar's own explicit "Finance ↗"
+  // link, just in the other direction — go('dashboard') navigates this same
+  // tab to a normal route, which drops the standalone-shell class (see
+  // app.js's applyFinanceOnlyShell — it only stays on for financeOnly
+  // accounts or while still on the 'finance' route) and brings the full
+  // Academic sidebar right back, Finance included as a link back in.
+  const backLink = root.querySelector('[data-back-academic]');
+  if (backLink) backLink.onclick = (e) => { e.stopPropagation(); go('dashboard'); };
   showTab(active);
 
   // Next Sprint 2 §14: picking a search result opens that student's profile

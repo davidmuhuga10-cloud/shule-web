@@ -272,8 +272,25 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
     // border accent; mobile gets its own compact two-line list (approved
     // "Design 3") instead of the table — same score input, no separate
     // Admission No./Name columns to squeeze sideways.
+    // BUG FIX (live report — "the system should know if it's an admin who
+    // is keying in marks... he should not see Submit for approval... upon
+    // saving he should just see publish"): Submit for approval only ever
+    // makes sense for a TEACHER, whose marks need a Class Teacher/Supervisor/
+    // Admin to review before anything goes live. An admin keying marks in
+    // directly IS the final approver — see the "Deliberately SECURITY
+    // INVOKER... the DB trigger already lets an admin publish directly from
+    // any prior status without requiring the intermediate 'approved' state"
+    // rule check_result_submission_transition() already enforces (schema.sql)
+    // and Review & Publish's own per-subject "Publish" button already relies
+    // on (publishing.mjs). Marks Entry was the one screen that hadn't caught
+    // up — it showed the teacher-workflow button to an admin too, even
+    // though clicking it would only ever route the admin's OWN marks back
+    // to themselves for "approval." An admin now sees a direct "Publish"
+    // action instead, calling the exact same publishSubmission() RPC Review
+    // & Publish uses, with the same confirmation copy.
     const headActions = `
-      ${status === 'draft' && canEdit ? '<button class="icon-chip" id="mk-submit">📤 Submit for approval</button>' : ''}
+      ${status === 'draft' && canEdit && !isAdmin ? '<button class="icon-chip" id="mk-submit">📤 Submit for approval</button>' : ''}
+      ${status !== 'published' && canEdit && isAdmin ? '<button class="icon-chip primary" id="mk-publish">✅ Publish</button>' : ''}
       ${status !== 'draft' && isAdmin ? '<button class="icon-chip" id="mk-reopen">↩️ Reopen</button>' : ''}
       ${hasAnyMarks && status !== 'published' && canEdit ? '<button class="icon-chip danger" id="mk-delete-all">🗑️ Delete All</button>' : ''}
       ${canEdit ? '<button class="icon-chip primary" id="mk-save">💾 Save marks</button>' : ''}`;
@@ -380,6 +397,31 @@ async function loadGrid(root, panel, examId, classId, streamId, subject) {
         onOk: async () => {
           const r = await Db.results.submitForApproval(examId, classId, subject.id);
           if (r.ok) { closeModal(); toast('Submitted for approval.', 'ok'); renderGridForPaper(); } else { toast(r.message, 'err'); }
+        }
+      });
+    });
+
+    // Admin-only direct Publish (see headActions comment above) — same
+    // preview-before-you-commit shape as Submit for approval, same
+    // publishSubmission() RPC and confirmation copy Review & Publish's own
+    // per-subject "Publish" button uses (publishing.mjs), just reachable
+    // without leaving Marks Entry first.
+    gridEl.querySelectorAll('#mk-publish').forEach((publishBtn) => publishBtn.onclick = () => {
+      const inputs = visibleScoreInputs();
+      const previewRows = inputs.map((inp, i) => ({ admission_no: rows[i].admission_no, full_name: rows[i].full_name, score: inp.value }));
+      modal({
+        title: `Preview — ${subject.name}`,
+        body: `
+          <p class="hint" style="margin-top:0">Publish this subject's results? Parents will be able to see them immediately. Use Edit to go back and change anything first.</p>
+          <div class="table-wrap" style="max-height:360px;overflow:auto"><table class="data">
+            <thead><tr><th class="num">#</th><th>Admission No.</th><th>Name</th><th class="num">Score</th></tr></thead>
+            <tbody>${previewRows.map((r, i) => `<tr><td class="num">${i + 1}</td><td>${esc(r.admission_no)}</td><td>${esc(r.full_name)}</td><td class="num">${esc(r.score === '' ? '—' : r.score)}</td></tr>`).join('')}</tbody>
+          </table></div>`,
+        okLabel: 'Publish',
+        cancelLabel: 'Edit',
+        onOk: async () => {
+          const r = await Db.results.publishSubmission(examId, classId, subject.id);
+          if (r.ok) { closeModal(); toast('Published.', 'ok'); renderGridForPaper(); } else { toast(r.message, 'err'); }
         }
       });
     });

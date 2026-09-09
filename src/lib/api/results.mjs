@@ -1226,6 +1226,40 @@ export function createResultsApi(supabase, gradingApi) {
     /** Current publishing-workflow status for one (exam, class, subject) —
      *  defaults to 'draft' when no submission row exists yet (nothing has
      *  been submitted for approval). */
+    /** BUG FIX (live report — "last analyzed exam should not select only
+     *  Grade 6 as default... imagine a school has analysed for Grade 5
+     *  only, still on dashboard they will be seeing Grade 6 - no exams
+     *  analyzed"): the Dashboard's "Last Exam Analyzed" widget used to
+     *  always open on the most recently CREATED exam (listExams() sorts
+     *  newest-first) and then guess a "Grade 6"-ish class within it — two
+     *  guesses stacked on top of each other, neither actually checking
+     *  whether anything had been analyzed at all. A school whose newest
+     *  exam hasn't been published yet (or was only published for a class
+     *  that isn't Grade 6) always landed on "No published results yet",
+     *  even when an OLDER exam had real, fully analyzed results sitting
+     *  right there for a different class.
+     *  Real fix: ask the data directly — the single most recently
+     *  published (exam, class) pair across the WHOLE school, from
+     *  result_submissions itself, no per-exam guessing needed. Returns
+     *  null when nothing has ever been published anywhere yet (a genuinely
+     *  brand-new school), which is the only time a guess is still needed. */
+    async lastPublishedExamClass() {
+      // No published_at IS NOT NULL filter: the DB trigger
+      // (check_result_submission_transition()) always stamps published_at
+      // the moment a row's status becomes 'published', so in practice every
+      // matching row has one — but this stays a plain status='published'
+      // filter (ordered by published_at, most recent first) so a legacy row
+      // that somehow predates that stamp still counts as "something is
+      // published" rather than being silently excluded.
+      const { data, error } = await supabase.from('result_submissions')
+        .select('exam_id, class_id, published_at')
+        .eq('status', 'published')
+        .order('published_at', { ascending: false })
+        .limit(1);
+      if (error) return err(error.message);
+      return ok((data && data[0]) || null);
+    },
+
     async getSubmissionStatus(examId, classId, subjectId) {
       if (!examId || !classId || !subjectId) return ok({ status: 'draft' });
       const { data } = await supabase.from('result_submissions').select('*')

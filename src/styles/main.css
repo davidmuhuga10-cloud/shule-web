@@ -1,10 +1,28 @@
 :root{
   --bg:#f4f6f9; --surface:#ffffff; --ink:#1b2733; --muted:#6b7a8d;
   --line:#e6ebf1; --brand:#0f3d3e; --brand-2:#12726e; --accent:#f5a623;
+  /* BUG FIX (live report — "teachers are not seeing the boxes" when keying
+     in marks): every form field (input/select/textarea) used to border with
+     --line above, a near-white #e6ebf1 that's barely distinguishable from
+     the page background — fine as a subtle divider between cards/rows, but
+     it meant an EMPTY score box in Marks Entry read as blank space, not a
+     field waiting for input. --input-border is a dedicated, deliberately
+     much darker token (near-black) for anything a person actually types
+     into, kept separate from --line so card/table dividers stay exactly as
+     subtle as before — only real form fields get the stronger border. */
+  --input-border:#111418;
   --primary:#127a6b; --primary-d:#0e6759; --danger:#d64545; --danger-bg:#fdecec;
   --ok:#2f9e6f; --ok-bg:#e8f6ef; --warn:#c9860a; --warn-bg:#fdf3e2;
   --radius:12px; --radius-sm:8px; --shadow:0 1px 3px rgba(16,32,45,.08),0 1px 2px rgba(16,32,45,.06);
-  --shadow-lg:0 10px 30px rgba(16,32,45,.15); --sidebar:250px;
+  --shadow-lg:0 10px 30px rgba(16,32,45,.15);
+  /* BUG FIX (live report — "the navigation bar is also too wide, there is a
+     lot of space left to the right"): 250px left a visibly empty strip to
+     the right of every nav label (the longest, "Teachers and Staff", only
+     ever needed ~193px including its icon/padding). Narrowed by ~1.5cm
+     (~40px at 96dpi) — still comfortably wider than the longest label in
+     either the main sidebar or Finance's own side-nav (which shares this
+     same token — see .fin-side-nav below), just without the dead space. */
+  --sidebar:210px;
   /* Deep black grid lines + text for printable reports (Mark List/Class
      List/Score Sheet/Exam Analysis) — deliberately darker/bolder than the
      app's normal --line/--muted, matching the ink weight of the reference
@@ -211,9 +229,16 @@ h1,h2,h3,h4{margin:0;font-weight:650;color:var(--ink)}
 
 /* ---------- Forms ---------- */
 label{display:block;font-weight:600;font-size:12.5px;color:var(--ink);margin-bottom:6px}
-input,select,textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);
+input,select,textarea{width:100%;padding:9px 11px;border:1px solid var(--input-border);border-radius:var(--radius-sm);
   font-size:14px;font-family:inherit;background:#fff;color:var(--ink);transition:.15s}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(18,122,107,.12)}
+/* Real placeholder TEXT (as opposed to the field's own border, fixed above)
+   — browsers default this to a low-contrast light grey that's genuinely
+   hard to read on some screens; darkened here site-wide. Firefox also
+   applies its own reduced opacity to placeholder text unless overridden,
+   hence opacity:1. Still visibly lighter than actually-typed text (--ink)
+   so a filled field never reads as still-empty. */
+input::placeholder,textarea::placeholder{color:#5a6472;opacity:1}
 .field{margin-bottom:15px}
 /* Design standard rollout round 2 (approved): every search bar site-wide
    gets a blue accent border — same "just the border colour" treatment as
@@ -621,7 +646,7 @@ table.data td.num,table.data th.num{text-align:center}
 .fin-report-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--bg);
   border:1px solid var(--line);border-radius:10px;padding:6px 8px}
 .print-opts{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.print-opts select{padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;background:#fff}
+.print-opts select{padding:8px 10px;border:1px solid var(--input-border);border-radius:8px;font-size:13px;background:#fff}
 /* Toolbar for Download/Print/paper-size controls, sat ABOVE the printable
    report card (not mixed into the print header itself) so the card below
    it is a true preview of exactly what prints. */
@@ -1702,7 +1727,7 @@ table.data td.num,table.data th.num{text-align:center}
 .mk-m-info{flex:1;min-width:0}
 .mk-m-info .name{font-weight:700;font-size:13px}
 .mk-m-info .adm{font-size:11px;color:var(--muted)}
-.mk-m-score{width:72px;padding:9px 4px;border:1.5px solid var(--line);border-radius:8px;text-align:center;font-weight:700;font-size:15px;flex:0 0 auto}
+.mk-m-score{width:72px;padding:9px 4px;border:1.5px solid var(--input-border);border-radius:8px;text-align:center;font-weight:700;font-size:15px;flex:0 0 auto}
 
 /* ===========================================================================
    Messaging_Overhaul.docx — Compose recipient picker (item 5), separated
@@ -1743,7 +1768,7 @@ table.data td.num,table.data th.num{text-align:center}
 .copy-to-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .copy-to-top label{font-size:12.5px;color:var(--ink);cursor:pointer}
 .copy-to-top input[type=checkbox]{width:15px;height:15px;accent-color:var(--primary)}
-.copy-to-top select{border:1px solid var(--line);border-radius:7px;padding:6px 8px;font-size:12.5px;font-family:inherit;color:var(--ink);background:#fff}
+.copy-to-top select{border:1px solid var(--input-border);border-radius:7px;padding:6px 8px;font-size:12.5px;font-family:inherit;color:var(--ink);background:#fff}
 .copy-to-top select:disabled{color:var(--muted);background:#f5f6f8}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chip{display:flex;align-items:center;gap:6px;background:#eef1f5;border:1px solid var(--line);border-radius:99px;padding:3px 6px 3px 10px;font-size:12px}

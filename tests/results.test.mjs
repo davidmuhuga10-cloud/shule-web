@@ -881,6 +881,46 @@ async function run() {
     check('the still-empty class (PP1) stays no_students, but stays visible', afterEnroll.data.find((r) => r.class_id === 'c3').status === 'no_students');
   }
 
+  // ---- lastPublishedExamClass (live bug fix, Version 39): the Dashboard's
+  // "Last Exam Analyzed" widget used to always open on the most recently
+  // CREATED exam and guess a "Grade 6"-ish class within it — a school that
+  // published an OLDER exam for a different class (Grade 5, say) but hasn't
+  // published anything for its newest exam yet always saw "No published
+  // results yet" instead of the real, already-analyzed data. This confirms
+  // the fix picks the exam/class with the most recently PUBLISHED results
+  // school-wide, not the most recently created exam. ---------------------
+  {
+    const { sb, results } = freshApis({
+      classes: [{ id: 'c1', name: 'Grade 5' }, { id: 'c2', name: 'Grade 6' }],
+      result_submissions: []
+    });
+    const older = (await results.saveExam({ name: 'Mid Term', academic_year_id: 'y1', term_id: 't1' })).data;
+    const newer = (await results.saveExam({ name: 'End Term', academic_year_id: 'y1', term_id: 't1' })).data;
+    // Older exam: Grade 5 has real, published results. Newer exam: nothing
+    // published for ANY class yet (still mid marks-entry).
+    sb._tables.result_submissions.push({
+      id: 'rs-old', exam_id: older.id, class_id: 'c1', subject_id: 'su1',
+      status: 'published', published_at: '2026-05-01T10:00:00.000Z'
+    });
+
+    const none = await results.lastPublishedExamClass();
+    check('lastPublishedExamClass finds the older exam\'s published class, not the newer unpublished one', none.ok === true && none.data && none.data.exam_id === older.id && none.data.class_id === 'c1');
+
+    // A later publish on the newer exam (a different class) should now win.
+    sb._tables.result_submissions.push({
+      id: 'rs-new', exam_id: newer.id, class_id: 'c2', subject_id: 'su1',
+      status: 'published', published_at: '2026-08-01T10:00:00.000Z'
+    });
+    const latest = await results.lastPublishedExamClass();
+    check('lastPublishedExamClass switches to whichever exam/class was published MOST RECENTLY', latest.data.exam_id === newer.id && latest.data.class_id === 'c2');
+
+    // A school with nothing published anywhere gets null, not a guess.
+    const { results: freshResults } = freshApis();
+    await freshResults.saveExam({ name: 'Opener', academic_year_id: 'y1', term_id: 't1' });
+    const empty = await freshResults.lastPublishedExamClass();
+    check('lastPublishedExamClass returns null when nothing has ever been published', empty.ok === true && empty.data === null);
+  }
+
   // ---- listExamClassChoices (Phase 2h) ---------------------------------------------
   {
     const { results } = freshApis({ classes: [{ id: 'c1', name: 'Grade 7' }, { id: 'c2', name: 'Grade 8' }] });
