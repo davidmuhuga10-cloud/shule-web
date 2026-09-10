@@ -1162,9 +1162,9 @@ function buildNav() {
     if (it.section) {
       html += `<div class="group">${esc(it.section)}</div>`;
     } else if (it.parent) {
-      const kids = it.children.map((c) => `<a class="subitem" data-route="${c.route}">${esc(c.label)}</a>`).join('');
+      const kids = it.children.map((c) => `<a class="subitem" data-route="${c.route}" title="${esc(c.label)}"><span class="nav-label">${esc(c.label)}</span></a>`).join('');
       html += `<div class="navparent" data-parent="${esc(it.parent)}">
-        <a class="parent-toggle"><span class="ico">${it.ico}</span>${esc(it.parent)}<span class="caret">▸</span></a>
+        <a class="parent-toggle" title="${esc(it.parent)}"><span class="ico">${it.ico}</span><span class="nav-label">${esc(it.parent)}</span><span class="caret">▸</span></a>
         <div class="subnav">${kids}</div></div>`;
     } else {
       // Finance opens in its own browser tab (see the standalone-tab wiring
@@ -1173,7 +1173,16 @@ function buildNav() {
       // makes sense on their own landing page. The ↗ mirrors the approved
       // sketch's "opens here ⧉" hint so it isn't a silent surprise.
       const opensStandalone = it.route === 'finance' && !state.profile.financeOnly;
-      html += `<a data-route="${it.route}"${opensStandalone ? ' data-standalone="1"' : ''}><span class="ico">${it.ico}</span>${esc(it.label)}${opensStandalone ? ' <span class="nav-ext-hint">↗</span>' : ''}</a>`;
+      // BUG FIX (live feedback: "some modules are appearing in lines eg
+      // Teachers and Staff and Classes and Streams... should be in one
+      // line"): the label used to be a bare text node sitting directly
+      // beside .ico inside a flex row — with no wrapper of its own to hand
+      // white-space:nowrap+ellipsis to, a long label just wrapped onto a
+      // second line instead of staying on one. Wrapping it in its own
+      // <span class="nav-label"> (flex:1;min-width:0 in main.css) lets that
+      // span truncate with an ellipsis while .ico stays full-size and fixed
+      // — same fix applied to the parent-toggle/subitem labels above.
+      html += `<a data-route="${it.route}" title="${esc(it.label)}"${opensStandalone ? ' data-standalone="1"' : ''}><span class="ico">${it.ico}</span><span class="nav-label">${esc(it.label)}</span>${opensStandalone ? ' <span class="nav-ext-hint">↗</span>' : ''}</a>`;
     }
   });
   $('#nav').innerHTML = html;

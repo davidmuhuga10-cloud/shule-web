@@ -290,9 +290,19 @@ input[placeholder^="🔍"]{border-color:#2563eb}
 .nav::-webkit-scrollbar-thumb:hover{background:#ffffff}
 .nav .group{color:#6f9a98;font-size:10.5px;text-transform:uppercase;letter-spacing:.8px;padding:14px 12px 6px;font-weight:700}
 .nav a{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:8px;color:#cfe3e2;
-  font-weight:600;font-size:13.5px;margin:3px 8px 2px;cursor:pointer;transition:.12s}
+  font-weight:600;font-size:13.5px;margin:3px 8px 2px;cursor:pointer;transition:.12s;white-space:nowrap}
 .nav a .ico{width:17px;text-align:center;opacity:.9;font-size:14px;flex-shrink:0}
-.nav a .nav-ext-hint{margin-left:auto;opacity:.55;font-size:12px}
+/* BUG FIX: "Teachers and Staff"/"Classes & Streams"-length labels were
+   wrapping onto a second line the moment the row above gained
+   white-space:nowrap (needed to stop the two-line wrap in the first
+   place) but nowhere to actually hide the overflow it then caused. This
+   is the fix: the label lives in its own flexible, shrinkable box that
+   ellipsizes on its own, while .ico above keeps its full fixed width —
+   truncating ("Teachers and S…") rather than wrapping OR spilling out of
+   the sidebar, with the full name always still available as the link's
+   title tooltip on hover. */
+.nav a .nav-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.nav a .nav-ext-hint{margin-left:auto;opacity:.55;font-size:12px;flex-shrink:0}
 .nav a:hover{background:rgba(255,255,255,.1);color:#fff}
 .nav a.active{background:var(--primary);color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.18)}
 /* Expandable parent menus */
@@ -1385,8 +1395,16 @@ table.data td.num,table.data th.num{text-align:center}
 .chart-svg{width:100%;height:auto;display:block}
 .chart-pie{max-width:220px;margin:0 auto}
 .chart-grid{stroke:var(--line);stroke-width:1}
-.chart-axis-line{stroke:var(--line);stroke-width:1.5}
-.chart-axis-label{font-size:9.5px;fill:var(--muted);font-family:inherit}
+/* Live feedback: "fix the axis, they can't be gray... make them deep
+   black, same to labels" — the axis line and its KSh/class-name labels
+   were var(--muted)/var(--line), the app's lightest gray tokens, chosen
+   for gridlines but too faint once it's the actual axis text carrying the
+   numbers. Switched to var(--ink) — the same near-black used for every
+   other primary reading text in the app, not a new one-off color. The
+   faint horizontal .chart-grid reference lines above are left alone on
+   purpose: those are meant to stay a quiet backdrop, not readable text. */
+.chart-axis-line{stroke:var(--ink);stroke-width:1.5}
+.chart-axis-label{font-size:9.5px;fill:var(--ink);font-family:inherit}
 .chart-bar{rx:2}
 /* Live feedback round 2: pink/blue (itself a replacement for the original
    grey/teal) was swapped again after a 3-design bake-off — "Indigo &
@@ -1401,7 +1419,8 @@ table.data td.num,table.data th.num{text-align:center}
    third palette. */
 .chart-bar-income{fill:var(--primary)}
 .chart-bar-expense{fill:var(--danger)}
-.chart-legend{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin-top:10px;font-size:12px;color:var(--muted)}
+/* Same "avoid gray" fix as the axis above — this was var(--muted) too. */
+.chart-legend{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin-top:10px;font-size:12px;color:var(--ink)}
 .chart-legend-pie{gap:8px 14px}
 .chart-legend span{display:inline-flex;align-items:center;gap:6px}
 .chart-legend b{color:var(--ink);font-variant-numeric:tabular-nums}
