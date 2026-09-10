@@ -113,6 +113,223 @@ function budgetVsPaidChart(perClass) {
   `;
 }
 
+// "Income vs Expenses" — live feedback ("also add a 3rd graphic showing
+// income vs expenses"): a 6-month trend, income from finance_collections
+// (via the existing finance_cashbook RPC, already scoped to
+// finance_can_collect() school-side) and expenses from finance_expenses
+// (excluding 'void' ones — a voided expense never happened). Both fetched
+// and bucketed by month in load() below, then handed here already summed.
+//
+// "Some schools don't track expenses" (live feedback): finance_expenses is
+// opt-in — a school that's never logged one would otherwise see a chart
+// half full of real income bars next to a flat row of invisible
+// zero-height red bars, reading as broken rather than "not used." Detect
+// the all-zero case and fall back to incomeOnlyChart() instead.
+function incomeExpenseChart(rows) {
+  const totalExpense = (rows || []).reduce((s, r) => s + (r.expense || 0), 0);
+  if (!totalExpense) return incomeOnlyChart(rows);
+  const W = 640, H = 250, padL = 46, padR = 12, padT = 14, padB = 34;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const maxVal = Math.max(1, ...rows.map((r) => Math.max(r.income || 0, r.expense || 0)));
+  const rawStep = maxVal / 4;
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
+  const niceStep = [1, 2, 5, 10].map((m) => m * mag).find((s) => s >= rawStep) || mag * 10;
+  const axisMax = niceStep * 4;
+  const y = (v) => padT + plotH - (v / axisMax) * plotH;
+  const groupW = plotW / rows.length;
+  const barW = Math.min(22, groupW * 0.32);
+  const gridlines = [0, 1, 2, 3, 4].map((i) => {
+    const v = niceStep * i;
+    const yy = y(v);
+    return `<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" class="chart-grid"/>
+      <text x="${padL - 6}" y="${yy + 3}" class="chart-axis-label" text-anchor="end">KSh ${fmtKes(v)}</text>`;
+  }).join('');
+  const bars = rows.map((r, i) => {
+    const cx = padL + groupW * i + groupW / 2;
+    const incH = plotH - (y(r.income || 0) - padT);
+    const expH = plotH - (y(r.expense || 0) - padT);
+    return `
+      <rect x="${(cx - barW - 3).toFixed(1)}" y="${y(r.income || 0).toFixed(1)}" width="${barW}" height="${Math.max(0, incH).toFixed(1)}" class="chart-bar chart-bar-income"><title>${esc(r.dateLabel || r.label)} — Income: KES ${Number(r.income || 0).toLocaleString()}</title></rect>
+      <rect x="${(cx + 3).toFixed(1)}" y="${y(r.expense || 0).toFixed(1)}" width="${barW}" height="${Math.max(0, expH).toFixed(1)}" class="chart-bar chart-bar-expense"><title>${esc(r.dateLabel || r.label)} — Expenses: KES ${Number(r.expense || 0).toLocaleString()}</title></rect>
+      <text x="${cx.toFixed(1)}" y="${H - padB + 16}" class="chart-axis-label" text-anchor="middle">${esc(r.label)}</text>
+    `;
+  }).join('');
+  return `
+    <svg viewBox="0 0 ${W} ${H}" class="chart-svg" role="img" aria-label="Income versus expenses, last 6 months">
+      ${gridlines}
+      <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H - padB}" class="chart-axis-line"/>
+      <line x1="${padL}" y1="${H - padB}" x2="${W - padR}" y2="${H - padB}" class="chart-axis-line"/>
+      ${bars}
+    </svg>
+    <div class="chart-legend"><span><i class="chart-swatch chart-bar-income"></i>Income</span><span><i class="chart-swatch chart-bar-expense"></i>Expenses</span></div>
+  `;
+}
+
+function incomeOnlyChart(rows) {
+  const W = 640, H = 250, padL = 46, padR = 12, padT = 14, padB = 34;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const maxVal = Math.max(1, ...(rows || []).map((r) => r.income || 0));
+  const rawStep = maxVal / 4;
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
+  const niceStep = [1, 2, 5, 10].map((m) => m * mag).find((s) => s >= rawStep) || mag * 10;
+  const axisMax = niceStep * 4;
+  const y = (v) => padT + plotH - (v / axisMax) * plotH;
+  const groupW = plotW / rows.length;
+  const barW = Math.min(32, groupW * 0.44);
+  const gridlines = [0, 1, 2, 3, 4].map((i) => {
+    const v = niceStep * i;
+    const yy = y(v);
+    return `<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" class="chart-grid"/>
+      <text x="${padL - 6}" y="${yy + 3}" class="chart-axis-label" text-anchor="end">KSh ${fmtKes(v)}</text>`;
+  }).join('');
+  const bars = rows.map((r, i) => {
+    const cx = padL + groupW * i + groupW / 2;
+    const incH = plotH - (y(r.income || 0) - padT);
+    return `
+      <rect x="${(cx - barW / 2).toFixed(1)}" y="${y(r.income || 0).toFixed(1)}" width="${barW}" height="${Math.max(0, incH).toFixed(1)}" class="chart-bar chart-bar-income"><title>${esc(r.dateLabel || r.label)} — Income: KES ${Number(r.income || 0).toLocaleString()}</title></rect>
+      <text x="${cx.toFixed(1)}" y="${H - padB + 16}" class="chart-axis-label" text-anchor="middle">${esc(r.label)}</text>
+    `;
+  }).join('');
+  return `
+    <div class="muted" style="font-size:11.5px;margin-bottom:6px">💡 Expenses aren't tracked for this school yet — showing income (collections) only.</div>
+    <svg viewBox="0 0 ${W} ${H}" class="chart-svg" role="img" aria-label="Income, last 6 months — expenses not tracked">
+      ${gridlines}
+      <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H - padB}" class="chart-axis-line"/>
+      <line x1="${padL}" y1="${H - padB}" x2="${W - padR}" y2="${H - padB}" class="chart-axis-line"/>
+      ${bars}
+    </svg>
+    <div class="chart-legend"><span><i class="chart-swatch chart-bar-income"></i>Income</span></div>
+  `;
+}
+
+// Buckets the last 6 calendar months (oldest→newest, current month last) —
+// used as the Income vs Expenses trend's fallback window whenever a chosen
+// Period can't be resolved to real dates yet (see resolvePeriodRange below).
+function last6MonthKeys() {
+  const out = [];
+  const now = new Date();
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    out.push({ key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, label: d.toLocaleString('en', { month: 'short' }), from: d, to: new Date(d.getFullYear(), d.getMonth() + 1, 0) });
+  }
+  return out;
+}
+
+// Live feedback: "allow filtration by This Term / This Month / This Week /
+// Today / Date Range / Academic Year" (Dashboard). This only ever drives the
+// Income vs Expenses trend below — the per-class Expected/Collected numbers
+// (tiles, Budget vs Paid, the Balances pie, Collections Per Class) all come
+// from the finance_dashboard() RPC, which only understands
+// academic_year_id/term_id and has no concept of "today" or "this week", so
+// those stay scoped to the Year/Term filters exactly as they always have.
+// Income vs Expenses is the one chart already built on genuinely
+// date-filterable APIs (finance_cashbook + finance_expenses.list), so it's
+// the one that can honor an arbitrary period.
+const PERIODS = [
+  { key: 'this_term', label: 'This Term' },
+  { key: 'this_month', label: 'This Month' },
+  { key: 'this_week', label: 'This Week' },
+  { key: 'today', label: 'Today' },
+  { key: 'date_range', label: 'Date Range' },
+  { key: 'academic_year', label: 'Academic Year' }
+];
+
+function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
+function endOfDay(d) { const x = new Date(d); x.setHours(23, 59, 59, 999); return x; }
+function startOfWeek(d) {
+  const x = startOfDay(d);
+  const day = x.getDay(); // 0=Sun..6=Sat
+  x.setDate(x.getDate() - (day === 0 ? 6 : day - 1)); // Monday start
+  return x;
+}
+function endOfWeek(d) {
+  const s = startOfWeek(d);
+  return endOfDay(new Date(s.getFullYear(), s.getMonth(), s.getDate() + 6));
+}
+
+// Resolves the Period selector into a concrete {from, to} range. "This
+// Term"/"Academic Year" deliberately reuse whatever the Year/Term filters
+// above are already set to, falling back to the active one when a filter is
+// on "All" — the two filter rows describe the same dashboard, so they
+// should never disagree about what "this term" means. Anything that can't
+// be resolved (e.g. a term/year with no start_date on file, or "Date Range"
+// before both dates are picked) falls back to the same last-6-months window
+// the Dashboard always showed before Period filtering existed, so the chart
+// never just goes blank.
+function resolvePeriodRange(period, sel, years, terms) {
+  const now = new Date();
+  if (period === 'today') return { from: startOfDay(now), to: endOfDay(now) };
+  if (period === 'this_week') return { from: startOfWeek(now), to: endOfWeek(now) };
+  if (period === 'this_month') {
+    return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: endOfDay(new Date(now.getFullYear(), now.getMonth() + 1, 0)) };
+  }
+  if (period === 'date_range' && sel.rangeFrom && sel.rangeTo) {
+    return { from: startOfDay(new Date(sel.rangeFrom)), to: endOfDay(new Date(sel.rangeTo)) };
+  }
+  if (period === 'this_term') {
+    const term = terms.find((t) => t.id === sel.term_id) || terms.find((t) => t.status === 'active');
+    if (term && term.start_date) return { from: startOfDay(new Date(term.start_date)), to: endOfDay(new Date(term.end_date || term.start_date)) };
+  }
+  if (period === 'this_term' || period === 'academic_year') {
+    const year = years.find((y) => y.id === sel.academic_year_id) || years.find((y) => y.status === 'active');
+    if (year && year.start_date) return { from: startOfDay(new Date(year.start_date)), to: endOfDay(new Date(year.end_date || year.start_date)) };
+  }
+  const months = last6MonthKeys();
+  return { from: months[0].from, to: months[months.length - 1].to };
+}
+
+// One line under the Income vs Expenses card naming exactly what range is
+// plotted — "Last 6 months" used to be a lie the moment Period existed.
+function periodSubtitle(period, range) {
+  const fmt = (d) => d.toLocaleDateString('en', { day: 'numeric', month: 'short', year: 'numeric' });
+  if (period === 'today') return `Today (${fmt(range.from)})`;
+  if (period === 'this_week') return `This week (${fmt(range.from)} – ${fmt(range.to)})`;
+  if (period === 'this_month') return `This month (${fmt(range.from)} – ${fmt(range.to)})`;
+  if (period === 'date_range') return `${fmt(range.from)} – ${fmt(range.to)}`;
+  if (period === 'this_term') return `This term (${fmt(range.from)} – ${fmt(range.to)})`;
+  if (period === 'academic_year') return `This academic year (${fmt(range.from)} – ${fmt(range.to)})`;
+  return `${fmt(range.from)} – ${fmt(range.to)}`;
+}
+
+// Buckets an arbitrary {from,to} range into chart-ready points. By calendar
+// month once the range spans more than ~6 weeks (a term/year plotted by day
+// would be an unreadable wall of bars); by day otherwise, since Today/This
+// Week/a short Date Range are far more useful broken down daily than
+// squashed into one lone monthly bar. Returned alongside the granularity so
+// callers know whether to match rows on a "YYYY-MM" or full "YYYY-MM-DD" key.
+function bucketRange(from, to) {
+  const spanDays = Math.max(1, Math.round((to - from) / 86400000));
+  if (spanDays > 45) {
+    const buckets = [];
+    let d = new Date(from.getFullYear(), from.getMonth(), 1);
+    const last = new Date(to.getFullYear(), to.getMonth(), 1);
+    while (d <= last) {
+      buckets.push({ key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, label: d.toLocaleString('en', { month: 'short' }) });
+      d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    }
+    return { granularity: 'month', buckets };
+  }
+  const buckets = [];
+  let d = startOfDay(from);
+  const end = startOfDay(to);
+  while (d <= end) {
+    buckets.push({ key: d.toISOString().slice(0, 10), label: d.toLocaleString('en', { day: 'numeric', month: 'short' }) });
+    d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+  }
+  return { granularity: 'day', buckets };
+}
+
+// Live feedback: the % Collected bar used to be red-vs-teal-agnostic — every
+// class got the exact same color regardless of whether it was 30% or 95%
+// collected, so a class in real trouble didn't stand out at all. Thresholds
+// reuse the app's existing --danger/--warn/--ok tokens rather than inventing
+// new colors (same ones badges/status pills already use elsewhere).
+function progressColorClass(pct) {
+  if (pct < 50) return 'prog-low';
+  if (pct < 80) return 'prog-mid';
+  return 'prog-high';
+}
+
 function truncateLabel(s) {
   s = String(s || '');
   return s.length > 10 ? s.slice(0, 9) + '…' : s;
@@ -189,26 +406,133 @@ export async function viewFinanceDashboard(root, access) {
 }
 
 async function load(root, years, terms, sel, access) {
+  // Live feedback: "the first thing to see should be [the greeting]...
+  // currently sitting in between things" — this used to be a small muted
+  // one-liner, easy to skim past between Finance's own title bar above and
+  // the year/term filters below. Upgraded to the same .page-head h2+p shape
+  // dashboard.mjs's own Academic dashboard greeting uses, so it reads as
+  // the unmistakable start of the page's content, the same way it does on
+  // the Academic side, rather than a small aside.
+  // Live feedback: "a lot of space to the right top of the dashboard...
+  // include some quick access icons" — the greeting's h2+p never filled the
+  // .page-head row's own width, leaving a wide dead strip to its right on
+  // anything wider than a phone. A row of the 3 things an admin/bursar most
+  // often comes to this screen to DO (not just look at) fills that space
+  // usefully instead of padding it out cosmetically. Same .icon-chip
+  // pattern Exam Desk's own action buttons use elsewhere in the app.
+  // "Add Collection" is gated behind access.canCollect the same way every
+  // other money-moving action on this screen already is (financeHub.mjs's
+  // own access object) — a viewer who can't record collections doesn't get
+  // a button that would just be rejected server-side.
+  const quickActionsHtml = `
+    <div class="fin-quick-actions no-print">
+      <button class="icon-chip" id="fd-qa-reminder">🔔 Send Reminder</button>
+      ${access.canCollect ? '<button class="icon-chip" id="fd-qa-collect">➕ Add Collection</button>' : ''}
+      <button class="icon-chip" id="fd-qa-balances">👛 View Balances</button>
+    </div>
+  `;
+  // Defaults to "Academic Year" — the Dashboard already opens scoped to the
+  // active academic year, so the Income vs Expenses trend agreeing with
+  // that by default (rather than a disconnected "last 6 months") is the
+  // least surprising starting point; every other option is one click away.
+  const period = sel.period || 'academic_year';
   root.innerHTML = `
-    <p class="muted" style="margin:0 0 12px;font-size:14.5px"><b>${greetingWord()}, ${esc(firstName())}</b> — here's your Finance snapshot.</p>
+    <div class="page-head" style="margin-bottom:14px">
+      <div><h2>${greetingWord()}, ${esc(firstName())}</h2><p>Here's your Finance snapshot.</p></div>
+      <div class="spacer"></div>
+      ${quickActionsHtml}
+    </div>
     <div class="fin-toolbar">
       <div class="fin-filters">
         <div class="field"><label>Academic Year</label>
           <select id="fd-year">${options(years, 'id', 'name', sel.academic_year_id, 'All years')}</select></div>
         <div class="field"><label>Term</label>
           <select id="fd-term">${options(terms.filter((t) => !sel.academic_year_id || t.academic_year_id === sel.academic_year_id), 'id', 'name', sel.term_id, 'All terms')}</select></div>
+        <div class="field"><label>Period</label>
+          <select id="fd-period">${options(PERIODS, 'key', 'label', period)}</select></div>
+        ${period === 'date_range' ? `
+          <div class="field"><label>From</label><input type="date" id="fd-range-from" value="${esc(sel.rangeFrom || '')}"></div>
+          <div class="field"><label>To</label><input type="date" id="fd-range-to" value="${esc(sel.rangeTo || '')}"></div>
+        ` : ''}
       </div>
       <div class="spacer"></div>
     </div>
     <div id="fd-body" style="margin-top:14px">Loading…</div>
   `;
-  root.querySelector('#fd-year').onchange = (e) => load(root, years, terms, { academic_year_id: e.target.value, term_id: '' }, access);
+  root.querySelector('#fd-year').onchange = (e) => load(root, years, terms, { ...sel, academic_year_id: e.target.value, term_id: '' }, access);
   root.querySelector('#fd-term').onchange = (e) => load(root, years, terms, { ...sel, term_id: e.target.value }, access);
+  root.querySelector('#fd-period').onchange = (e) => load(root, years, terms, { ...sel, period: e.target.value }, access);
+  const rangeFromEl = root.querySelector('#fd-range-from');
+  const rangeToEl = root.querySelector('#fd-range-to');
+  if (rangeFromEl) rangeFromEl.onchange = (e) => load(root, years, terms, { ...sel, rangeFrom: e.target.value }, access);
+  if (rangeToEl) rangeToEl.onchange = (e) => load(root, years, terms, { ...sel, rangeTo: e.target.value }, access);
 
-  const res = await Db.finance.reports.dashboard(sel.academic_year_id || null, sel.term_id || null);
+  // Quick actions just switch Finance's own tab bar — same clickTab()
+  // trick fd-tile-balances already used below, so these stay consistent
+  // with how every other cross-tab jump on this screen works.
+  const clickTab = (key) => { const t = document.querySelector(`[data-tab="${key}"]`); if (t) t.click(); };
+  const qaReminder = root.querySelector('#fd-qa-reminder');
+  if (qaReminder) qaReminder.onclick = () => clickTab('reminders');
+  const qaCollect = root.querySelector('#fd-qa-collect');
+  if (qaCollect) qaCollect.onclick = () => clickTab('collections');
+  const qaBalances = root.querySelector('#fd-qa-balances');
+  if (qaBalances) qaBalances.onclick = () => clickTab('reports');
+
+  const range = resolvePeriodRange(period, sel, years, terms);
+  const { granularity, buckets } = bucketRange(range.from, range.to);
+  const rangeFrom = range.from.toISOString().slice(0, 10);
+  const rangeTo = range.to.toISOString().slice(0, 10);
+  const [res, cashbookRes, expensesRes] = await Promise.all([
+    Db.finance.reports.dashboard(sel.academic_year_id || null, sel.term_id || null),
+    Db.finance.reports.cashbook(rangeFrom, rangeTo),
+    Db.finance.expenses.list({ from: rangeFrom, to: rangeTo })
+  ]);
   const body = root.querySelector('#fd-body');
   if (!res.ok) { body.innerHTML = `<div class="card pad">⚠️ ${esc(res.message)}</div>`; return; }
   const d = res.data || {};
+  // Income vs Expenses: bucket the cashbook's individual receipts and the
+  // expenses list's individual records into the same day/month keys the
+  // selected Period resolved to — both best-effort (".ok ? .data : []") so a
+  // report RPC hiccup degrades to an empty trend rather than breaking the
+  // whole Dashboard tab. matchKey compares on the granularity bucketRange()
+  // picked: "YYYY-MM-DD" for a day-level period (Today/This Week/a short
+  // Date Range), "YYYY-MM" for a month-level one (This Term/This Month
+  // spanning weeks/Academic Year/a long Date Range).
+  const cashbookRows = cashbookRes.ok ? cashbookRes.data : [];
+  const expenseRows = (expensesRes.ok ? expensesRes.data : []).filter((e) => e.status !== 'void');
+  const keyLen = granularity === 'day' ? 10 : 7;
+  const monthlyRows = buckets.map((b) => {
+    const income = cashbookRows
+      .filter((r) => String(r.collection_date || '').slice(0, keyLen) === b.key)
+      .reduce((s, r) => s + Number(r.amount || 0), 0);
+    const expense = expenseRows
+      .filter((e) => String(e.expense_date || '').slice(0, keyLen) === b.key)
+      .reduce((s, e) => s + Number(e.amount || 0), 0);
+    // dateLabel keeps the full date for the bar's hover tooltip even when
+    // the on-axis `label` below gets thinned out for space.
+    return { label: b.label, dateLabel: b.label, income, expense };
+  });
+  // A day-granularity range longer than ~2 weeks (This Month, a longer
+  // Date Range) still draws one bar per day — that's the useful part — but
+  // printing a date under every single bar produces the exact unreadable
+  // run-together text main.css's own Collections Per Class fix already
+  // dealt with once this session. Thin the on-axis labels to ~8 evenly
+  // spaced ones (always including the last day) instead; the full date is
+  // still there on hover via dateLabel above.
+  if (granularity === 'day' && monthlyRows.length > 10) {
+    const stride = Math.ceil(monthlyRows.length / 8);
+    const lastIdx = monthlyRows.length - 1;
+    const lastStridedIdx = Math.floor(lastIdx / stride) * stride;
+    monthlyRows.forEach((r, i) => {
+      const isStrided = i % stride === 0;
+      // The final day always gets a label EXCEPT when it would land right
+      // next to the last regular strided one (e.g. stride=6 landing on day
+      // 42 with only 45 days total) — closer than half a stride apart, two
+      // dates would collide into unreadable overlapping text.
+      const isLast = i === lastIdx && (lastIdx - lastStridedIdx > stride / 2 || lastIdx === 0);
+      if (!isStrided && !isLast) r.label = '';
+    });
+  }
   const tilesHtml = [
     tile('Total Collected', fmtMoney(d.total_collected || 0), 'green', null, `KES ${Number(d.total_collected || 0).toLocaleString()}`),
     tile('Balances', fmtMoney(d.total_balance || 0), 'rose', 'fd-tile-balances', `KES ${Number(d.total_balance || 0).toLocaleString()}`),
@@ -224,25 +548,31 @@ async function load(root, years, terms, sel, access) {
   body.innerHTML = `
     <div class="stats-mobile">${tilesHtml}</div>
     <div class="stats-desktop" style="max-width:none">${tilesHtml}</div>
-    <div class="fin-chart-row">
-      <div class="card side-accent tile-rose">
-        <div class="card-h" style="flex-direction:column;align-items:flex-start;gap:2px"><h3>Class Balances Distribution</h3><span class="muted" style="font-size:12px">Outstanding balances by class</span></div>
-        <div class="card-b">${classBalancesPie(d.per_class)}</div>
-      </div>
-      <div class="card side-accent tile-teal">
+    <div class="fin-chart-feature">
+      <div class="card side-accent tile-indigo">
         <div class="card-h" style="flex-direction:column;align-items:flex-start;gap:2px"><h3>Class Budget vs Paid</h3><span class="muted" style="font-size:12px">Comparison across classes</span></div>
         <div class="card-b">${budgetVsPaidChart(d.per_class)}</div>
       </div>
+      <div class="fin-two-col">
+        <div class="card side-accent tile-rose">
+          <div class="card-h" style="flex-direction:column;align-items:flex-start;gap:2px"><h3>Class Balances Distribution</h3><span class="muted" style="font-size:12px">Outstanding balances by class</span></div>
+          <div class="card-b">${classBalancesPie(d.per_class)}</div>
+        </div>
+        <div class="card side-accent tile-blue">
+          <div class="card-h" style="flex-direction:column;align-items:flex-start;gap:2px"><h3>Income vs Expenses</h3><span class="muted" style="font-size:12px">${esc(periodSubtitle(period, range))}</span></div>
+          <div class="card-b">${incomeExpenseChart(monthlyRows)}</div>
+        </div>
+      </div>
     </div>
-    <div class="card side-accent tile-teal" style="margin-top:16px">
+    <div class="card side-accent tile-amber" style="margin-top:16px">
       <div class="card-h"><h3>Collections Per Class</h3></div>
-      <div class="card-b table-wrap"><table class="data">
+      <div class="card-b table-wrap"><table class="data fin-collections-table">
         <thead><tr><th>Class</th><th class="num">Expected</th><th class="num">Collected</th><th>% Collected</th></tr></thead>
         <tbody>${(d.per_class || []).map((c) => `<tr>
           <td>${esc(c.class_name)}</td>
           <td class="num">${Number(c.expected || 0).toLocaleString()}</td>
           <td class="num">${Number(c.collected || 0).toLocaleString()}</td>
-          <td><div class="fin-progress"><div class="fin-progress-fill" style="width:${Math.min(100, c.pct || 0)}%"></div></div> ${c.pct || 0}%</td>
+          <td><div class="fin-progress-row"><div class="fin-progress"><div class="fin-progress-fill ${progressColorClass(c.pct || 0)}" style="width:${Math.min(100, c.pct || 0)}%"></div></div><span class="fin-progress-pct">${c.pct || 0}%</span></div></td>
         </tr>`).join('') || '<tr><td colspan="4" class="muted">No classes yet.</td></tr>'}</tbody>
       </table></div>
     </div>

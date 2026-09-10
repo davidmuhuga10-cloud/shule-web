@@ -1278,8 +1278,66 @@ table.data td.num,table.data th.num{text-align:center}
 @media(max-width:960px){.scrim.show{display:block}}
 
 /* ---------- Finance module ---------- */
-.fin-progress{display:inline-block;width:100px;height:8px;border-radius:5px;background:var(--line);overflow:hidden;vertical-align:middle;margin-right:6px}
+/* Live feedback: this bar used to sit in a fixed 100px box no matter how
+   much room the "% Collected" column actually had, leaving a long dead
+   strip of empty space to its right on most screens — and every bar was
+   the same teal regardless of how good or bad the number was. .fin-progress
+   is now flexible width (its row wrapper stretches it to fill the column,
+   see .fin-collections-table below) and colored by threshold via the
+   .prog-low/-mid/-high classes financeDashboard.mjs applies. */
+.fin-progress{display:inline-block;width:100px;height:9px;border-radius:5px;background:var(--line);overflow:hidden;vertical-align:middle}
 .fin-progress-fill{height:100%;background:var(--primary);border-radius:5px}
+.fin-progress-fill.prog-low{background:var(--danger)}
+.fin-progress-fill.prog-mid{background:var(--warn)}
+.fin-progress-fill.prog-high{background:var(--ok)}
+.fin-progress-row{display:flex;align-items:center;gap:10px}
+.fin-progress-row .fin-progress{flex:1;width:auto;min-width:50px}
+.fin-progress-pct{flex-shrink:0;min-width:34px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;font-size:12.5px}
+/* Live feedback: giving just the LAST column a width wasn't enough — with
+   no table-layout:fixed, the browser was still free to stretch Class/
+   Expected/Collected across most of the remaining space on its own,
+   leaving the exact same huge gap between them the fix was meant to close.
+   table-layout:fixed plus an explicit width on every column (not just the
+   last one) is what actually pins Class/Expected/Collected tight on the
+   left and hands everything else to % Collected, so its bar can stretch
+   much further right. */
+.fin-collections-table{table-layout:fixed}
+.fin-collections-table th:not(:last-child),.fin-collections-table td:not(:last-child){padding-right:8px}
+/* Live feedback (round 2): Expected/Collected/% Collected were fine, but
+   Class-to-Expected still looked wide — because "Class" is left-aligned
+   short text (e.g. "Grade 6") inside a 17%-wide column, the empty space
+   between where that text ends and the column boundary read as a gap even
+   though Expected's own column started right there. Shrinking Class's
+   column to fit its content (it never needs to be as wide as a money
+   column) closes that visual gap directly, instead of just moving
+   boundaries around. */
+.fin-collections-table th:nth-child(1),.fin-collections-table td:nth-child(1){width:10%}
+.fin-collections-table th:nth-child(2),.fin-collections-table td:nth-child(2){width:15%}
+.fin-collections-table th:nth-child(3),.fin-collections-table td:nth-child(3){width:15%}
+.fin-collections-table th:last-child,.fin-collections-table td:last-child{width:60%;padding-left:10px}
+/* BUG FIX: with table-layout:fixed, text that doesn't fit its column
+   doesn't wrap — it bleeds sideways into the next header, reading as one
+   run-together word ("CLASSEXPECTEDCOLLECTED..."). Clip with ellipsis
+   instead so a cramped column truncates cleanly rather than overlapping
+   its neighbor. */
+.fin-collections-table th,.fin-collections-table td{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* BUG FIX (phones): the desktop proportions above (10/15/15/60) turn
+   Class/Expected/Collected into unreadable slivers on a ~350px-wide card —
+   the ellipsis fix above stopped them from overlapping, but "Grade 6" and
+   "45,000" were still truncating to "G…" and "45,0…". Below 960px, give
+   those three columns real room back and let % Collected give up some of
+   its width instead — a shorter bar that's still readable beats a longer
+   one next to illegible numbers. Tighter padding recovers a bit more room
+   on top of that. */
+@media screen and (max-width:960px){
+  .fin-collections-table th:nth-child(1),.fin-collections-table td:nth-child(1){width:22%}
+  .fin-collections-table th:nth-child(2),.fin-collections-table td:nth-child(2){width:24%}
+  .fin-collections-table th:nth-child(3),.fin-collections-table td:nth-child(3){width:24%}
+  .fin-collections-table th:last-child,.fin-collections-table td:last-child{width:30%;padding-left:6px}
+  .fin-collections-table th,.fin-collections-table td{padding-top:9px;padding-bottom:9px}
+  .fin-collections-table th:not(:last-child),.fin-collections-table td:not(:last-child){padding-left:6px;padding-right:4px}
+  .fin-progress-pct{min-width:28px;font-size:11.5px}
+}
 
 /* Finance Expansion brief item 0 — the two SAMIS-inspired dashboard charts
    (financeDashboard.mjs's budgetVsPaidChart()/classBalancesPie()). Plain
@@ -1288,6 +1346,15 @@ table.data td.num,table.data th.num{text-align:center}
    bolted-on widget. */
 .fin-chart-row{display:grid;grid-template-columns:minmax(260px,340px) 1fr;gap:16px;margin-top:16px;align-items:stretch}
 @media screen and (max-width:860px){.fin-chart-row{grid-template-columns:1fr}}
+/* Live feedback ("alternate where we have income vs expense and class
+   budget vs paid"): Budget vs Paid is now the featured full-width chart
+   (it always has data — every school invoices something — so the top of
+   the Dashboard never shows an empty hero chart), with Balances and the
+   newer Income vs Expenses chart (which CAN be empty, for a school that
+   doesn't track expenses) stacked below it as an equal-width pair via the
+   existing .fin-two-col. */
+.fin-chart-feature{display:flex;flex-direction:column;gap:16px;margin-top:16px}
+.fin-chart-feature .fin-two-col{margin-top:0}
 /* POST-BUILD AUDIT (Task #49, mobile pass) — Inventory's dashboard used to
    reuse .fin-chart-row (built for an asymmetric chart+table pairing) with
    an inline style="grid-template-columns:1fr 1fr" override for its two
@@ -1304,16 +1371,44 @@ table.data td.num,table.data th.num{text-align:center}
 .chart-axis-line{stroke:var(--line);stroke-width:1.5}
 .chart-axis-label{font-size:9.5px;fill:var(--muted);font-family:inherit}
 .chart-bar{rx:2}
-.chart-bar-budget{fill:var(--line);stroke:var(--muted);stroke-width:1;stroke-opacity:.35}
-.chart-bar-paid{fill:var(--primary)}
+/* Live feedback round 2: pink/blue (itself a replacement for the original
+   grey/teal) was swapped again after a 3-design bake-off — "Indigo &
+   Orange" won. Indigo matches the .side-accent.tile-indigo border token
+   (#4f46e5) already defined for this card, orange is a warm complementary
+   pop distinct from the pie's palette and Income vs Expenses' green/red. */
+.chart-bar-budget{fill:#4f46e5}
+.chart-bar-paid{fill:#f2994a}
+/* Income vs Expenses — green/red reuses the app's own --primary/--danger
+   tokens (same "good/caution" meaning those colors already carry
+   elsewhere, e.g. .fin-progress-fill's thresholds) rather than inventing a
+   third palette. */
+.chart-bar-income{fill:var(--primary)}
+.chart-bar-expense{fill:var(--danger)}
 .chart-legend{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin-top:10px;font-size:12px;color:var(--muted)}
 .chart-legend-pie{gap:8px 14px}
 .chart-legend span{display:inline-flex;align-items:center;gap:6px}
 .chart-legend b{color:var(--ink);font-variant-numeric:tabular-nums}
 .chart-swatch{width:10px;height:10px;border-radius:3px;display:inline-block;flex:none}
-.chart-swatch.chart-bar-budget{background:var(--line);border:1px solid var(--muted)}
-.chart-swatch.chart-bar-paid{background:var(--primary)}
+.chart-swatch.chart-bar-budget{background:#4f46e5}
+.chart-swatch.chart-bar-paid{background:#f2994a}
+.chart-swatch.chart-bar-income{background:var(--primary)}
+.chart-swatch.chart-bar-expense{background:var(--danger)}
 .chart-empty{padding:30px 10px;text-align:center;font-size:13px}
+/* Live feedback: "a lot of space to the right top of the dashboard... quick
+   access icons" — fills the empty width next to the greeting on wider
+   screens; wraps under the greeting on narrow ones via .page-head's own
+   flex-wrap, same as everything else in that row. */
+.fin-quick-actions{display:flex;gap:8px;flex-wrap:wrap;align-self:center}
+.fin-quick-actions .icon-chip{white-space:nowrap}
+/* Live feedback: "on mobile please don't include quick action tabs...not
+   needed, we included them on desktop because we had space" — these three
+   buttons (Send Reminder/Add Collection/View Balances) exist purely to fill
+   the empty gutter beside the desktop greeting; on a phone the page-head
+   already stacks to a single column with no dead space to fill, and Finance's
+   own nav/tab bar has all three destinations one tap away anyway. */
+@media screen and (max-width:960px){
+  .fin-quick-actions{display:none}
+}
 .fin-statement table{width:100%;border-collapse:collapse}
 .fin-statement th,.fin-statement td{border:1px solid var(--grid-ink);padding:5px 8px;font-size:12px}
 /* Next Sprint §Finance "Redesign the Student Statement": one boxed table
@@ -1566,8 +1661,14 @@ table.data td.num,table.data th.num{text-align:center}
    list itself easier to scan at a glance without turning it into grouped
    categories, per the same feedback's own follow-up note preferring that
    over literal section headers. */
-.fin-side-nav a{display:flex;align-items:center;padding:11px 14px;border-radius:8px;color:#cfe3e2;font-weight:600;
-  font-size:13.5px;cursor:pointer;margin:3px 10px;transition:background .15s;white-space:nowrap}
+/* Live feedback: "reduce the green space to the left of the modules" — this
+   nav had no icon column, so every label sat behind a flat 14px run of bare
+   --brand background before any text/color broke it up, reading as wasted
+   space. Icons now fill that gap (matches .nav .ico on the main app sidebar)
+   and the base padding is trimmed a little further on top of that. */
+.fin-side-nav a{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:8px;color:#cfe3e2;font-weight:600;
+  font-size:13.5px;cursor:pointer;margin:3px 8px;transition:background .15s;white-space:nowrap}
+.fin-side-nav a .ico{width:17px;text-align:center;opacity:.9;font-size:14px;flex-shrink:0}
 .fin-side-nav a:hover{background:rgba(255,255,255,.1);color:#fff}
 .fin-side-nav a.active{background:var(--primary);color:#fff}
 /* item 2 (BUG FIX): Messages used to carry a border-top + extra margin here,
@@ -1580,11 +1681,20 @@ table.data td.num,table.data th.num{text-align:center}
    scrolls, so .fin-brand above and .fin-side-foot below never move.
    Same slim-scrollbar treatment as .nav above so the two side-navs are a
    genuine replica of each other, not just close. */
-.fin-nav-scroll{flex:1;min-height:0;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.2) transparent}
-.fin-nav-scroll::-webkit-scrollbar{width:6px}
-.fin-nav-scroll::-webkit-scrollbar-track{background:transparent}
-.fin-nav-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:3px}
-.fin-nav-scroll::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.32)}
+/* Live feedback: "the scrolling bar colour isn't very visible, make it
+   bigger" — the old rgba(255,255,255,.2) thumb nearly disappeared against
+   the dark --brand green. First tried the accent amber, but that read as
+   "yellow" and was rejected — switched to a crisp near-white instead
+   (guaranteed contrast against the dark green, no color-identity debate),
+   at a wider track, with a couple px of right-padding on the scroll
+   container to pull it in off the sidebar's outer edge, closer to the nav
+   links, instead of sitting flush in the far corner. */
+.fin-nav-scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding-right:3px;box-sizing:border-box;
+  scrollbar-width:auto;scrollbar-color:#eef4f3 rgba(255,255,255,.08)}
+.fin-nav-scroll::-webkit-scrollbar{width:10px}
+.fin-nav-scroll::-webkit-scrollbar-track{background:rgba(255,255,255,.08);border-radius:5px}
+.fin-nav-scroll::-webkit-scrollbar-thumb{background:#eef4f3;border-radius:5px;border:2px solid var(--brand)}
+.fin-nav-scroll::-webkit-scrollbar-thumb:hover{background:#ffffff}
 /* Copied verbatim from .side-foot (the outer app sidebar's own footer) —
    "ShuleTop © 2026" belongs here too so Finance is a genuine replica,
    not a lookalike missing a piece. */
@@ -1593,8 +1703,9 @@ table.data td.num,table.data th.num{text-align:center}
   .fin-side-nav{position:fixed;top:0;bottom:0;left:0;width:var(--sidebar);z-index:32}
   .fin-nav-scroll{padding:16px 0}
   .fin-side-body{margin-left:var(--sidebar)}
-  /* The page header (title + search bar) sits ABOVE .fin-shell as its own
-     sibling, so it doesn't inherit .fin-side-body's margin. */
+  /* The page header (title + search bar) and the Active strip above it both
+     sit ABOVE .fin-shell as its own siblings, so neither inherits
+     .fin-side-body's margin. */
   .fin-page-head{margin-left:var(--sidebar)}
 }
 @media screen and (max-width:960px){
@@ -1606,6 +1717,48 @@ table.data td.num,table.data th.num{text-align:center}
   .fin-side-nav a{font-size:13.5px;padding:10px 13px}
   .fin-side-nav.open{transform:none}
   .fin-side-body{margin-left:0}
+}
+/* Live feedback: "term should be at the very top... look at the academics
+   side" — the real app's .topbar puts its "Active: Year · Term" strip as
+   the literal first thing at the top of every Academic screen, always
+   visible before any page title. Finance's own copy of that same info used
+   to be buried at the end of its title row, easy to miss. This is now a
+   thin standalone strip, the first thing rendered in Finance, styled like
+   the real .topbar's .ctx text (same font-size/color/bold-value pattern). */
+/* BUG FIX (live feedback: "white background rectangle behind the Academic
+   Year at the top ... doesn't look good on the desktop"): this strip's
+   white background+border was correct, but the strip itself was rendered
+   as just another child of .content, whose 24px padding (all four sides —
+   see .content{padding:24px} above) box it in on the left/right/top. The
+   real .topbar this was modeled on doesn't have that problem because it
+   sits OUTSIDE .content entirely and spans the true viewport edge to
+   edge; this strip is stuck inside .content, so its white box floated in
+   a gray gutter instead of reading as a header bar. Fixed the same way any
+   "bleed" element escapes a padded container: negative margins equal to
+   .content's own padding on the sides that need to reach the edge, with
+   the strip's own horizontal padding restored so its text doesn't then
+   touch those edges. Each breakpoint below matches .content's own padding
+   at that width (24px desktop / 16px / 12px / 340px:10px) so the bleed
+   stays exact instead of drifting once mobile shrinks .content's padding. */
+.fin-topctx-strip{font-size:12.5px;color:var(--muted);padding:9px 24px;border-bottom:1px solid var(--line);
+  background:var(--surface);margin:-24px -24px 0 -24px}
+.fin-topctx-strip b{color:var(--ink)}
+@media screen and (min-width:961px){
+  /* Same edge-to-edge bleed as above, but the left edge also has to clear
+     the fixed Finance sidebar (.fin-page-head does this with a plain
+     margin-left:var(--sidebar) — this strip additionally cancels
+     .content's own 24px left padding first, since it's already bleeding
+     everywhere else). */
+  .fin-topctx-strip{margin-left:calc(var(--sidebar) - 24px)}
+}
+@media screen and (max-width:960px){
+  .fin-topctx-strip{margin:-16px -16px 0 -16px}
+}
+@media screen and (max-width:400px){
+  .fin-topctx-strip{margin:-12px -12px 0 -12px}
+}
+@media screen and (max-width:340px){
+  .fin-topctx-strip{margin:-10px -10px 0 -10px}
 }
 .fin-toolbar{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:18px}
 .fin-toolbar .fin-search{flex:1 1 420px;max-width:560px;margin:0}

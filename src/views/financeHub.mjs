@@ -57,19 +57,27 @@ import { viewFinancePreferences } from './financePreferences.mjs';
 // viewFinanceHub() below.
 // Design standard brief item 4: Collections now comes right after
 // Dashboard in the nav order (was 3rd).
+// Icons added (live feedback: "use relevant emojis in finance module like it
+// is in academics side") to match app.js's NAV convention (.ico span, one
+// emoji per route) — Finance's nav was plain text with no icon column at
+// all, which is also *why* it had that flat block of empty brand-color
+// padding to the left of every label. Same feedback flagged "Payroll" as
+// ambiguous (reads like it could mean fee payments) and asked for "Staff
+// Payroll" instead; "Transport" became "Transport Mgnt" for the same
+// clarity reason — its tab covers routes/fees management, not just a list.
 const TABS = [
-  { key: 'dashboard', label: 'Dashboard' },
-  { key: 'students', label: 'Students' },
-  { key: 'collections', label: 'Collections' },
-  { key: 'invoicing', label: 'Invoicing' },
-  { key: 'accounting', label: 'Accounting' },
-  { key: 'expenses', label: 'Expenses' },
-  { key: 'payroll', label: 'Payroll' },
-  { key: 'inventory', label: 'Inventory' },
-  { key: 'reports', label: 'Reports' },
-  { key: 'transport', label: 'Transport' },
-  { key: 'reminders', label: 'Reminders' },
-  { key: 'preferences', label: 'Preferences' }
+  { key: 'dashboard', label: 'Dashboard', ico: '🏠' },
+  { key: 'students', label: 'Students', ico: '🎒' },
+  { key: 'collections', label: 'Collections', ico: '💰' },
+  { key: 'invoicing', label: 'Invoicing', ico: '📄' },
+  { key: 'accounting', label: 'Accounting', ico: '📊' },
+  { key: 'expenses', label: 'Expenses', ico: '💸' },
+  { key: 'payroll', label: 'Staff Payroll', ico: '💵' },
+  { key: 'inventory', label: 'Inventory', ico: '📦' },
+  { key: 'reports', label: 'Reports', ico: '🧾' },
+  { key: 'transport', label: 'Transport Mgnt', ico: '🚌' },
+  { key: 'reminders', label: 'Reminders', ico: '🔔' },
+  { key: 'preferences', label: 'Preferences', ico: '⚙️' }
 ];
 
 export async function viewFinanceHub(root) {
@@ -117,6 +125,13 @@ export async function viewFinanceHub(root) {
   // it never carried the same "Active: Year · Term" strip + school logo/
   // name the rest of the app's topbar/sidebar always show. Added here so
   // Finance reads as the same product, not a bolted-on second app.
+  // Live feedback: "term should be at the very top... look at the academics
+  // side" — the Active strip used to sit crammed into the same row as the
+  // "Finance" title and search box (easy to miss, and visually the LAST
+  // thing in that row rather than the first thing on the page, unlike the
+  // real app topbar's own Active strip, which is always the very first
+  // thing at the top of every Academic screen). It's now its own full-width
+  // strip above everything else in Finance, mirroring that placement.
   const settings = state.settings || {};
   // Sized/styled to match .brand .logo exactly (38x38, 10px radius, orange
   // gradient) — the outer app sidebar's own logo tile — so Finance's nav
@@ -126,6 +141,7 @@ export async function viewFinanceHub(root) {
     ? `<img src="${esc(settings.logo)}" style="width:38px;height:38px;border-radius:10px;object-fit:cover;flex-shrink:0">`
     : `<div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#e8890b);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🎓</div>`;
   root.innerHTML = `
+    <div class="fin-topctx-strip no-print" id="fin-active-ctx">Active: <span class="skeleton" style="display:inline-block;width:70px;height:11px;vertical-align:middle"></span></div>
     <div class="page-head fin-page-head no-print" style="align-items:flex-start;gap:20px">
       <div style="display:flex;align-items:center;gap:8px">
         <button class="icon-btn fin-side-toggle" id="fin-menu-toggle" title="Menu">☰</button>
@@ -135,14 +151,13 @@ export async function viewFinanceHub(root) {
         <input id="fin-search-q" class="fin-search-prominent" placeholder="🔍 Search student — admission no. or name…" autocomplete="off">
         <div id="fin-search-results" class="search-results"></div>
       </div>
-      <div class="muted" id="fin-active-ctx" style="font-size:13px;white-space:nowrap;align-self:center">Active: <span class="skeleton" style="display:inline-block;width:70px;height:12px;vertical-align:middle"></span></div>
     </div>
     <div class="fin-shell">
       <div class="scrim no-print" id="fin-scrim"></div>
       <nav class="fin-side-nav no-print" id="fin-side-nav">
         <div class="fin-brand">${logoHtml}<div><div class="fin-brand-name">${esc(settings.school_name || 'ShuleTop')}</div><small>Finance</small></div></div>
         <div class="fin-nav-scroll">
-          ${TABS.map((t) => `<a data-tab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</a>`).join('')}
+          ${TABS.map((t) => `<a data-tab="${t.key}" class="${t.key === active ? 'active' : ''}"><span class="ico">${t.ico}</span>${t.label}</a>`).join('')}
           <a class="fin-nav-msg" data-msg="1">💬 Messages</a>
           ${!state.profile.financeOnly ? `<a class="fin-nav-msg" data-back-academic="1">🎓 Back to Academic</a>` : ''}
         </div>
