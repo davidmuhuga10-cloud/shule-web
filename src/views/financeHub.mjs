@@ -141,15 +141,16 @@ export async function viewFinanceHub(root) {
     ? `<img src="${esc(settings.logo)}" style="width:38px;height:38px;border-radius:10px;object-fit:cover;flex-shrink:0">`
     : `<div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#e8890b);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🎓</div>`;
   root.innerHTML = `
-    <div class="fin-topctx-strip no-print" id="fin-active-ctx">Active: <span class="skeleton" style="display:inline-block;width:70px;height:11px;vertical-align:middle"></span></div>
-    <div class="page-head fin-page-head no-print" style="align-items:flex-start;gap:20px">
+    <div class="page-head fin-page-head no-print" style="align-items:center;gap:20px">
       <div style="display:flex;align-items:center;gap:8px">
         <button class="icon-btn fin-side-toggle" id="fin-menu-toggle" title="Menu">☰</button>
         <h2 style="margin:0">Finance</h2>
       </div>
-      <div style="position:relative;flex:1;max-width:640px">
-        <input id="fin-search-q" class="fin-search-prominent" placeholder="🔍 Search student — admission no. or name…" autocomplete="off">
-        <div id="fin-search-results" class="search-results"></div>
+      <div class="fin-search-wrap">
+        <div style="position:relative;width:100%;max-width:640px">
+          <input id="fin-search-q" class="fin-search-prominent" placeholder="🔍 Search student — admission no. or name…" autocomplete="off">
+          <div id="fin-search-results" class="search-results"></div>
+        </div>
       </div>
     </div>
     <div class="fin-shell">
@@ -168,18 +169,28 @@ export async function viewFinanceHub(root) {
       </div>
     </div>
   `;
-  // Non-blocking — the shell above is already fully interactive; this just
-  // fills in the "Active: Year · Term" text once it resolves, same
-  // fire-and-forget pattern app.js's own topbar uses for the identical text.
-  try {
-    Promise.resolve(Db.dashboard.getActiveContext()).then((ctx) => {
-      const el = root.querySelector('#fin-active-ctx');
-      if (!el) return;
-      el.innerHTML = ctx.academic_year_name
-        ? `Active: <b>${esc(ctx.academic_year_name)}</b> · <b>${esc(ctx.term_name || 'No term set')}</b>`
-        : '<span class="muted">No active academic year set</span>';
-    }).catch(() => {});
-  } catch (e) { /* best-effort — the "Active: Year · Term" strip just stays blank */ }
+  // Live feedback: "there is a lot of white space at the top of the
+  // dashboard caused by misplacement of 'Active: 2026 · Term 1'... see
+  // where it is on Academics side... it should be to the very left of
+  // profile" — this used to be Finance's own full-width strip, its own row
+  // ABOVE the page header, which duplicated (and sat awkwardly beside) the
+  // real app topbar's OWN "Active: Year · Term" text — #topctx, in
+  // index.html's shared .topbar, immediately left of the spacer that pushes
+  // the profile avatar to the right. Rather than keep two copies in two
+  // different places, Finance now just fills in that same shared #topctx
+  // element directly — the exact element/position Academics screens have
+  // always used — instead of rendering a second one of its own. That
+  // recovers the whole extra row this used to cost.
+  const topctxEl = document.getElementById('topctx');
+  if (topctxEl) {
+    try {
+      Promise.resolve(Db.dashboard.getActiveContext()).then((ctx) => {
+        topctxEl.innerHTML = ctx.academic_year_name
+          ? `Active: <b>${esc(ctx.academic_year_name)}</b> · <b>${esc(ctx.term_name || 'No term set')}</b>`
+          : '<span class="muted">No active academic year set</span>';
+      }).catch(() => {});
+    } catch (e) { /* best-effort — #topctx just keeps whatever it already had */ }
+  }
   const body = root.querySelector('#fin-hub-body');
   const sideNav = root.querySelector('#fin-side-nav');
   const finScrim = root.querySelector('#fin-scrim');

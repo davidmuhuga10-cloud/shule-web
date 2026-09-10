@@ -274,21 +274,26 @@ input[placeholder^="🔍"]{border-color:#2563eb}
   display:grid;place-items:center;color:#fff;font-weight:800;font-size:18px;flex-shrink:0}
 .brand h1{color:#fff;font-size:17px;letter-spacing:.3px}
 .brand small{color:#8fb5b3;font-size:11px;display:block}
-/* Slim scrollbar (matches .tabs/.fin-tabs' existing scrollbar-width:thin) —
-   without this the sidebar falls back to the browser's native scrollbar,
-   which on many browsers/OSes renders as a wide grey thumb with arrow
-   buttons that eats visibly into this already-narrow 250px column. */
-.nav{flex:1;overflow-y:auto;padding:12px 10px;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.2) transparent}
-.nav::-webkit-scrollbar{width:6px}
-.nav::-webkit-scrollbar-track{background:transparent}
-.nav::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:3px}
-.nav::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.32)}
+/* Live feedback: "I like what I see on the Finance module... the wide
+   navigation bar... just replicate everything on Academics side also for
+   uniformity" — Finance's side-nav (.fin-side-nav below) got its own round
+   of polish earlier (bigger/brighter scrollbar, bolder near-white labels,
+   inset "pill" rows) that this, the ORIGINAL app sidebar, never received.
+   Every rule in this block is now copied verbatim from its .fin-side-nav
+   equivalent so the two are a genuine replica of each other rather than
+   two different-looking navs bolted onto the same app. */
+.nav{flex:1;overflow-y:auto;padding:12px 10px;box-sizing:border-box;
+  scrollbar-width:auto;scrollbar-color:#eef4f3 rgba(255,255,255,.08)}
+.nav::-webkit-scrollbar{width:10px}
+.nav::-webkit-scrollbar-track{background:rgba(255,255,255,.08);border-radius:5px}
+.nav::-webkit-scrollbar-thumb{background:#eef4f3;border-radius:5px;border:2px solid var(--brand)}
+.nav::-webkit-scrollbar-thumb:hover{background:#ffffff}
 .nav .group{color:#6f9a98;font-size:10.5px;text-transform:uppercase;letter-spacing:.8px;padding:14px 12px 6px;font-weight:700}
-.nav a{display:flex;align-items:center;gap:11px;padding:9.5px 12px;border-radius:9px;color:#bcd6d4;
-  font-weight:550;font-size:13.5px;margin-bottom:2px;cursor:pointer;transition:.12s}
-.nav a .ico{width:18px;text-align:center;opacity:.9;font-size:15px}
+.nav a{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:8px;color:#cfe3e2;
+  font-weight:600;font-size:13.5px;margin:3px 8px 2px;cursor:pointer;transition:.12s}
+.nav a .ico{width:17px;text-align:center;opacity:.9;font-size:14px;flex-shrink:0}
 .nav a .nav-ext-hint{margin-left:auto;opacity:.55;font-size:12px}
-.nav a:hover{background:rgba(255,255,255,.07);color:#fff}
+.nav a:hover{background:rgba(255,255,255,.1);color:#fff}
 .nav a.active{background:var(--primary);color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.18)}
 /* Expandable parent menus */
 .navparent .parent-toggle{position:relative}
@@ -715,6 +720,18 @@ table.data td.num,table.data th.num{text-align:center}
 .fin-search-prominent{width:100%;min-width:280px;padding:14px 18px;font-size:15.5px;border-radius:12px;
   box-shadow:var(--shadow-sm,0 1px 3px rgba(16,32,45,.08))}
 @media(max-width:360px){.fin-search-prominent{min-width:0;padding:12px 14px;font-size:14.5px}}
+/* Live feedback: "redo the search bar under Dashboard, let it fit on the
+   centre of the empty space" — this used to sit flex:1 immediately after
+   the "Finance" title with nothing after it, so it just hugged the left
+   and left the whole right side of the row empty. flex:1 + justify-
+   content:center here centers the (still max-width:640px) input within
+   whatever space is actually left over after the title, instead of
+   pinning it to the title's edge. min-width:280px (matching the input's
+   own floor above) is deliberately kept, NOT overridden to 0 — that's
+   what still forces this to wrap onto its own full-width row on a phone,
+   same as before, rather than getting squeezed illegibly onto the title's
+   row. */
+.fin-search-wrap{flex:1;min-width:280px;display:flex;justify-content:center}
 
 /* ---------- Modal ---------- */
 .modal-back{position:fixed;inset:0;background:rgba(16,32,45,.45);display:grid;place-items:center;z-index:100;padding:20px}
@@ -1400,6 +1417,16 @@ table.data td.num,table.data th.num{text-align:center}
    flex-wrap, same as everything else in that row. */
 .fin-quick-actions{display:flex;gap:8px;flex-wrap:wrap;align-self:center}
 .fin-quick-actions .icon-chip{white-space:nowrap}
+/* Live feedback: "border the quick action tabs well with colours
+   alternating" — .icon-chip's default border is a single flat
+   var(--line) gray on every button, so the three read as one
+   undifferentiated group. Each one now borders in a different accent
+   (reusing the app's existing --warn/--primary/rose tokens, the same
+   three the dashboard's own side-accent cards already use) so they're
+   visually distinct at a glance, not just three identical gray pills. */
+.fin-quick-actions .qa-chip-amber{border-color:var(--warn);color:#92600a}
+.fin-quick-actions .qa-chip-teal{border-color:var(--primary);color:#0f6b60}
+.fin-quick-actions .qa-chip-rose{border-color:#db2777;color:#9d1c5c}
 /* Live feedback: "on mobile please don't include quick action tabs...not
    needed, we included them on desktop because we had space" — these three
    buttons (Send Reminder/Add Collection/View Balances) exist purely to fill
@@ -1703,10 +1730,22 @@ table.data td.num,table.data th.num{text-align:center}
   .fin-side-nav{position:fixed;top:0;bottom:0;left:0;width:var(--sidebar);z-index:32}
   .fin-nav-scroll{padding:16px 0}
   .fin-side-body{margin-left:var(--sidebar)}
-  /* The page header (title + search bar) and the Active strip above it both
-     sit ABOVE .fin-shell as its own siblings, so neither inherits
-     .fin-side-body's margin. */
+  /* The page header (title + search bar) sits ABOVE .fin-shell as its own
+     sibling, so it doesn't inherit .fin-side-body's margin. */
   .fin-page-head{margin-left:var(--sidebar)}
+  /* BUG FIX: the real app topbar (index.html's .topbar, holding #topctx —
+     "Active: Year · Term" — and the profile avatar) is a sibling of
+     .content, not a child of it, so none of .content's own children
+     offsetting themselves for .fin-side-nav (above) helped it. Left alone,
+     .topbar spanned x:0 same as it does everywhere finance-only-shell sets
+     .main{margin-left:0} — which put #topctx directly UNDER Finance's own
+     fixed sidebar (z-index:32 vs .topbar's 30), invisible behind it, while
+     only the avatar (pushed to the far right by .topbar's own .spacer)
+     stayed visibly clear of it. Financehub.mjs now fills #topctx directly
+     (this session's fix for the OLD duplicate-strip bug) — but that visible
+     text still needs the topbar itself pushed clear of the sidebar, same as
+     everything else in Finance already is. */
+  body.finance-only-shell .topbar{margin-left:var(--sidebar)}
 }
 @media screen and (max-width:960px){
   .fin-side-toggle{display:inline-flex}
@@ -1718,48 +1757,15 @@ table.data td.num,table.data th.num{text-align:center}
   .fin-side-nav.open{transform:none}
   .fin-side-body{margin-left:0}
 }
-/* Live feedback: "term should be at the very top... look at the academics
-   side" — the real app's .topbar puts its "Active: Year · Term" strip as
-   the literal first thing at the top of every Academic screen, always
-   visible before any page title. Finance's own copy of that same info used
-   to be buried at the end of its title row, easy to miss. This is now a
-   thin standalone strip, the first thing rendered in Finance, styled like
-   the real .topbar's .ctx text (same font-size/color/bold-value pattern). */
-/* BUG FIX (live feedback: "white background rectangle behind the Academic
-   Year at the top ... doesn't look good on the desktop"): this strip's
-   white background+border was correct, but the strip itself was rendered
-   as just another child of .content, whose 24px padding (all four sides —
-   see .content{padding:24px} above) box it in on the left/right/top. The
-   real .topbar this was modeled on doesn't have that problem because it
-   sits OUTSIDE .content entirely and spans the true viewport edge to
-   edge; this strip is stuck inside .content, so its white box floated in
-   a gray gutter instead of reading as a header bar. Fixed the same way any
-   "bleed" element escapes a padded container: negative margins equal to
-   .content's own padding on the sides that need to reach the edge, with
-   the strip's own horizontal padding restored so its text doesn't then
-   touch those edges. Each breakpoint below matches .content's own padding
-   at that width (24px desktop / 16px / 12px / 340px:10px) so the bleed
-   stays exact instead of drifting once mobile shrinks .content's padding. */
-.fin-topctx-strip{font-size:12.5px;color:var(--muted);padding:9px 24px;border-bottom:1px solid var(--line);
-  background:var(--surface);margin:-24px -24px 0 -24px}
-.fin-topctx-strip b{color:var(--ink)}
-@media screen and (min-width:961px){
-  /* Same edge-to-edge bleed as above, but the left edge also has to clear
-     the fixed Finance sidebar (.fin-page-head does this with a plain
-     margin-left:var(--sidebar) — this strip additionally cancels
-     .content's own 24px left padding first, since it's already bleeding
-     everywhere else). */
-  .fin-topctx-strip{margin-left:calc(var(--sidebar) - 24px)}
-}
-@media screen and (max-width:960px){
-  .fin-topctx-strip{margin:-16px -16px 0 -16px}
-}
-@media screen and (max-width:400px){
-  .fin-topctx-strip{margin:-12px -12px 0 -12px}
-}
-@media screen and (max-width:340px){
-  .fin-topctx-strip{margin:-10px -10px 0 -10px}
-}
+/* Live feedback (this round): "a lot of white space at the top of the
+   dashboard caused by misplacement of 'Active: 2026 · Term 1'... see where
+   it is on Academics side... it should be to the very left of profile" —
+   the standalone .fin-topctx-strip this used to be (several rounds of its
+   own history are preserved in financeHub.mjs's git blame) duplicated, and
+   sat below, the real app topbar's own #topctx text. Finance now just
+   writes into that shared #topctx element directly (see financeHub.mjs),
+   so there is nothing left for this class to style — removed rather than
+   left as dead CSS. */
 .fin-toolbar{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:18px}
 .fin-toolbar .fin-search{flex:1 1 420px;max-width:560px;margin:0}
 .fin-toolbar .fin-search input{width:100%}

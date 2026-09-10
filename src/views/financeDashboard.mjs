@@ -74,7 +74,11 @@ function fmtKes(n) {
 function budgetVsPaidChart(perClass) {
   const classes = (perClass || []).filter((c) => (c.expected || 0) > 0 || (c.collected || 0) > 0);
   if (!classes.length) return '<div class="chart-empty muted">No invoiced classes yet for this term.</div>';
-  const W = 640, H = 260, padL = 46, padR = 12, padT = 14, padB = 34;
+  // Live feedback: "Class vs Budget graph is too big, reduce its size by
+  // half from top to bottom" — same width (640), viewBox height halved
+  // (260→130) with its top/bottom padding trimmed proportionally so the
+  // bars/gridlines/axis labels still have breathing room at the new size.
+  const W = 640, H = 130, padL = 46, padR = 12, padT = 8, padB = 22;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const maxVal = Math.max(1, ...classes.map((c) => Math.max(c.expected || 0, c.collected || 0)));
   // Round the axis ceiling up to a "nice" step (1/2/5 x 10^n) so gridline
@@ -280,8 +284,16 @@ function resolvePeriodRange(period, sel, years, terms) {
 
 // One line under the Income vs Expenses card naming exactly what range is
 // plotted — "Last 6 months" used to be a lie the moment Period existed.
-function periodSubtitle(period, range) {
+function periodSubtitle(period, range, capped) {
   const fmt = (d) => d.toLocaleDateString('en', { day: 'numeric', month: 'short', year: 'numeric' });
+  // Once bucketRange has capped a long month-granularity window down to its
+  // most recent 4 months, "This academic year (Jan–Dec)" would name a
+  // wider span than what's actually plotted — say "Last 4 months of..."
+  // instead so the label matches the bars.
+  if (capped) {
+    const label = period === 'this_term' ? 'this term' : period === 'academic_year' ? 'the academic year' : 'the selected period';
+    return `Last 4 months of ${label} (${fmt(range.from)} – ${fmt(range.to)})`;
+  }
   if (period === 'today') return `Today (${fmt(range.from)})`;
   if (period === 'this_week') return `This week (${fmt(range.from)} – ${fmt(range.to)})`;
   if (period === 'this_month') return `This month (${fmt(range.from)} – ${fmt(range.to)})`;
@@ -307,7 +319,21 @@ function bucketRange(from, to) {
       buckets.push({ key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, label: d.toLocaleString('en', { month: 'short' }) });
       d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
     }
-    return { granularity: 'month', buckets };
+    // Live feedback: "income vs expenses show only four months" — an
+    // Academic Year or a long custom Date Range could otherwise stretch
+    // this to 12+ monthly bars; keep only the most recent 4 so the chart
+    // stays readable. displayFrom carries the ACTUAL start of what's shown
+    // (not the originally requested range) so the subtitle below can say
+    // so accurately rather than naming a window wider than what's plotted.
+    let displayFrom = from;
+    let capped = false;
+    if (buckets.length > 4) {
+      buckets.splice(0, buckets.length - 4);
+      const [fy, fm] = buckets[0].key.split('-').map(Number);
+      displayFrom = new Date(fy, fm - 1, 1);
+      capped = true;
+    }
+    return { granularity: 'month', buckets, displayFrom, capped };
   }
   const buckets = [];
   let d = startOfDay(from);
@@ -316,7 +342,7 @@ function bucketRange(from, to) {
     buckets.push({ key: d.toISOString().slice(0, 10), label: d.toLocaleString('en', { day: 'numeric', month: 'short' }) });
     d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
   }
-  return { granularity: 'day', buckets };
+  return { granularity: 'day', buckets, displayFrom: from, capped: false };
 }
 
 // Live feedback: the % Collected bar used to be red-vs-teal-agnostic — every
@@ -426,9 +452,9 @@ async function load(root, years, terms, sel, access) {
   // a button that would just be rejected server-side.
   const quickActionsHtml = `
     <div class="fin-quick-actions no-print">
-      <button class="icon-chip" id="fd-qa-reminder">🔔 Send Reminder</button>
-      ${access.canCollect ? '<button class="icon-chip" id="fd-qa-collect">➕ Add Collection</button>' : ''}
-      <button class="icon-chip" id="fd-qa-balances">👛 View Balances</button>
+      <button class="icon-chip qa-chip-amber" id="fd-qa-reminder">🔔 Send Reminder</button>
+      ${access.canCollect ? '<button class="icon-chip qa-chip-teal" id="fd-qa-collect">➕ Add Collection</button>' : ''}
+      <button class="icon-chip qa-chip-rose" id="fd-qa-balances">👛 View Balances</button>
     </div>
   `;
   // Defaults to "Academic Year" — the Dashboard already opens scoped to the
@@ -479,7 +505,11 @@ async function load(root, years, terms, sel, access) {
   if (qaBalances) qaBalances.onclick = () => clickTab('reports');
 
   const range = resolvePeriodRange(period, sel, years, terms);
-  const { granularity, buckets } = bucketRange(range.from, range.to);
+  const { granularity, buckets, displayFrom, capped } = bucketRange(range.from, range.to);
+  // The subtitle should name what's actually plotted — once bucketRange
+  // caps a long month-granularity range to its most recent 4 months,
+  // displayFrom no longer equals range.from, and the label needs to say so.
+  const displayRange = { from: displayFrom, to: range.to };
   const rangeFrom = range.from.toISOString().slice(0, 10);
   const rangeTo = range.to.toISOString().slice(0, 10);
   const [res, cashbookRes, expensesRes] = await Promise.all([
@@ -550,8 +580,12 @@ async function load(root, years, terms, sel, access) {
     <div class="stats-desktop" style="max-width:none">${tilesHtml}</div>
     <div class="fin-chart-feature">
       <div class="card side-accent tile-indigo">
-        <div class="card-h" style="flex-direction:column;align-items:flex-start;gap:2px"><h3>Class Budget vs Paid</h3><span class="muted" style="font-size:12px">Comparison across classes</span></div>
-        <div class="card-b">${budgetVsPaidChart(d.per_class)}</div>
+        <!-- Live feedback: centered title, "Comparison across classes"
+             subtitle dropped as redundant, and the card-h's usual
+             border-bottom removed here specifically (border:none inline) —
+             all three only for this card, not a sitewide card-h change. -->
+        <div class="card-h" style="justify-content:center;border-bottom:none;padding-bottom:6px"><h3 style="text-align:center">Class Budget vs Paid</h3></div>
+        <div class="card-b" style="padding-top:0">${budgetVsPaidChart(d.per_class)}</div>
       </div>
       <div class="fin-two-col">
         <div class="card side-accent tile-rose">
@@ -559,7 +593,7 @@ async function load(root, years, terms, sel, access) {
           <div class="card-b">${classBalancesPie(d.per_class)}</div>
         </div>
         <div class="card side-accent tile-blue">
-          <div class="card-h" style="flex-direction:column;align-items:flex-start;gap:2px"><h3>Income vs Expenses</h3><span class="muted" style="font-size:12px">${esc(periodSubtitle(period, range))}</span></div>
+          <div class="card-h" style="flex-direction:column;align-items:flex-start;gap:2px"><h3>Income vs Expenses</h3><span class="muted" style="font-size:12px">${esc(periodSubtitle(period, displayRange, capped))}</span></div>
           <div class="card-b">${incomeExpenseChart(monthlyRows)}</div>
         </div>
       </div>
