@@ -70,6 +70,15 @@
   <div id="modal-root"></div>
   <div id="scrim" class="scrim"></div>
 
+  <!-- Graceful offline state (mobile app + browser): a plain lost-connection
+       error page looks broken and unbranded. This banner appears the moment
+       the device loses connectivity and disappears the moment it's back, so
+       the app degrades visibly and recoverably instead of just stalling. -->
+  <div id="offline-banner" hidden style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#0f3d3e;color:#fff;padding:10px 16px;font:600 13.5px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;justify-content:center;gap:12px;text-align:center">
+    <span>📡 You're offline — reconnect to keep using ShuleTop.</span>
+    <button id="offline-retry" style="background:#e8890b;color:#fff;border:none;border-radius:6px;padding:5px 12px;font:inherit;cursor:pointer">Retry</button>
+  </div>
+
   <div id="auth-screen" class="hidden"></div>
 
   <div id="app" class="hidden">
@@ -99,6 +108,8 @@
                 <div id="um-role" class="muted" style="font-size:12px"></div>
               </div>
               <a id="um-change-password">🔑 Change password</a>
+              <a id="um-privacy" href="/privacy.html" target="_blank" rel="noopener">🔒 Privacy Policy</a>
+              <a id="um-delete-account" href="/account-deletion.html" target="_blank" rel="noopener">🗑️ Delete Account / Data</a>
               <a id="um-logout">↩️ Sign out</a>
             </div>
           </div>
@@ -110,9 +121,54 @@
     </div>
   </div>
 
+  <script>
+    (function () {
+      var banner = document.getElementById('offline-banner');
+      var retryBtn = document.getElementById('offline-retry');
+      function show() { if (banner) banner.hidden = false; }
+      function hide() { if (banner) banner.hidden = true; }
+      window.addEventListener('offline', show);
+      window.addEventListener('online', hide);
+      if (retryBtn) retryBtn.onclick = function () { location.reload(); };
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) show();
+    })();
+  </script>
+
   <script src="src/lib/config.js"></script>
   <script src="src/lib/studentEmail.shared.js"></script>
   <script src="src/lib/phone.shared.js"></script>
   <script type="module" src="src/app.js"></script>
+
+  <!-- Native Android app shell (ShuleTop wrapped via Capacitor for the Play
+       Store). This site is loaded as-is inside the native WebView, so this
+       block is the only native-specific code and it does nothing when the
+       page is opened in a normal browser: window.Capacitor only exists
+       inside the wrapped app. Handles the hardware/gesture back button
+       (walk the in-app hash history instead of closing the app outright)
+       and paints the status bar to match the brand's dark teal sidebar. -->
+  <script>
+    (function () {
+      if (!window.Capacitor || !window.Capacitor.isNativePlatform || !window.Capacitor.isNativePlatform()) return;
+      var Plugins = window.Capacitor.Plugins || {};
+      if (Plugins.StatusBar) {
+        try {
+          Plugins.StatusBar.setBackgroundColor({ color: '#0f3d3e' });
+          Plugins.StatusBar.setStyle({ style: 'LIGHT' }); // light icons for a dark status bar
+        } catch (e) { /* best-effort */ }
+      }
+      if (Plugins.App) {
+        Plugins.App.addListener('backButton', function () {
+          var atRoot = !location.hash || location.hash === '#/' || location.hash === '#' ||
+            location.hash.replace(/^#\/?/, '').split('/')[0] === '' ||
+            document.getElementById('auth-screen') && !document.getElementById('auth-screen').classList.contains('hidden');
+          if (!atRoot && history.length > 1) {
+            history.back();
+          } else {
+            Plugins.App.exitApp();
+          }
+        });
+      }
+    })();
+  </script>
 </body>
 </html>

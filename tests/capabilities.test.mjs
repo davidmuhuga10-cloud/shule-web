@@ -1,5 +1,5 @@
 import { createMockSupabase } from './helpers/mockSupabase.mjs';
-import { createCapabilitiesApi, CAPABILITIES, DENIABLE_MODULES } from '../src/lib/api/capabilities.mjs';
+import { createCapabilitiesApi, CAPABILITIES, DENIABLE_MODULES, FINANCE_DENIABLE_TABS, FINANCE_USER_CAPABILITIES } from '../src/lib/api/capabilities.mjs';
 
 let passed = 0, failed = 0;
 function check(name, cond) { if (cond) passed++; else { failed++; console.error('FAIL:', name); } }
@@ -44,7 +44,48 @@ async function run() {
       CAPABILITIES.indexOf('finance_clerk') !== -1);
     check('CAPABILITIES also includes one deny_* key per deniable module, and nothing else',
       DENIABLE_MODULES.every((m) => CAPABILITIES.indexOf(m.key) !== -1) &&
-      CAPABILITIES.length === 4 + DENIABLE_MODULES.length);
+      CAPABILITIES.length === 4 + DENIABLE_MODULES.length + FINANCE_DENIABLE_TABS.length);
+    check('CAPABILITIES includes one deny_finance_* key per Finance tab that can be restricted',
+      FINANCE_DENIABLE_TABS.every((m) => CAPABILITIES.indexOf(m.key) !== -1));
+  }
+
+  {
+    // Finance > Access (live feedback: "add other finance users... restrict
+    // some operations or modules... delete the finance user when needed").
+    const sb = createMockSupabase({
+      staff: [
+        { id: 'st4', full_name: 'Mrs. Achieng', role: 'Bursar', status: 'active' },
+        { id: 'st5', full_name: 'Mr. Njoroge', role: 'Teacher', status: 'active' },
+        { id: 'st6', full_name: 'Ms. Wafula', role: 'Accounts Clerk', status: 'active' }
+      ]
+    });
+    const api = createCapabilitiesApi(sb);
+
+    check('listFinanceUsers starts empty when nobody has finance access', (await api.listFinanceUsers()).data.length === 0);
+
+    await api.grant('st4', 'finance_manage_fees');
+    await api.grant('st6', 'finance_record_collections');
+    await api.grant('st6', FINANCE_DENIABLE_TABS[0].key); // e.g. block Accounts Clerk from Finance's Payroll tab
+    await api.grant('st5', 'publish_results'); // NOT a finance capability — st5 should not show up below
+
+    const users = await api.listFinanceUsers();
+    check('listFinanceUsers only lists staff with an actual finance capability', users.data.length === 2);
+    const clerk = users.data.find((u) => u.staff.id === 'st6');
+    check('listFinanceUsers embeds the staff record (name/role) alongside their capabilities',
+      !!clerk && clerk.staff.full_name === 'Ms. Wafula');
+    check('listFinanceUsers includes both the base finance capability and any deny_finance_* restriction',
+      !!clerk && clerk.capabilities.indexOf('finance_record_collections') !== -1 &&
+      clerk.capabilities.indexOf(FINANCE_DENIABLE_TABS[0].key) !== -1);
+
+    // "Delete the finance user when needed" — revoking every finance-related
+    // capability (base grant + any tab-level denies) removes them from the
+    // list entirely without touching their staff/login record.
+    for (const cap of clerk.capabilities) await api.revoke('st6', cap);
+    const afterRemoval = await api.listFinanceUsers();
+    check('removing every finance capability drops that staff member from listFinanceUsers',
+      afterRemoval.data.length === 1 && !afterRemoval.data.find((u) => u.staff.id === 'st6'));
+    check('the staff record itself is untouched by removal from Finance — this only ever touches staff_capabilities',
+      sb._tables.staff.find((s) => s.id === 'st6').full_name === 'Ms. Wafula');
   }
 
   {

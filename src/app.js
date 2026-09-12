@@ -1032,10 +1032,20 @@ const NAV = {
   admin: [
     { route: 'dashboard', label: 'Dashboard', ico: '🏠' },
     { section: 'Academics' },
-    { route: 'classes', label: 'Classes & Streams', ico: '🏫' },
+    // Live feedback: "instead of having 3 dots on Classes and Streams,
+    // truncate the name... force it until it fits without requiring the
+    // ellipsis" — these two were consistently the widest labels in the
+    // sidebar (main.css's own scrollbar-width comment already measured
+    // "Teachers and Staff" as the longest one), so even with the nav-label
+    // ellipsis fix (this file, buildNav()) they'd still show "…" at the
+    // sidebar's normal width. Shortened here rather than only fixed
+    // visually — nothing else refers to these by their SIDEBAR label
+    // specifically (the module's own page heading/prereq text elsewhere
+    // still says "Classes & Streams"/"Teachers and Staff" in full).
+    { route: 'classes', label: 'Classes & Strm', ico: '🏫' },
     { section: 'People' },
     { route: 'students', label: 'Students', ico: '🎒' },
-    { route: 'staff-teachers', label: 'Teachers and Staff', ico: '👨‍🏫' },
+    { route: 'staff-teachers', label: 'Teachers & Staff', ico: '👨‍🏫' },
     { section: 'Assessment' },
     { route: 'exams-hub', label: 'Exams', ico: '📝' },
     { route: 'reports-hub', label: 'Reports', ico: '🧾' },

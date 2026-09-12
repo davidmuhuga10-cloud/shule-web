@@ -284,12 +284,24 @@ function resolvePeriodRange(period, sel, years, terms) {
 
 // One line under the Income vs Expenses card naming exactly what range is
 // plotted — "Last 6 months" used to be a lie the moment Period existed.
-function periodSubtitle(period, range, capped) {
+// `meta` describes WHY the plotted window differs from the raw period:
+//   trimmedEmpty — leading months with zero income AND zero expenses were
+//     dropped so the chart starts at the school's first real transaction
+//     instead of opening with blank bars.
+//   capped — on top of that (or instead of it, for a long-running school
+//     with no leading gap), the window was also capped to the most recent
+//     4 months for readability.
+function periodSubtitle(period, range, meta) {
   const fmt = (d) => d.toLocaleDateString('en', { day: 'numeric', month: 'short', year: 'numeric' });
-  // Once bucketRange has capped a long month-granularity window down to its
-  // most recent 4 months, "This academic year (Jan–Dec)" would name a
-  // wider span than what's actually plotted — say "Last 4 months of..."
-  // instead so the label matches the bars.
+  const { trimmedEmpty, capped } = meta || {};
+  if (trimmedEmpty && capped) {
+    return `Last 4 months with activity (${fmt(range.from)} – ${fmt(range.to)})`;
+  }
+  if (trimmedEmpty) {
+    return `${fmt(range.from)} – ${fmt(range.to)} — starts at your first recorded transaction`;
+  }
+  // Long history, no leading gap, but still too many months to plot
+  // readably — same "Last 4 months of..." framing as before.
   if (capped) {
     const label = period === 'this_term' ? 'this term' : period === 'academic_year' ? 'the academic year' : 'the selected period';
     return `Last 4 months of ${label} (${fmt(range.from)} – ${fmt(range.to)})`;
@@ -319,21 +331,21 @@ function bucketRange(from, to) {
       buckets.push({ key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, label: d.toLocaleString('en', { month: 'short' }) });
       d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
     }
-    // Live feedback: "income vs expenses show only four months" — an
-    // Academic Year or a long custom Date Range could otherwise stretch
-    // this to 12+ monthly bars; keep only the most recent 4 so the chart
-    // stays readable. displayFrom carries the ACTUAL start of what's shown
-    // (not the originally requested range) so the subtitle below can say
-    // so accurately rather than naming a window wider than what's plotted.
-    let displayFrom = from;
-    let capped = false;
-    if (buckets.length > 4) {
-      buckets.splice(0, buckets.length - 4);
-      const [fy, fm] = buckets[0].key.split('-').map(Number);
-      displayFrom = new Date(fy, fm - 1, 1);
-      capped = true;
-    }
-    return { granularity: 'month', buckets, displayFrom, capped };
+    // Live feedback (round 1): "income vs expenses show only four months" —
+    // an Academic Year or a long custom Date Range could otherwise stretch
+    // this to 12+ monthly bars, so the display window is still capped to 4
+    // for readability. BUT that capping used to always count backward from
+    // the END of the range, which for a school whose year starts long
+    // before it actually opened (or before any money had been recorded)
+    // meant the chart's first bars were just empty months — e.g. an academic
+    // year starting Jan 1 with the school's first real transaction in
+    // August showed Jun/Jul as two blank leading bars instead of Aug's real
+    // numbers. The cap-to-4 decision now happens later in load(), AFTER the
+    // actual cashbook/expense rows are known, so it can anchor on the first
+    // month that has real activity instead of blindly counting from the
+    // end. This function just returns every month in the range uncapped;
+    // load() decides what subset to actually display.
+    return { granularity: 'month', buckets, displayFrom: from, capped: false };
   }
   const buckets = [];
   let d = startOfDay(from);
@@ -505,10 +517,11 @@ async function load(root, years, terms, sel, access) {
   if (qaBalances) qaBalances.onclick = () => clickTab('reports');
 
   const range = resolvePeriodRange(period, sel, years, terms);
-  const { granularity, buckets, displayFrom, capped } = bucketRange(range.from, range.to);
-  // The subtitle should name what's actually plotted — once bucketRange
-  // caps a long month-granularity range to its most recent 4 months,
-  // displayFrom no longer equals range.from, and the label needs to say so.
+  // bucketRange no longer caps or trims anything itself (see its own
+  // comment) — it just lays out every month/day in the raw range. The
+  // actual "what window do we show" decision happens below, once we know
+  // which buckets have real activity.
+  const { granularity, buckets, displayFrom } = bucketRange(range.from, range.to);
   const displayRange = { from: displayFrom, to: range.to };
   const rangeFrom = range.from.toISOString().slice(0, 10);
   const rangeTo = range.to.toISOString().slice(0, 10);
@@ -539,8 +552,10 @@ async function load(root, years, terms, sel, access) {
       .filter((e) => String(e.expense_date || '').slice(0, keyLen) === b.key)
       .reduce((s, e) => s + Number(e.amount || 0), 0);
     // dateLabel keeps the full date for the bar's hover tooltip even when
-    // the on-axis `label` below gets thinned out for space.
-    return { label: b.label, dateLabel: b.label, income, expense };
+    // the on-axis `label` below gets thinned out for space. `key` is kept
+    // too (not used for rendering) so the month-anchoring logic below can
+    // turn "first bucket with real activity" back into an actual Date.
+    return { key: b.key, label: b.label, dateLabel: b.label, income, expense };
   });
   // A day-granularity range longer than ~2 weeks (This Month, a longer
   // Date Range) still draws one bar per day — that's the useful part — but
@@ -562,6 +577,45 @@ async function load(root, years, terms, sel, access) {
       const isLast = i === lastIdx && (lastIdx - lastStridedIdx > stride / 2 || lastIdx === 0);
       if (!isStrided && !isLast) r.label = '';
     });
+  }
+  // Live feedback: "if a school is created, the first month should be when
+  // it's created or when transactions start to be recorded" — a school
+  // whose academic year began months before it actually started using
+  // ShuleTop (or before its first fee payment) was showing 1-2 completely
+  // blank leading bars (e.g. Jun/Jul empty, Aug the real first month) on
+  // every month-granularity view. Anchor the display window on the first
+  // bucket that actually has income or an expense instead of blindly
+  // trusting the period's raw start date, then apply the existing 4-month
+  // readability cap (see bucketRange's comment) on TOP of that trimmed
+  // window rather than before it, so it still counts from the right end —
+  // "cap the tail" for a long-running school, never "reintroduce the
+  // blank head" for a new one. Day-granularity views (Today/This
+  // Week/short Date Range) are left untouched — they're too short to ever
+  // hit this, and the thinning above already handles their own labels.
+  let displayRows = monthlyRows;
+  let trimmedEmpty = false;
+  let capped = false;
+  if (granularity === 'month') {
+    const MAX_MONTHS = 4;
+    const firstActiveIdx = monthlyRows.findIndex((r) => r.income > 0 || r.expense > 0);
+    if (firstActiveIdx > 0) {
+      displayRows = monthlyRows.slice(firstActiveIdx);
+      trimmedEmpty = true;
+    }
+    // No activity anywhere in the whole range (brand-new school, nothing
+    // recorded yet) — nothing to anchor on, so fall back to the original
+    // "most recent N months" window rather than showing the entire year of
+    // zeros.
+    if (displayRows.length > MAX_MONTHS) {
+      displayRows = displayRows.slice(displayRows.length - MAX_MONTHS);
+      capped = true;
+    }
+    if (displayRows.length) {
+      // Mutates the same Date object displayRange.from already points at,
+      // so the subtitle below reflects the trimmed/capped window too.
+      const [fy, fm] = displayRows[0].key.split('-').map(Number);
+      displayFrom.setFullYear(fy, fm - 1, 1);
+    }
   }
   const tilesHtml = [
     tile('Total Collected', fmtMoney(d.total_collected || 0), 'green', null, `KES ${Number(d.total_collected || 0).toLocaleString()}`),
@@ -593,8 +647,8 @@ async function load(root, years, terms, sel, access) {
           <div class="card-b">${classBalancesPie(d.per_class)}</div>
         </div>
         <div class="card side-accent tile-blue">
-          <div class="card-h" style="flex-direction:column;align-items:flex-start;gap:2px"><h3>Income vs Expenses</h3><span class="muted" style="font-size:12px">${esc(periodSubtitle(period, displayRange, capped))}</span></div>
-          <div class="card-b">${incomeExpenseChart(monthlyRows)}</div>
+          <div class="card-h" style="flex-direction:column;align-items:flex-start;gap:2px"><h3>Income vs Expenses</h3><span class="muted" style="font-size:12px">${esc(periodSubtitle(period, displayRange, { trimmedEmpty, capped }))}</span></div>
+          <div class="card-b">${incomeExpenseChart(displayRows)}</div>
         </div>
       </div>
     </div>

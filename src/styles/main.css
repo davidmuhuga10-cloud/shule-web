@@ -282,7 +282,13 @@ input[placeholder^="🔍"]{border-color:#2563eb}
    Every rule in this block is now copied verbatim from its .fin-side-nav
    equivalent so the two are a genuine replica of each other rather than
    two different-looking navs bolted onto the same app. */
-.nav{flex:1;overflow-y:auto;padding:12px 10px;box-sizing:border-box;
+/* Live feedback: "there is still some space between the name of the
+   modules and the navigation bar [scrollbar]" — this container's own 10px
+   right padding, stacked on top of .nav a's 8px right margin below, left a
+   visibly wider gap here than Finance's equivalent (.fin-nav-scroll uses
+   just 3px of its own). Matched to that same 3px so the two navs sit the
+   same distance from their scrollbars, not just look alike otherwise. */
+.nav{flex:1;overflow-y:auto;padding:12px 3px 12px 10px;box-sizing:border-box;
   scrollbar-width:auto;scrollbar-color:#eef4f3 rgba(255,255,255,.08)}
 .nav::-webkit-scrollbar{width:10px}
 .nav::-webkit-scrollbar-track{background:rgba(255,255,255,.08);border-radius:5px}
@@ -1715,12 +1721,26 @@ table.data td.num,table.data th.num{text-align:center}
 .fin-side-nav a{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:8px;color:#cfe3e2;font-weight:600;
   font-size:13.5px;cursor:pointer;margin:3px 8px;transition:background .15s;white-space:nowrap}
 .fin-side-nav a .ico{width:17px;text-align:center;opacity:.9;font-size:14px;flex-shrink:0}
+/* "Back to Academic ↗" reuses the exact same opens-elsewhere hint the main
+   sidebar's own "Finance ↗" link uses (.nav a .nav-ext-hint) — that rule is
+   scoped to .nav, though, so it needs its own copy here for .fin-side-nav. */
+.fin-side-nav a .nav-ext-hint{margin-left:auto;opacity:.55;font-size:12px;flex-shrink:0}
 .fin-side-nav a:hover{background:rgba(255,255,255,.1);color:#fff}
 .fin-side-nav a.active{background:var(--primary);color:#fff}
 /* item 2 (BUG FIX): Messages used to carry a border-top + extra margin here,
    reading as a separate, standalone category rather than one more Finance
    tab. It's a regular nav link like any other — no divider. */
 .fin-side-nav a.fin-nav-msg{margin-top:2px;padding-top:10px;border-top:none}
+/* Live feedback: "Messages" (stays inside Finance/opens Messaging) and
+   "Back to Academic" (leaves Finance's shell entirely) sat back-to-back
+   with identical styling — easy to misclick one for the other, and
+   whichever click actually lands, ending up on the Academic dashboard
+   instead of Messaging reads as "Messages sent me back to the dashboard".
+   A real divider + a dimmer, smaller treatment now marks "Back to
+   Academic" as the different, one-way kind of action it is. */
+.fin-side-nav a.fin-nav-exit{margin-top:10px;padding-top:14px;border-top:1px solid rgba(255,255,255,.15);
+  color:#8fb5b3;font-size:12.5px}
+.fin-side-nav a.fin-nav-exit:hover{color:#fff}
 .fin-side-nav .fin-rail-arrow{display:none}
 .fin-side-body{flex:1;min-width:0}
 /* The scrollable middle section (tab links + Messages) — only this part

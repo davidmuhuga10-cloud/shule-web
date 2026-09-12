@@ -52,16 +52,47 @@ export const DENIABLE_MODULES = [
 // of finance_manage_fees/finance_record_collections — this one only
 // controls what the SIDEBAR looks like; those two still control what the
 // clerk can actually do once inside Finance, exactly as for any bursar.
+// Finance > Access (live feedback: "create access module in finance where
+// the bursar can add other finance users eg accounts clerk and restrict
+// some operations or modules from him or her"). Same shape as
+// DENIABLE_MODULES above, just one level down: these gate Finance's OWN
+// internal tab bar (financeHub.mjs's TABS) rather than the app's main
+// sidebar, so a finance user can be a full bursar in every other module but
+// blocked from, say, Payroll or Inventory inside Finance specifically. Only
+// meaningful for a staff member who has finance access at all
+// (finance_manage_fees/finance_record_collections/finance_clerk) — denying
+// a Finance tab to someone with no Finance access to begin with is a no-op.
+export const FINANCE_DENIABLE_TABS = [
+  { key: 'deny_finance_students', route: 'students', label: 'Students' },
+  { key: 'deny_finance_invoicing', route: 'invoicing', label: 'Invoicing' },
+  { key: 'deny_finance_accounting', route: 'accounting', label: 'Accounting' },
+  { key: 'deny_finance_expenses', route: 'expenses', label: 'Expenses' },
+  { key: 'deny_finance_payroll', route: 'payroll', label: 'Staff Payroll' },
+  { key: 'deny_finance_inventory', route: 'inventory', label: 'Inventory' },
+  { key: 'deny_finance_reports', route: 'reports', label: 'Reports' },
+  { key: 'deny_finance_transport', route: 'transport', label: 'Transport Mgnt' },
+  { key: 'deny_finance_preferences', route: 'preferences', label: 'Preferences' }
+];
+// Everything that makes a staff member "a finance user" at all — used by
+// financeAccess.mjs to list who currently has any kind of Finance access,
+// and to know which rows to strip when someone is removed from Finance
+// entirely. Deliberately does NOT include the deny_finance_* tab-level keys
+// here — those only mean something IN ADDITION to one of these three, never
+// on their own.
+export const FINANCE_USER_CAPABILITIES = ['finance_manage_fees', 'finance_record_collections', 'finance_clerk'];
+
 export const CAPABILITIES = [
   'publish_results', 'finance_record_collections', 'finance_manage_fees', 'finance_clerk',
-  ...DENIABLE_MODULES.map((m) => m.key)
+  ...DENIABLE_MODULES.map((m) => m.key),
+  ...FINANCE_DENIABLE_TABS.map((m) => m.key)
 ];
 export const CAPABILITY_LABELS = {
   publish_results: 'Publish exam results',
   finance_record_collections: 'Finance: record collections & view statements',
   finance_manage_fees: 'Finance: manage fees, invoices & credit/debit notes',
   finance_clerk: 'Finance Clerk — sidebar shows ONLY Finance, nothing else',
-  ...Object.fromEntries(DENIABLE_MODULES.map((m) => [m.key, `Block access to ${m.label}`]))
+  ...Object.fromEntries(DENIABLE_MODULES.map((m) => [m.key, `Block access to ${m.label}`])),
+  ...Object.fromEntries(FINANCE_DENIABLE_TABS.map((m) => [m.key, `Block access to Finance's ${m.label} tab`]))
 };
 
 export function createCapabilitiesApi(supabase) {
@@ -99,6 +130,46 @@ export function createCapabilitiesApi(supabase) {
       if (error) return err(error.message);
       clearCache();
       return ok(true);
+    },
+
+    // Finance > Access's own list screen: every staff member who holds ANY
+    // of the three "counts as a finance user" capabilities, one row per
+    // staff member with all of their capabilities (finance + tab-level
+    // denies) grouped together — not one row per capability, which the raw
+    // table naturally returns since a bursar with 2-3 grants would otherwise
+    // show up 2-3 times.
+    async listFinanceUsers() {
+      return cached('capabilities.listFinanceUsers', null, async () => {
+        const { data, error } = await supabase.from('staff_capabilities')
+          .select('staff_id, capability, staff(id, full_name, role, status)')
+          .in('capability', FINANCE_USER_CAPABILITIES);
+        if (error) return err(error.message);
+        // A capability row for a staff member who's since been deleted has
+        // no embedded `staff` — skip it rather than surface a blank name.
+        const byStaff = {};
+        (data || []).forEach((row) => {
+          if (!row.staff) return;
+          if (!byStaff[row.staff_id]) byStaff[row.staff_id] = { staff: row.staff, capabilities: [] };
+          byStaff[row.staff_id].capabilities.push(row.capability);
+        });
+        // The tab-level deny_finance_* rows aren't part of the `.in()`
+        // filter above (see FINANCE_USER_CAPABILITIES's own comment), but a
+        // listed finance user's full capability set — deny rows included —
+        // is what the Access screen needs to pre-check their restriction
+        // boxes, so fetch those separately for exactly the staff already
+        // found above rather than pulling every capability row in the
+        // school.
+        const staffIds = Object.keys(byStaff);
+        if (staffIds.length) {
+          const denyKeys = FINANCE_DENIABLE_TABS.map((m) => m.key);
+          const { data: denyRows, error: denyErr } = await supabase.from('staff_capabilities')
+            .select('staff_id, capability').in('staff_id', staffIds).in('capability', denyKeys);
+          if (!denyErr) (denyRows || []).forEach((row) => {
+            if (byStaff[row.staff_id]) byStaff[row.staff_id].capabilities.push(row.capability);
+          });
+        }
+        return ok(Object.values(byStaff));
+      });
     }
   };
 }

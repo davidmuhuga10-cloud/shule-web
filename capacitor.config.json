@@ -1,0 +1,29 @@
+{
+  "appId": "com.shuletop.app",
+  "appName": "ShuleTop",
+  "webDir": "www",
+  "server": {
+    "url": "https://shuletop.com",
+    "androidScheme": "https",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false
+  },
+  "backgroundColor": "#105c3e",
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1200,
+      "backgroundColor": "#105c3e",
+      "androidSplashResourceName": "splash",
+      "androidScaleType": "CENTER_CROP",
+      "showSpinner": false,
+      "splashFullScreen": true,
+      "splashImmersive": true
+    },
+    "StatusBar": {
+      "style": "LIGHT",
+      "backgroundColor": "#0f3d3e"
+    }
+  }
+}

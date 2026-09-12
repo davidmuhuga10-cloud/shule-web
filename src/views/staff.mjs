@@ -261,7 +261,14 @@ export async function openStaffModal(root, existing, onSaved) {
         }
         toast('Staff saved.', 'ok');
       }
-      onSaved();
+      // Finance > Access (financeAccess.mjs) needs to know WHICH staff
+      // record just got created, so it can immediately open its own
+      // finance-permission editor for that exact person instead of asking
+      // the admin to find them again in a list. Every existing caller's
+      // onSaved is a zero-arg callback (see the call sites in staff.mjs/
+      // teachers.mjs) so passing this extra argument is safe — it's simply
+      // ignored where nobody asked for it.
+      onSaved(res.data);
     }
   });
 }

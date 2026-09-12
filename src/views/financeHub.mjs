@@ -18,6 +18,7 @@
  */
 import { renderLoading, renderPrereq, esc, state, go } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
+import { FINANCE_DENIABLE_TABS } from '../lib/api/capabilities.mjs';
 import { viewFinanceDashboard } from './financeDashboard.mjs';
 import { viewFinanceInvoicing } from './financeInvoicing.mjs';
 import { viewFinanceCollections } from './financeCollections.mjs';
@@ -49,6 +50,11 @@ import { viewStudents } from './students.mjs';
 // Finance Expansion brief item 1.2's "Preferences or Customization" tab
 // ("almost the same as what we have as Permissions in the Exams system").
 import { viewFinancePreferences } from './financePreferences.mjs';
+// Finance > Access (live feedback: "create access module in finance where
+// the bursar can add other finance users eg accounts clerk and restrict
+// some operations or modules from him or her, also be able to delete the
+// finance user when needed") — see financeAccess.mjs's own header comment.
+import { viewFinanceAccess } from './financeAccess.mjs';
 
 // Next Sprint 2 §14: "Search Student" is no longer its own tab — it moved
 // up here, to the top-right of the Finance page header (same line as the
@@ -77,7 +83,12 @@ const TABS = [
   { key: 'reports', label: 'Reports', ico: '🧾' },
   { key: 'transport', label: 'Transport Mgnt', ico: '🚌' },
   { key: 'reminders', label: 'Reminders', ico: '🔔' },
-  { key: 'preferences', label: 'Preferences', ico: '⚙️' }
+  { key: 'preferences', label: 'Preferences', ico: '⚙️' },
+  // Finance > Access — manage-level only (see viewFinanceHub's filtering
+  // below) and never itself deniable via FINANCE_DENIABLE_TABS: someone who
+  // can grant/restrict Finance access obviously needs to be able to reach
+  // the screen that does that.
+  { key: 'access', label: 'Access', ico: '🔐', managedOnly: true }
 ];
 
 export async function viewFinanceHub(root) {
@@ -117,7 +128,28 @@ export async function viewFinanceHub(root) {
   // finance_bootstrap()).
   await Db.finance.bootstrap();
 
-  let active = TABS[0].key;
+  // Finance > Access: which of Finance's own tabs THIS staff member is
+  // blocked from (deny_finance_* — see capabilities.mjs), plus the
+  // Access tab itself, which only a manage-level user should ever see —
+  // an Accounts Clerk who can only record collections shouldn't be able to
+  // hand themselves (or anyone else) more access than they were granted.
+  // state.profile.deniedModules already holds EVERY 'deny_'-prefixed
+  // capability this staff member has (app.js's bootApp() collects them
+  // generically, not just the ones its own DENIABLE_MODULES list knows
+  // about — see that field's own comment) and is always an empty Set for
+  // an admin, so this filtering is a no-op for admins exactly like every
+  // other deny_* check in the app.
+  const deniedModules = state.profile.deniedModules || new Set();
+  const deniedFinanceRoutes = new Set(
+    FINANCE_DENIABLE_TABS.filter((m) => deniedModules.has(m.key)).map((m) => m.route)
+  );
+  const visibleTabs = TABS.filter((t) => {
+    if (t.managedOnly && !access.canManage) return false;
+    if (deniedFinanceRoutes.has(t.key)) return false;
+    return true;
+  });
+
+  let active = visibleTabs[0].key;
   // POST-BUILD AUDIT (Sidebar_Performance_Login_Audit_Fixes.docx item 3,
   // BUG: "look like two different systems bolted together"): Finance opens
   // as its own standalone tab (app.js's finance-only-shell hides the outer
@@ -158,9 +190,9 @@ export async function viewFinanceHub(root) {
       <nav class="fin-side-nav no-print" id="fin-side-nav">
         <div class="fin-brand">${logoHtml}<div><div class="fin-brand-name">${esc(settings.school_name || 'ShuleTop')}</div><small>Finance</small></div></div>
         <div class="fin-nav-scroll">
-          ${TABS.map((t) => `<a data-tab="${t.key}" class="${t.key === active ? 'active' : ''}"><span class="ico">${t.ico}</span>${t.label}</a>`).join('')}
+          ${visibleTabs.map((t) => `<a data-tab="${t.key}" class="${t.key === active ? 'active' : ''}"><span class="ico">${t.ico}</span>${t.label}</a>`).join('')}
           <a class="fin-nav-msg" data-msg="1">💬 Messages</a>
-          ${!state.profile.financeOnly ? `<a class="fin-nav-msg" data-back-academic="1">🎓 Back to Academic</a>` : ''}
+          ${!state.profile.financeOnly ? `<a class="fin-nav-msg fin-nav-exit" data-back-academic="1">🎓 Back to Academic <span class="nav-ext-hint">↗</span></a>` : ''}
         </div>
         <div class="fin-side-foot">ShuleTop &copy; 2026</div>
       </nav>
@@ -212,6 +244,12 @@ export async function viewFinanceHub(root) {
   finScrim.onclick = () => toggleFinNav(false);
 
   const showTab = (key) => {
+    // Defensive, same as the tab-button rendering above never offering a
+    // denied/managed-only tab in the first place: a stale click handler or
+    // programmatic clickTab() call (quick actions, etc.) naming a tab this
+    // user can't see shouldn't be able to reach it just by asking for its
+    // key directly.
+    if (!visibleTabs.find((t) => t.key === key)) key = visibleTabs[0].key;
     active = key;
     root.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === key));
     toggleFinNav(false);
@@ -227,10 +265,28 @@ export async function viewFinanceHub(root) {
     else if (key === 'reports') viewFinanceReports(body, access);
     else if (key === 'preferences') viewFinancePreferences(body, access);
     else if (key === 'reminders') viewFinanceMessaging(body, access);
+    else if (key === 'access') viewFinanceAccess(body, access);
     else viewFinanceTransport(body, access);
   };
   root.querySelectorAll('[data-tab]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); showTab(b.dataset.tab); });
-  root.querySelector('[data-msg]').onclick = (e) => { e.stopPropagation(); go('messaging'); };
+  // BUG FIX (live feedback: "when I click messages while in Finance it's
+  // taking me back to [the Academic] dashboard"): go('messaging') swapped
+  // the CURRENT tab's route in place, which meant a real transition — drop
+  // finance-only-shell, restore the outer sidebar, mount Messaging — all
+  // inside the same page load. Fine in theory, but Finance is opened as its
+  // own separate browser tab for everyone except a real Finance Clerk (see
+  // the "opensStandalone"/window.open() wiring for the sidebar's own
+  // "Finance ↗" link), so this in-place swap was the one nav action in
+  // Finance's whole sidebar that didn't match that "separate product tab"
+  // model — every other exit either stays inside Finance or explicitly
+  // opens elsewhere. Opening Messaging in a fresh tab the same way sidesteps
+  // that in-place transition entirely: the new tab boots from scratch with
+  // #/messaging already in its hash, so it never touches Finance's own
+  // shell state at all, and Finance stays open right where it was.
+  root.querySelector('[data-msg]').onclick = (e) => {
+    e.stopPropagation();
+    window.open(`${location.pathname}#/messaging`, '_blank', 'noopener');
+  };
   // BUG FIX (live report — an admin who ends up in Finance with no OTHER
   // tab open, e.g. straight after school signup, had no obvious way back
   // to the Academic side at all: Finance opens as its own standalone shell
