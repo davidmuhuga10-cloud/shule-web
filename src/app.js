@@ -1030,21 +1030,19 @@ async function forceLogout(msg) {
  * ==========================================================================*/
 const NAV = {
   admin: [
+    // Live feedback: "introduce back academics on top of dashboard, don
+    // bring back people" — 'Academics' is restored as the very first
+    // entry (above Dashboard); 'People' stays removed for good.
+    { section: 'Academics' },
     { route: 'dashboard', label: 'Dashboard', ico: '🏠' },
-    // Nav redesign: the 'Academics' and 'People' section dividers were
-    // removed per explicit feedback ("remove people and academics") —
-    // Students/Classes & Streams now sit directly under Dashboard with no
-    // categorizer above them, mirroring the uncluttered top of the
-    // Finance nav. Teachers & Staff stays grouped with Assessment below
-    // rather than under a now-removed 'People' header.
     { route: 'students', label: 'Students', ico: '🎒' },
-    // Live feedback: "instead of having 3 dots on Classes and Streams,
-    // truncate the name... force it until it fits without requiring the
-    // ellipsis" — measured and confirmed the full label fits without
-    // truncation at every standard phone width (320/360/390/412px) using
-    // the real Android default font (Roboto), so it no longer needs to be
-    // shortened.
-    { route: 'classes', label: 'Classes & Streams', ico: '🏫' },
+    // Live feedback: on the actual phone this still showed as "Classes &
+    // Str…" with the ellipsis despite the full label measuring as fitting
+    // in this sandbox's Playwright check — the real device's rendered
+    // font metrics clearly differ enough to truncate anyway. Reverted to
+    // the shortened label instead of continuing to chase font-metric
+    // parity with one specific device.
+    { route: 'classes', label: 'Classes & Strm', ico: '🏫' },
     { route: 'staff-teachers', label: 'Teachers & Staff', ico: '👨‍🏫' },
     { section: 'Assessment' },
     { route: 'exams-hub', label: 'Exams', ico: '📝' },

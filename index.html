@@ -127,8 +127,25 @@
       var retryBtn = document.getElementById('offline-retry');
       var pollTimer = null;
 
-      function show() { if (banner) banner.hidden = false; startPolling(); }
-      function hide() { if (banner) banner.hidden = true; stopPolling(); }
+      // BUG FIX (live report, phone): showing this banner used to cover the
+      // sidebar's hamburger button with no way to reach it — "blocking the
+      // navigation bar the 3 lines so school now can't do anything there".
+      // Root cause: the banner is position:fixed at the very top with a huge
+      // z-index (by design, so real connectivity loss is never hidden), but
+      // nothing made room for it elsewhere, so it sat ON TOP of the topbar
+      // instead of above it. Fix: measure the banner's own real height
+      // (it can wrap to 2 lines on a narrow phone, so this is never assumed)
+      // and publish it as a CSS variable + body class main.css uses to push
+      // the topbar/sidebar/scrim down clear of the banner while it's shown.
+      function syncOffset() {
+        if (!banner) return;
+        var h = banner.hidden ? 0 : banner.getBoundingClientRect().height;
+        document.documentElement.style.setProperty('--offline-banner-h', h + 'px');
+        document.body.classList.toggle('has-offline-banner', h > 0);
+      }
+      function show() { if (banner) banner.hidden = false; syncOffset(); startPolling(); }
+      function hide() { if (banner) banner.hidden = true; syncOffset(); stopPolling(); }
+      window.addEventListener('resize', syncOffset);
 
       // BUG FIX (live report on the Play Store/Capacitor build): this
       // banner got permanently stuck reading "You're offline" even once
