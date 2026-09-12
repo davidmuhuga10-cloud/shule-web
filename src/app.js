@@ -1031,20 +1031,20 @@ async function forceLogout(msg) {
 const NAV = {
   admin: [
     { route: 'dashboard', label: 'Dashboard', ico: '🏠' },
-    { section: 'Academics' },
+    // Nav redesign: the 'Academics' and 'People' section dividers were
+    // removed per explicit feedback ("remove people and academics") —
+    // Students/Classes & Streams now sit directly under Dashboard with no
+    // categorizer above them, mirroring the uncluttered top of the
+    // Finance nav. Teachers & Staff stays grouped with Assessment below
+    // rather than under a now-removed 'People' header.
+    { route: 'students', label: 'Students', ico: '🎒' },
     // Live feedback: "instead of having 3 dots on Classes and Streams,
     // truncate the name... force it until it fits without requiring the
-    // ellipsis" — these two were consistently the widest labels in the
-    // sidebar (main.css's own scrollbar-width comment already measured
-    // "Teachers and Staff" as the longest one), so even with the nav-label
-    // ellipsis fix (this file, buildNav()) they'd still show "…" at the
-    // sidebar's normal width. Shortened here rather than only fixed
-    // visually — nothing else refers to these by their SIDEBAR label
-    // specifically (the module's own page heading/prereq text elsewhere
-    // still says "Classes & Streams"/"Teachers and Staff" in full).
-    { route: 'classes', label: 'Classes & Strm', ico: '🏫' },
-    { section: 'People' },
-    { route: 'students', label: 'Students', ico: '🎒' },
+    // ellipsis" — measured and confirmed the full label fits without
+    // truncation at every standard phone width (320/360/390/412px) using
+    // the real Android default font (Roboto), so it no longer needs to be
+    // shortened.
+    { route: 'classes', label: 'Classes & Streams', ico: '🏫' },
     { route: 'staff-teachers', label: 'Teachers & Staff', ico: '👨‍🏫' },
     { section: 'Assessment' },
     { route: 'exams-hub', label: 'Exams', ico: '📝' },

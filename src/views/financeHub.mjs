@@ -47,6 +47,10 @@ import { viewFinanceTransport } from './financeTransport.mjs';
 // judged not worth it: the actual ask here (search/add/edit/move
 // students) works identically for everyone.
 import { viewStudents } from './students.mjs';
+// "💬 Messages" link (below) mounts this directly into Finance's own body —
+// see that click handler's comment for why, after a live bug report in the
+// Android app.
+import { viewMessaging } from './messaging.mjs';
 // Finance Expansion brief item 1.2's "Preferences or Customization" tab
 // ("almost the same as what we have as Permissions in the Exams system").
 import { viewFinancePreferences } from './financePreferences.mjs';
@@ -269,23 +273,24 @@ export async function viewFinanceHub(root) {
     else viewFinanceTransport(body, access);
   };
   root.querySelectorAll('[data-tab]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); showTab(b.dataset.tab); });
-  // BUG FIX (live feedback: "when I click messages while in Finance it's
-  // taking me back to [the Academic] dashboard"): go('messaging') swapped
-  // the CURRENT tab's route in place, which meant a real transition — drop
-  // finance-only-shell, restore the outer sidebar, mount Messaging — all
-  // inside the same page load. Fine in theory, but Finance is opened as its
-  // own separate browser tab for everyone except a real Finance Clerk (see
-  // the "opensStandalone"/window.open() wiring for the sidebar's own
-  // "Finance ↗" link), so this in-place swap was the one nav action in
-  // Finance's whole sidebar that didn't match that "separate product tab"
-  // model — every other exit either stays inside Finance or explicitly
-  // opens elsewhere. Opening Messaging in a fresh tab the same way sidesteps
-  // that in-place transition entirely: the new tab boots from scratch with
-  // #/messaging already in its hash, so it never touches Finance's own
-  // shell state at all, and Finance stays open right where it was.
+  // BUG FIX (live report, mobile app): the previous fix for "clicking
+  // Messages in Finance takes me back to the Academic dashboard" opened
+  // Messaging in a NEW browser tab instead — reasonable on desktop, but
+  // inside the Android app's WebView there is no such thing as a second
+  // tab, so window.open() there either fails or just navigates the SAME
+  // WebView away from Finance, then going back landed right back on
+  // Academic exactly as before — the original bug, wearing a new coat.
+  // Fixed the same way the Students tab above already handles this:
+  // Messaging (messaging.mjs) is fully self-contained (it never assumes
+  // it's mounted at the app's own top-level #view), so it's mounted
+  // straight into Finance's own body here — no new tab, no route change,
+  // no touching Finance's shell state at all.
   root.querySelector('[data-msg]').onclick = (e) => {
     e.stopPropagation();
-    window.open(`${location.pathname}#/messaging`, '_blank', 'noopener');
+    root.querySelectorAll('[data-tab]').forEach((b) => b.classList.remove('active'));
+    toggleFinNav(false);
+    renderLoading(body, 'Loading, please wait…');
+    viewMessaging(body);
   };
   // BUG FIX (live report — an admin who ends up in Finance with no OTHER
   // tab open, e.g. straight after school signup, had no obvious way back

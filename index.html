@@ -125,12 +125,50 @@
     (function () {
       var banner = document.getElementById('offline-banner');
       var retryBtn = document.getElementById('offline-retry');
-      function show() { if (banner) banner.hidden = false; }
-      function hide() { if (banner) banner.hidden = true; }
-      window.addEventListener('offline', show);
-      window.addEventListener('online', hide);
-      if (retryBtn) retryBtn.onclick = function () { location.reload(); };
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) show();
+      var pollTimer = null;
+
+      function show() { if (banner) banner.hidden = false; startPolling(); }
+      function hide() { if (banner) banner.hidden = true; stopPolling(); }
+
+      // BUG FIX (live report on the Play Store/Capacitor build): this
+      // banner got permanently stuck reading "You're offline" even once
+      // the device was fully connected and every other part of the app
+      // was working fine — including right after tapping Retry, which
+      // just reloaded the page into the exact same stuck state.
+      // Root cause: navigator.onLine and the browser's 'online'/'offline'
+      // events (which the original version trusted directly) are well
+      // documented to be unreliable inside Android's WebView — the thing
+      // that actually renders this app once Capacitor wraps it for the
+      // Play Store — and can get stuck reporting the wrong value
+      // indefinitely on some devices/Android versions. Trusting them WAS
+      // the bug. Now neither is trusted directly — they're only used as a
+      // hint to check sooner. Whether the banner is actually shown or
+      // hidden is always decided by a real, tiny network request (this
+      // site's own robots.txt, cache-busted so a cached response can't
+      // lie about it): while the banner is showing, that check re-runs
+      // every few seconds and hides it the instant a request actually
+      // succeeds, no matter what navigator.onLine claims.
+      function verifyConnectivity() {
+        if (typeof fetch !== 'function') return;
+        fetch('/robots.txt?_=' + Date.now(), { cache: 'no-store' })
+          .then(function (res) { if (res && res.ok) hide(); else show(); })
+          .catch(function () { show(); });
+      }
+      function startPolling() {
+        if (pollTimer) return;
+        pollTimer = setInterval(verifyConnectivity, 5000);
+      }
+      function stopPolling() {
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      }
+
+      window.addEventListener('offline', verifyConnectivity);
+      window.addEventListener('online', verifyConnectivity);
+      if (retryBtn) retryBtn.onclick = verifyConnectivity;
+      // Real verification on load too — not a navigator.onLine check —
+      // since a stuck-false reading there was exactly what caused the
+      // original bug to reappear on every reload.
+      verifyConnectivity();
     })();
   </script>
 

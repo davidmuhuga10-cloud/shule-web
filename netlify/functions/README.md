@@ -114,6 +114,23 @@ Response: `{ ok: true, school_code, school_name, admin_email, seeded }` or
 No CAPTCHA/rate-limiting yet — see `PRODUCT_ROADMAP.md`'s Phase 0 notes for
 why that's a deliberate, revisit-later call rather than an oversight.
 
+## keep-alive — scheduled, prevents Supabase's free-tier auto-pause
+
+Not a public/admin endpoint — Netlify calls this one itself on a schedule
+(see the `[functions."keep-alive"]` entry in `netlify.toml`, currently every
+3 days). It does the smallest possible real read against the database
+(`select id from schools limit 1`) purely so Supabase always sees recent
+activity and never auto-pauses the project for inactivity, and so the
+project never sits paused long enough to hit Supabase's 90-day
+restorability window. See `keep-alive.js`'s own header comment for the full
+reasoning, including why this reduces the risk rather than eliminating it,
+and why a paid Supabase plan (immune to pausing entirely) is the fully
+reliable fix if/when that's worth the cost for a live production school.
+
+Uses the same `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` env vars as
+admin-provision.js above — no extra configuration needed once those are
+already set.
+
 ## Re-running the tests
 
 `npm install && npm test` from the project root runs every test, including

@@ -84,7 +84,6 @@ async function render(root) {
         <button class="btn" id="fa-empty-add">+ Add finance user</button>
       </div></div>`}
     </div>
-    <p class="hint" style="margin-top:10px">"Remove from Finance" only takes away Finance access — it never deletes the person's staff record or login. To delete a staff member entirely, use Teachers and Staff.</p>
   `;
 
   const openAdd = () => openAddUserModal(root, allStaff, financeStaffIds);

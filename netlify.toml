@@ -14,6 +14,20 @@
   # node_modules upload step needed for the function itself.
   node_bundler = "esbuild"
 
+## --- Keep Supabase warm ----------------------------------------------------
+## Live feedback: avoid Supabase's free-tier "paused after 7 days of
+## inactivity" behavior (and, further out, a paused project's 90-day
+## restorability window closing) without needing any separate cron service —
+## see netlify/functions/keep-alive.js's own header comment for the full
+## reasoning and the tradeoffs. Runs at 03:00 UTC every 3rd day (day-of-month
+## */3 — the small gap at a month boundary, e.g. day 31 to day 1, is at most
+## a few days, never anywhere near the 7-day pause threshold). Cron
+## expressions are evaluated in UTC; change "*/3" to "*/6" here if you'd
+## rather match the original 6-day idea once this has run reliably for a
+## while.
+[functions."keep-alive"]
+  schedule = "0 3 */3 * *"
+
 ## --- Super Admin mini-app -------------------------------------------------
 ## admin.html/admin.js/admin.css are a SEPARATE static mini-app (Admin_
 ## Dashboard_Architecture3.docx: not bolted onto the main SPA's hash router),

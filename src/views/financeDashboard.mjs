@@ -298,7 +298,7 @@ function periodSubtitle(period, range, meta) {
     return `Last 4 months with activity (${fmt(range.from)} – ${fmt(range.to)})`;
   }
   if (trimmedEmpty) {
-    return `${fmt(range.from)} – ${fmt(range.to)} — starts at your first recorded transaction`;
+    return `${fmt(range.from)} – ${fmt(range.to)}`;
   }
   // Long history, no leading gap, but still too many months to plot
   // readably — same "Last 4 months of..." framing as before.
