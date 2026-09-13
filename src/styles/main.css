@@ -1207,7 +1207,16 @@ table.data td.num,table.data th.num{text-align:center}
      strip, every other report's shaded table headers) is covered by one
      rule instead of needing to be listed out and kept in sync by hand. */
   *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
-  .sidebar,.topbar,.no-print{display:none!important}
+  /* Live feedback: "when printing balances they come with unnecessary
+     things at the top... the submodules show on what is being printed" —
+     .fin-tabs (and the same sub-tab bar reused outside Finance too, e.g.
+     Settings/Timetable/Attendance/Messaging/Staff & Teachers) is pure
+     screen navigation between sibling tables/forms; none of it should ever
+     end up on a printed page, same reasoning as .sidebar/.topbar. Most
+     individual reports already added .no-print to their own toolbars by
+     hand — this covers the tab STRIP itself everywhere it's used, since
+     that one was never opted out anywhere. */
+  .sidebar,.topbar,.no-print,.fin-tabs,.tabs{display:none!important}
   .main{margin-left:0}.content{padding:0;max-width:none}
   .report{border:none;box-shadow:none;max-width:none}
   body{background:#fff}

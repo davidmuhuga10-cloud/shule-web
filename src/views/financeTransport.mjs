@@ -137,12 +137,17 @@ async function loadInvoicing(root, access, settings, routes, years, terms, sel) 
   root.innerHTML = `
     <div class="fin-toolbar no-print">
       <div class="fin-filters">
-        <div class="field"><label>Route</label><select id="fti-route">${routes.length ? options(routes, 'id', 'name', sel.route_id) : '<option value="">No routes yet — add one under Routes</option>'}</select></div>
+        <div class="field"><label>Route</label><select id="fti-route">${routes.length ? `<option value="">All routes</option>${options(routes, 'id', 'name', sel.route_id)}` : '<option value="">No routes yet — add one under Routes</option>'}</select></div>
         <div class="field"><label>Academic Year</label><select id="fti-year">${options(years, 'id', 'name', sel.academic_year_id)}</select></div>
         <div class="field"><label>Term</label><select id="fti-term">${options(terms.filter((t) => !sel.academic_year_id || t.academic_year_id === sel.academic_year_id), 'id', 'name', sel.term_id)}</select></div>
+        <div class="field"><label>Status</label><select id="fti-status">
+          <option value="">All</option>
+          <option value="invoiced" ${sel.status === 'invoiced' ? 'selected' : ''}>Invoiced</option>
+          <option value="not_invoiced" ${sel.status === 'not_invoiced' ? 'selected' : ''}>Not invoiced</option>
+        </select></div>
       </div>
       <div class="spacer"></div>
-      ${access.canManage && routes.length ? `<button class="btn secondary" id="fti-add-student">+ Add Student</button>
+      ${access.canManage && routes.length && sel.route_id ? `<button class="btn secondary" id="fti-add-student">+ Add Student</button>
       <button class="btn secondary" id="fti-add-class">+ Add by Class</button>
       <button class="btn" id="fti-invoice">Invoice this route</button>` : ''}
     </div>
@@ -152,30 +157,45 @@ async function loadInvoicing(root, access, settings, routes, years, terms, sel) 
   root.querySelector('#fti-route').onchange = (e) => loadInvoicing(root, access, settings, routes, years, terms, { ...sel, route_id: e.target.value });
   root.querySelector('#fti-year').onchange = (e) => loadInvoicing(root, access, settings, routes, years, terms, { ...sel, academic_year_id: e.target.value, term_id: '' });
   root.querySelector('#fti-term').onchange = (e) => loadInvoicing(root, access, settings, routes, years, terms, { ...sel, term_id: e.target.value });
+  root.querySelector('#fti-status').onchange = (e) => loadInvoicing(root, access, settings, routes, years, terms, { ...sel, status: e.target.value });
 
-  const route = routes.find((r) => r.id === sel.route_id);
+  // No specific route chosen ("All routes" — live feedback: "I should be
+  // able to filter by term, route"): aggregate every active route's roster
+  // for the chosen year/term into one list, each row tagged with its own
+  // route name, so a combined Invoiced/Not-invoiced view across the whole
+  // school is possible, not just one route at a time. Add/Invoice actions
+  // above only make sense for ONE route, so they're hidden in this mode.
+  const route = routes.find((r) => r.id === sel.route_id) || null;
   const rosterEl = root.querySelector('#fti-roster');
   let lastRoster = [];
   let notInvoicedCount = 0;
   const refreshRoster = async () => {
-    if (!route || !sel.academic_year_id || !sel.term_id) { rosterEl.innerHTML = '<div class="card pad muted">Choose a route, academic year and term.</div>'; lastRoster = []; return; }
-    const [rosterRes, invoicedRes] = await Promise.all([
-      Db.finance.routes.studentsOnRoute(route.id, sel.academic_year_id, sel.term_id),
-      Db.finance.routes.invoicedStudentIds(route.id, sel.academic_year_id, sel.term_id)
-    ]);
-    const rows = rosterRes.ok ? rosterRes.data : [];
-    const invoicedIds = new Set(invoicedRes.ok ? invoicedRes.data : []);
+    if (!sel.academic_year_id || !sel.term_id) { rosterEl.innerHTML = '<div class="card pad muted">Choose an academic year and term.</div>'; lastRoster = []; return; }
+    const targetRoutes = route ? [route] : routes;
+    const perRoute = await Promise.all(targetRoutes.map(async (r) => {
+      const [rosterRes, invoicedRes] = await Promise.all([
+        Db.finance.routes.studentsOnRoute(r.id, sel.academic_year_id, sel.term_id),
+        Db.finance.routes.invoicedStudentIds(r.id, sel.academic_year_id, sel.term_id)
+      ]);
+      const invoicedIds = new Set(invoicedRes.ok ? invoicedRes.data : []);
+      return (rosterRes.ok ? rosterRes.data : []).map((row) => ({ ...row, route_name: r.name, invoiced: invoicedIds.has(row.student_id) }));
+    }));
+    let rows = perRoute.flat();
     lastRoster = rows;
-    notInvoicedCount = rows.filter((r) => !invoicedIds.has(r.student_id)).length;
+    notInvoicedCount = rows.filter((r) => !r.invoiced).length;
+    if (sel.status === 'invoiced') rows = rows.filter((r) => r.invoiced);
+    else if (sel.status === 'not_invoiced') rows = rows.filter((r) => !r.invoiced);
     // POST-BUILD FEEDBACK item 8: "can I, right now, look at a list and
     // tell which students have already been invoiced this term and which
     // haven't?" — this column is that answer, per student, not a guess.
-    // Live feedback: "list of students in a route should be printable" —
-    // reuses the exact printable header/title bar every other Finance
-    // report already uses, plus a Print + Excel pair to match.
+    // Live feedback: "list of students in a route should be printable"
+    // and "be able to download any info I want" — reuses the exact
+    // printable header/title bar every other Finance report already uses,
+    // plus a Print + Excel pair, both respecting the Status filter above.
+    const reportTitle = route ? `${route.name} — Transport Roster` : 'Transport Roster — All Routes';
     rosterEl.innerHTML = `
       <div class="fin-toolbar no-print" style="margin-bottom:8px">
-        <span class="muted"><b>${rows.length}</b> assigned · <b>${rows.length - notInvoicedCount}</b> invoiced · <b>${notInvoicedCount}</b> not yet invoiced</span>
+        <span class="muted"><b>${lastRoster.length}</b> assigned · <b>${lastRoster.length - notInvoicedCount}</b> invoiced · <b>${notInvoicedCount}</b> not yet invoiced${sel.status ? ` · showing <b>${rows.length}</b> (${sel.status === 'invoiced' ? 'Invoiced' : 'Not invoiced'} only)` : ''}</span>
         <div class="spacer"></div>
         <div class="fin-report-actions">
           <button class="btn secondary" id="fti-xlsx">⬇️ Excel</button>
@@ -184,28 +204,31 @@ async function loadInvoicing(root, access, settings, routes, years, terms, sel) 
       </div>
       <div class="card print-grid" id="fti-print-sheet"><div class="card-b">
         ${printHeaderHtml(settings)}
-        ${reportTitleBarHtml(`${route.name} — Transport Roster`)}
+        ${reportTitleBarHtml(reportTitle)}
         <div class="table-wrap" style="margin-top:10px"><table class="data compact">
-          <thead><tr><th>Admission No.</th><th>Student</th><th>Class</th><th>Direction</th><th>Invoiced This Term?</th></tr></thead>
+          <thead><tr>${route ? '' : '<th>Route</th>'}<th>Admission No.</th><th>Student</th><th>Class</th><th>Direction</th><th>Invoiced This Term?</th></tr></thead>
           <tbody>${rows.map((r) => `<tr>
+            ${route ? '' : `<td>${esc(r.route_name)}</td>`}
             <td>${esc(r.students ? r.students.admission_no : '')}</td>
             <td>${esc(r.students ? r.students.full_name : '')}</td>
             <td>${esc(r.students && r.students.classes ? r.students.classes.name : '')}</td>
             <td>${r.direction === 'two_way' ? 'Two-way' : 'One-way'}</td>
-            <td>${invoicedIds.has(r.student_id) ? '<span class="badge green">Invoiced</span>' : '<span class="badge amber">Not invoiced</span>'}</td>
-          </tr>`).join('') || '<tr><td colspan="5" class="muted">No students assigned to this route for this term yet.</td></tr>'}</tbody>
+            <td>${r.invoiced ? '<span class="badge green">Invoiced</span>' : '<span class="badge amber">Not invoiced</span>'}</td>
+          </tr>`).join('') || `<tr><td colspan="${route ? 5 : 6}" class="muted">No students match this filter.</td></tr>`}</tbody>
         </table></div>
       </div></div>
     `;
-    wirePrintOptions(rosterEl, 'fti', `${route.name} Transport Roster`);
+    wirePrintOptions(rosterEl, 'fti', reportTitle);
     rosterEl.querySelector('#fti-xlsx').onclick = () => {
-      downloadXlsx(`${route.name} Transport Roster.xlsx`, rows.map((r) => ({
+      downloadXlsx(`${reportTitle}.xlsx`, rows.map((r) => ({
+        route_name: r.route_name,
         admission_no: r.students ? r.students.admission_no : '',
         full_name: r.students ? r.students.full_name : '',
         class_name: r.students && r.students.classes ? r.students.classes.name : '',
         direction: r.direction === 'two_way' ? 'Two-way' : 'One-way',
-        invoiced: invoicedIds.has(r.student_id) ? 'Invoiced' : 'Not invoiced'
+        invoiced: r.invoiced ? 'Invoiced' : 'Not invoiced'
       })), [
+        ...(route ? [] : [{ key: 'route_name', label: 'Route' }]),
         { key: 'admission_no', label: 'Admission No.' }, { key: 'full_name', label: 'Student' },
         { key: 'class_name', label: 'Class' }, { key: 'direction', label: 'Direction' }, { key: 'invoiced', label: 'Invoiced This Term?' }
       ], 'Transport Roster');
