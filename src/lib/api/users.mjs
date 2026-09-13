@@ -21,6 +21,23 @@ export function createUsersApi(supabase, callAdminFunction) {
   const { cached } = createMemoCache(20000);
   function clearCache() { clearAllCaches(); }
   return {
+    /** Edit Profile (every role): updates the caller's own name/phone on
+     *  `profiles` via the narrow profile_update_own RPC — never a plain
+     *  table update, same reasoning as staff.updateOwnProfile. Staff
+     *  accounts use staff.updateOwnProfile instead (it also syncs this
+     *  same profiles row), so this is really for parents/students/finance-
+     *  only accounts with no linked staff record. */
+    async updateOwnProfile(payload) {
+      payload = payload || {};
+      const { data, error } = await supabase.rpc('profile_update_own', {
+        p_name: payload.name || null,
+        p_phone: payload.phone || null
+      });
+      if (error) return err(error.message);
+      clearCache();
+      return ok(data);
+    },
+
     async list() {
       return cached('users.list', null, async () => {
         const { data, error } = await supabase

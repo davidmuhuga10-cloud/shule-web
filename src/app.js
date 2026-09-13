@@ -1081,7 +1081,7 @@ const NAV = {
     // Next Sprint 2 §11: teacher self-service profile updates (phone,
     // gender, other personal details) — was admin-only before.
     { section: 'Account' },
-    { route: 'my-profile', label: 'My Profile', ico: '🙍' }
+    { route: 'my-profile', label: 'Edit Profile', ico: '🙍' }
   ],
   student: [
     { route: 'my-results', label: 'My Results', ico: '🧾' }
@@ -1102,7 +1102,7 @@ const NAV = {
   financeOnly: [
     { route: 'finance', label: 'Finance', ico: '💰' },
     { section: 'Account' },
-    { route: 'my-profile', label: 'My Profile', ico: '🙍' }
+    { route: 'my-profile', label: 'Edit Profile', ico: '🙍' }
   ]
 };
 
@@ -1115,8 +1115,13 @@ const NAV = {
 // just have them as icons" — exams-hub/reports-hub/settings are the actual
 // sidebar entries now; these are what their icon tiles/tabs link to).
 const HIDDEN_ALLOWED_ROUTES = {
-  admin: ['bulk-upload', 'staff-bulk-upload', 'exam-desk', 'deleted-exams', 'grading', 'class-list', 'broadsheet', 'reports', 'transcript', 'certificates', 'exam-analysis', 'score-sheet'],
-  teacher: ['bulk-upload', 'exam-desk', 'class-list', 'broadsheet', 'reports', 'transcript', 'certificates', 'exam-analysis', 'score-sheet']
+  admin: ['bulk-upload', 'staff-bulk-upload', 'exam-desk', 'deleted-exams', 'grading', 'class-list', 'broadsheet', 'reports', 'transcript', 'certificates', 'exam-analysis', 'score-sheet', 'my-profile'],
+  teacher: ['bulk-upload', 'exam-desk', 'class-list', 'broadsheet', 'reports', 'transcript', 'certificates', 'exam-analysis', 'score-sheet'],
+  // Edit Profile (top user-menu, every role): admin/teacher already reach
+  // it via the sidebar entry or the line above — student/parent get it via
+  // the user-menu link only, so it isn't in their (very short) sidebars.
+  student: ['my-profile'],
+  parent: ['my-profile']
 };
 
 // SignUp_Fixes §5: maps a nav route back to its 'deny_<module>' capability
@@ -1617,6 +1622,7 @@ window.addEventListener('online', () => toast('Back online.', 'ok'));
   $('#menu-toggle-btn').onclick = () => App.toggleSidebar();
   $('#avatar').onclick = () => App.toggleUserMenu();
   $('#um-change-password').onclick = () => App.openChangePassword();
+  $('#um-edit-profile').onclick = () => { $('#usermenu').classList.add('hidden'); go('my-profile'); };
   $('#um-logout').onclick = () => App.logout();
   const yearEl = $('#year');
   if (yearEl) yearEl.textContent = new Date().getFullYear();

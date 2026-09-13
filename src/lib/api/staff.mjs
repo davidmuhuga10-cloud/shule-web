@@ -45,6 +45,7 @@ export function createStaffApi(supabase) {
     async updateOwnProfile(payload) {
       payload = payload || {};
       const { data, error } = await supabase.rpc('staff_update_own_profile', {
+        p_full_name: payload.full_name || null,
         p_phone: payload.phone || null,
         p_gender: payload.gender || null,
         p_date_of_birth: payload.date_of_birth || null,
