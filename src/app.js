@@ -201,7 +201,16 @@ function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm) {
   if (!tableEl) return () => {};
   const [shortMm, longMm] = PAPER_DIMENSIONS_MM[paperSize] || PAPER_DIMENSIONS_MM.A4;
   const pageWidthMm = orientation === 'landscape' ? longMm : shortMm;
-  const printableWidthPx = (pageWidthMm - 2 * (marginMm || 10)) * PX_PER_MM;
+  // Live feedback: "it came with the last column truncated a little bit —
+  // fix so it always fits, leaves no or just small space." Scaling to
+  // EXACTLY printableWidthPx cut it too close in practice — the table is
+  // measured on-screen (normal font-size) a moment before the browser
+  // switches to print media (smaller @media print font-size/padding) and
+  // actually paginates, and sub-pixel rounding in the scale/border math can
+  // land a hair over the true printable edge either way. A small safety
+  // margin (1.5%) costs a sliver of unused white space but guarantees the
+  // right-most column always survives onto the page.
+  const printableWidthPx = (pageWidthMm - 2 * (marginMm || 10)) * PX_PER_MM * 0.985;
   const naturalWidth = tableEl.scrollWidth;
   const scale = naturalWidth > printableWidthPx ? printableWidthPx / naturalWidth : 1;
   if (scale >= 1) return () => {};

@@ -261,7 +261,12 @@ async function load(root, classes, sel) {
            leaving them to float separately, so this now matches that same
            established pattern rather than inventing a new one. -->
       <div class="fin-report-actions">
-        <button class="btn secondary xlsx-download-btn" id="bs-download">⬇️ Download</button>
+        <!-- Live feedback: "I should see Download as Excel, not just
+             Download" — .xlsx-download-btn is already hidden entirely on
+             mobile (main.css, max-width:960px), so its own label text only
+             ever shows on desktop; spelling it out doesn't touch mobile at
+             all. -->
+        <button class="btn secondary xlsx-download-btn" id="bs-download">⬇️ Download as Excel</button>
         ${printOptionsHtml('bs', 'landscape', { lockOrientation: true })}
       </div>
     </div>
