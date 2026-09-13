@@ -90,6 +90,35 @@ export function createFinanceApi(supabase) {
       clearCache();
       return ok(data);
     },
+    /** Live feedback: "adding students to routes is difficult, one by one —
+     *  select a class, tick which students, click Add" and "sometimes a
+     *  school adds a transport charge mid-term for a class/some students/
+     *  the whole school." Reuses the exact same finance_assign_route RPC
+     *  every single-student add already goes through (same negotiated-rate
+     *  handling, same auto-invoice-on-assign) — just fired once per
+     *  selected student, in small concurrent batches rather than one huge
+     *  Promise.all (a whole-school batch can be hundreds of students).
+     *  Returns { succeeded: [], failed: [{student_id, message}] } so the
+     *  caller can report exactly who didn't go through and why. */
+    async assignBulk(studentIds, routeId, direction, academicYearId, termId) {
+      const ids = Array.from(new Set(studentIds || []));
+      const succeeded = [];
+      const failed = [];
+      const CHUNK = 15;
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const chunk = ids.slice(i, i + CHUNK);
+        const results = await Promise.all(chunk.map(async (studentId) => {
+          const { error } = await supabase.rpc('finance_assign_route', {
+            p_student_id: studentId, p_route_id: routeId, p_direction: direction,
+            p_academic_year_id: academicYearId, p_term_id: termId, p_amount_override: null
+          });
+          return { studentId, error };
+        }));
+        results.forEach((r) => { if (r.error) failed.push({ student_id: r.studentId, message: r.error.message }); else succeeded.push(r.studentId); });
+      }
+      clearCache();
+      return ok({ succeeded, failed });
+    },
     async forStudent(studentId, academicYearId, termId) {
       const { data, error } = await supabase.from('finance_student_routes').select('*')
         .eq('student_id', studentId).eq('academic_year_id', academicYearId).eq('term_id', termId).maybeSingle();
@@ -338,6 +367,26 @@ export function createFinanceApi(supabase) {
         .select('id, admission_no, full_name, gender, class_id, stream_id, guardian_name, guardian_contact, classes(name), streams(name)')
         .or(`full_name.ilike.%${q}%,admission_no.ilike.%${q}%`)
         .eq('status', 'active').order('full_name').limit(30);
+      if (error) return err(error.message);
+      return ok(data || []);
+    },
+    /** Transport bulk-assign ("add students by class" — live feedback:
+     *  adding students to a route one-by-one was too slow): every active
+     *  student in one class, for the class-then-tick-boxes picker. */
+    async byClass(classId) {
+      if (!classId) return ok([]);
+      const { data, error } = await supabase.from('students')
+        .select('id, admission_no, full_name, gender, class_id, classes(name)')
+        .eq('class_id', classId).eq('status', 'active').order('full_name');
+      if (error) return err(error.message);
+      return ok(data || []);
+    },
+    /** "Whole school" option in the same bulk picker — every active student,
+     *  not just one class. */
+    async allActive() {
+      const { data, error } = await supabase.from('students')
+        .select('id, admission_no, full_name, gender, class_id, classes(name)')
+        .eq('status', 'active').order('full_name');
       if (error) return err(error.message);
       return ok(data || []);
     },
