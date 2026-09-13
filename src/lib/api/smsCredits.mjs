@@ -1,7 +1,7 @@
 /**
  * smsCredits.mjs — the SCHOOL side of "buy SMS credits" (Admin_Dashboard_
  * Architecture3.docx). A school pays the Super Admin directly (instructed to
- * send payment to 0705041512), then submits the payment confirmation
+ * send payment to 0180025789), then submits the payment confirmation
  * message text here; the Super Admin reviews/approves it from the /admin
  * mini-app (see admin/js/adminApi.js — a completely separate client, but the
  * same sms_credit_requests table, RLS-scoped by school on this side, opened

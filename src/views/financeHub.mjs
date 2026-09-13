@@ -200,9 +200,21 @@ export async function viewFinanceHub(root) {
       <nav class="fin-side-nav no-print" id="fin-side-nav">
         <div class="fin-brand">${logoHtml}<div><div class="fin-brand-name">${esc(settings.school_name || 'ShuleTop')}</div><small>Finance</small></div></div>
         <div class="fin-nav-scroll">
-          ${visibleTabs.map((t) => `<a data-tab="${t.key}" class="${t.key === active ? 'active' : ''}"><span class="ico">${t.ico}</span>${t.label}</a>`).join('')}
+          <!-- Live feedback: "take the notes and reversals module below
+               message, it should be the last module" — 'trail' (Notes &
+               Reversals) is pulled out of its normal spot in TABS and
+               re-rendered after Messages/Back to Academic instead, so it's
+               the very last link in the sidebar. Still the exact same
+               data-tab="trail" link (position-independent — every click
+               handler below wires up via querySelectorAll('[data-tab]'),
+               not sidebar order), just moved. -->
+          ${visibleTabs.filter((t) => t.key !== 'trail').map((t) => `<a data-tab="${t.key}" class="${t.key === active ? 'active' : ''}"><span class="ico">${t.ico}</span>${t.label}</a>`).join('')}
           <a class="fin-nav-msg" data-msg="1">💬 Messages</a>
           ${!state.profile.financeOnly ? `<a class="fin-nav-msg fin-nav-exit" data-back-academic="1">🎓 Back to Academic <span class="nav-ext-hint">↗</span></a>` : ''}
+          ${(() => {
+            const trailTab = visibleTabs.find((t) => t.key === 'trail');
+            return trailTab ? `<a data-tab="trail" class="${trailTab.key === active ? 'active' : ''}"><span class="ico">${trailTab.ico}</span>${trailTab.label}</a>` : '';
+          })()}
         </div>
         <div class="fin-side-foot">ShuleTop &copy; 2026</div>
       </nav>

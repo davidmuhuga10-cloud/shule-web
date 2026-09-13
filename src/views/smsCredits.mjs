@@ -7,7 +7,7 @@
  *
  * Messaging_Overhaul.docx item 9: "Keep this screen simple: just the
  * remaining balance and a clear way to buy more." The purchase-request
- * form (pay 0705041512, paste the confirmation message) used to sit open
+ * form (pay 0180025789, paste the confirmation message) used to sit open
  * on the page at all times, with its own request history below it — moved
  * the form into a modal behind one "Buy SMS Credits" button so the screen
  * itself is just the balance and that button; past requests stay one tap
@@ -29,7 +29,7 @@
 import { esc, toast, loader, withBusy, modal, closeModal, fmtDate } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 
-const ADMIN_PAY_PHONE = '0705041512';
+const ADMIN_PAY_PHONE = '0180025789';
 
 export async function renderSmsCredits(body) {
   body.innerHTML = `
