@@ -15,18 +15,21 @@
  *     as it does today. Actual data (results, messages, balances) is
  *     NEVER cached, by construction, not by care.
  *
- *  2. Cached files use "stale-while-revalidate": serve instantly from
- *     cache when we have it (this is what makes it fast/offline-capable),
- *     but ALWAYS also fetch fresh from the network in the background and
- *     overwrite the cache with whatever comes back. This is the actual
- *     anti-staleness mechanism — it needs no manual bookkeeping: the very
- *     next time a file is requested after we ship a change to it, that
- *     request already gets the fixed version, because the background
- *     fetch from the PREVIOUS request already updated the cache. A person
- *     might see one stale load right after a deploy; they cannot get
- *     permanently stuck the way a naive cache-forever setup would trap
- *     them (the exact class of bug this session spent hours chasing in
- *     exam-results sending — never again via this mechanism).
+ *  2. BUG FIX (live report, v52): cached files used to use
+ *     "stale-while-revalidate" — serve instantly from cache, then update
+ *     the cache in the background for NEXT time. During active, rapid
+ *     development that turned into a real problem, not just a one-load
+ *     flicker: with fixes shipping every few minutes, a person is
+ *     effectively ALWAYS one or more versions behind whatever was last
+ *     shipped, because "next time" never arrives before the next deploy
+ *     does. That's what made a real, already-pushed nav/offline-banner fix
+ *     look like it "wasn't fixed at all" on both the phone app and the
+ *     desktop browser. Switched to network-first: always try the real
+ *     network first and cache whatever comes back, only falling back to
+ *     the cached copy if the network request actually fails (i.e. this
+ *     device is genuinely offline). This keeps the exact same offline
+ *     capability while guaranteeing that anyone online always gets what
+ *     was actually deployed, immediately, no second load required.
  *
  *  3. SW_VERSION below exists only as a periodic hygiene tool — bump it
  *     when files get renamed/removed (not just edited) and you want old,
@@ -42,7 +45,7 @@
  *     the person retry once they're back online, with fresh information.
  */
 
-const SW_VERSION = 'v1';
+const SW_VERSION = 'v2';
 const SHELL_CACHE = `shule-shell-${SW_VERSION}`;
 
 // Small, load-bearing set fetched once up front so the very first visit
@@ -84,6 +87,12 @@ function isCacheable(request, url) {
   if (request.method !== 'GET') return false; // never touch a write
   if (url.origin !== self.location.origin) return false; // never touch Supabase (a different origin) or anything else external
   if (url.pathname.startsWith('/.netlify/functions/')) return false; // never touch an API call
+  // index.html's offline banner probes this with a fresh cache-busting
+  // query string on every single check — caching it would be pure
+  // storage waste (each timestamped URL is a distinct cache key, never
+  // reused) and it must always reflect a real, un-cached network attempt
+  // for the connectivity check to mean anything.
+  if (url.pathname === '/robots.txt') return false;
   return true;
 }
 
@@ -94,26 +103,24 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith(
     caches.open(SHELL_CACHE).then(async (cache) => {
-      const cached = await cache.match(request);
-      const networkFetch = fetch(request).then((response) => {
-        if (response && response.ok) cache.put(request, response.clone());
-        return response;
-      }).catch(() => null);
-
-      if (cached) {
-        // Kick the revalidation off but don't make the visible response
-        // wait on it — that's the entire "instant even on a bad
-        // connection" benefit. Any failure here is silent on purpose:
-        // the cached copy already answered the request just fine.
-        event.waitUntil(networkFetch);
-        return cached;
+      // Network-first (see BUG FIX note above): try the real network
+      // request before ever touching the cache, so anyone online always
+      // gets exactly what was actually deployed. Cache is only a fallback
+      // for when this fetch genuinely fails (offline, or briefly
+      // unreachable) — updated on every successful network response so
+      // it stays as fresh as possible for that fallback case.
+      try {
+        const fresh = await fetch(request);
+        if (fresh && fresh.ok) cache.put(request, fresh.clone());
+        return fresh;
+      } catch (e) {
+        const cached = await cache.match(request);
+        if (cached) return cached;
+        return new Response(
+          'This page needs a connection the first time you open it — please reconnect and try again.',
+          { status: 503, headers: { 'Content-Type': 'text/plain' } }
+        );
       }
-      const fresh = await networkFetch;
-      if (fresh) return fresh;
-      return new Response(
-        'This page needs a connection the first time you open it — please reconnect and try again.',
-        { status: 503, headers: { 'Content-Type': 'text/plain' } }
-      );
     })
   );
 });
