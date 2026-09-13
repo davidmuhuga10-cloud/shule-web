@@ -276,6 +276,25 @@ export function createFinanceApi(supabase) {
       if (error) return err(error.message);
       return ok(data || []);
     },
+    /** School-wide debit-note trail (live feedback: "no trail of debit and
+     *  credit notes... incase we want to reverse or edit"). Every note this
+     *  school has ever issued, newest first, with the student/class/vote
+     *  head already joined in so the trail screen needs no per-row lookups
+     *  — filterable by year/term (opts.academic_year_id/term_id) and by
+     *  status (opts.status: 'active' | 'reversed'; omitted = both). */
+    async list(opts) {
+      opts = opts || {};
+      let q = supabase.from('finance_debit_notes')
+        .select('*, students(full_name, admission_no, class_id, classes(name)), finance_vote_heads(name), created_by_profile:profiles!finance_debit_notes_created_by_fkey(name)')
+        .order('created_at', { ascending: false }).limit(opts.limit || 500);
+      if (opts.academic_year_id) q = q.eq('academic_year_id', opts.academic_year_id);
+      if (opts.term_id) q = q.eq('term_id', opts.term_id);
+      if (opts.status === 'active') q = q.is('reversed_at', null);
+      if (opts.status === 'reversed') q = q.not('reversed_at', 'is', null);
+      const { data, error } = await q;
+      if (error) return err(error.message);
+      return ok(data || []);
+    },
     /** Next Sprint 2 §12: reverse a wrongly-entered debit note — inserts a
      *  matching opposite (credit) note and flags this one as reversed,
      *  never deletes anything. See finance_reverse_debit_note() in
@@ -303,6 +322,21 @@ export function createFinanceApi(supabase) {
       if (error) return err(error.message);
       return ok(data || []);
     },
+    /** School-wide credit-note trail — same shape/filters as
+     *  debitNotes.list() above. */
+    async list(opts) {
+      opts = opts || {};
+      let q = supabase.from('finance_credit_notes')
+        .select('*, students(full_name, admission_no, class_id, classes(name)), finance_vote_heads(name), created_by_profile:profiles!finance_credit_notes_created_by_fkey(name)')
+        .order('created_at', { ascending: false }).limit(opts.limit || 500);
+      if (opts.academic_year_id) q = q.eq('academic_year_id', opts.academic_year_id);
+      if (opts.term_id) q = q.eq('term_id', opts.term_id);
+      if (opts.status === 'active') q = q.is('reversed_at', null);
+      if (opts.status === 'reversed') q = q.not('reversed_at', 'is', null);
+      const { data, error } = await q;
+      if (error) return err(error.message);
+      return ok(data || []);
+    },
     /** Same idea as debitNotes.reverse() above, just the opposite direction
      *  — inserts a matching debit note and flags this credit note reversed. */
     async reverse(noteId, reason) {
@@ -321,6 +355,12 @@ export function createFinanceApi(supabase) {
         .order('created_at', { ascending: false }).limit(opts.limit || 300);
       if (opts.student_id) q = q.eq('student_id', opts.student_id);
       if (opts.status) q = q.eq('status', opts.status);
+      // Notes & Reversals trail (live feedback: "we dont have a place for
+      // reversed receipts") needs to narrow a school-wide reversed list by
+      // year/term the same way the notes trail does — collections already
+      // carry both columns, just never had a filter for them until now.
+      if (opts.academic_year_id) q = q.eq('academic_year_id', opts.academic_year_id);
+      if (opts.term_id) q = q.eq('term_id', opts.term_id);
       const { data, error } = await q;
       if (error) return err(error.message);
       return ok(data || []);

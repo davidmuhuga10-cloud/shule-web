@@ -29,6 +29,13 @@ import { viewFinanceExpenses } from './financeExpenses.mjs';
 import { viewFinancePayroll } from './financePayroll.mjs';
 import { viewFinanceInventory } from './financeInventory.mjs';
 import { viewFinanceTransport } from './financeTransport.mjs';
+// Live feedback: "we dont have a train [trail] of debit notes and credit
+// notes... incase we want to reverse or edit... also we dont have a place
+// for reversed reciepts" — a school-wide view of both (financeTrail.mjs),
+// separate from Invoicing (where notes are issued) and Collections (where
+// a receipt is reversed) since neither of those screens lists them all in
+// one place across every student.
+import { viewFinanceTrail } from './financeTrail.mjs';
 // Finance Expansion brief item 1.1 ("Student Module Under Finance"): reuse
 // the EXACT existing Students screen — same search, add/edit/move, class
 // drill-down, bulk upload entry point — as one more tab here, rather than
@@ -79,6 +86,7 @@ const TABS = [
   { key: 'students', label: 'Students', ico: '🎒' },
   { key: 'collections', label: 'Collections', ico: '💰' },
   { key: 'invoicing', label: 'Invoicing', ico: '📄' },
+  { key: 'trail', label: 'Notes & Reversals', ico: '↩️' },
   { key: 'accounting', label: 'Accounting', ico: '📊' },
   { key: 'expenses', label: 'Expenses', ico: '💸' },
   { key: 'payroll', label: 'Staff Payroll', ico: '💵' },
@@ -259,6 +267,7 @@ export async function viewFinanceHub(root) {
     if (key === 'dashboard') viewFinanceDashboard(body, access);
     else if (key === 'students') viewStudents(body);
     else if (key === 'invoicing') viewFinanceInvoicing(body, access);
+    else if (key === 'trail') viewFinanceTrail(body, access);
     else if (key === 'accounting') viewFinanceAccounting(body, access);
     else if (key === 'expenses') viewFinanceExpenses(body, access);
     else if (key === 'payroll') viewFinancePayroll(body, access);

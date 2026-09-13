@@ -65,6 +65,7 @@ export const DENIABLE_MODULES = [
 export const FINANCE_DENIABLE_TABS = [
   { key: 'deny_finance_students', route: 'students', label: 'Students' },
   { key: 'deny_finance_invoicing', route: 'invoicing', label: 'Invoicing' },
+  { key: 'deny_finance_trail', route: 'trail', label: 'Notes & Reversals' },
   { key: 'deny_finance_accounting', route: 'accounting', label: 'Accounting' },
   { key: 'deny_finance_expenses', route: 'expenses', label: 'Expenses' },
   { key: 'deny_finance_payroll', route: 'payroll', label: 'Staff Payroll' },

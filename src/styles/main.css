@@ -1590,6 +1590,15 @@ table.data td.num,table.data th.num{text-align:center}
   #fb-table .frb-desktop-view{display:none!important}
   #fb-table .fb-print-full{display:block!important}
 }
+/* Notes & Reversals (financeTrail.mjs) pagination — same pattern as
+   Balances above: screen shows PAGE_SIZE rows, print always gets the full
+   filtered list. Scoped to #ftl-table so it doesn't touch any other
+   report's own print/export pair. */
+.ftl-print-full{display:none}
+@media print{
+  #ftl-table .ftl-desktop-view{display:none!important}
+  #ftl-table .ftl-print-full{display:block!important}
+}
 /* Cashbook pagination — same pattern as Balances above: screen shows
    PAGE_SIZE rows, print/export always gets the full filtered range. Scoped
    to #fcb-table so it doesn't affect other reports sharing .rcb-desktop-view. */
