@@ -2194,5 +2194,11 @@ table.data td.num,table.data th.num{text-align:center}
 .ea-mi-delta{font-weight:800;color:var(--ok);margin-top:6px;font-size:13px}
 .ea-mi-scores{font-size:11px;color:#000;margin-top:2px}
 .ea-mi-note{font-size:11px;color:#000;margin-top:8px;font-style:italic}
+/* Combined print toolbar tick boxes (approved sketch): "Class Analysis
+   Report" / "Top Students Report", sat to the far left of the same toolbar
+   row the Download/Print controls already live in. */
+.ea-report-checks{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.ea-report-checks label{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:650;color:var(--ink);margin:0;cursor:pointer}
+.ea-report-checks input[type=checkbox]{width:16px;height:16px}
 @media print{.ea-podium,.ea-mi-grid{grid-template-columns:1fr 1fr 1fr}.ea-mi-grid{grid-template-columns:1fr 1fr}}
 

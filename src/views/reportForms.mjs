@@ -117,16 +117,20 @@ export async function viewReports(root) {
  *  own admin-only write policy on `settings` (schema.sql) is what actually
  *  restricts who can change these, exactly as it already does for School
  *  Settings — no separate permission check is added here. */
+// Live feedback: "Save dates button... isolated below wasting space —
+// reduce the school closed on/opens on bars' width and let Save dates rest
+// in the same line as those two, to their very right." Approved sketch: one
+// row, the two date fields narrowed to a fixed width instead of each
+// stretching across half the card, and the Save button pushed to the far
+// right of that same row instead of sitting in its own footer strip below.
 function termDatesCardHtml(settings) {
   return `
     <div class="card no-print" style="margin-bottom:16px">
-      <div class="card-b">
-        <div class="grid2">
-          <div class="field"><label>School closed on</label><input id="rf-closed-on" type="date" value="${esc(String(settings.school_closed_on || '').slice(0, 10))}"></div>
-          <div class="field"><label>Next term begins on</label><input id="rf-next-term" type="date" value="${esc(String(settings.next_term_begins_on || '').slice(0, 10))}"></div>
-        </div>
+      <div class="card-b" style="display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap">
+        <div class="field" style="flex:0 1 220px;margin:0"><label>School closed on</label><input id="rf-closed-on" type="date" value="${esc(String(settings.school_closed_on || '').slice(0, 10))}"></div>
+        <div class="field" style="flex:0 1 220px;margin:0"><label>Next term begins on</label><input id="rf-next-term" type="date" value="${esc(String(settings.next_term_begins_on || '').slice(0, 10))}"></div>
+        <button class="btn secondary sm" id="rf-dates-save" style="margin-left:auto">Save dates</button>
       </div>
-      <div class="modal-f" style="border-top:1px solid var(--line)"><button class="btn secondary sm" id="rf-dates-save">Save dates</button></div>
     </div>
   `;
 }

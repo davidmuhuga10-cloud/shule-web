@@ -16,7 +16,7 @@
  * printing). Each report has its own Print/Download control; printing one
  * temporarily hides the other so only that report ends up on paper/PDF.
  */
-import { esc, options, renderPrereq, renderPrereqOrConnectivity, loader, go, printOptionsHtml, wirePrintOptions } from '../app.js';
+import { esc, options, renderPrereq, renderPrereqOrConnectivity, loader, go, printOptionsHtml, wirePrintOptions, toast } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { downloadXlsxAOA } from '../lib/xlsxUtil.mjs';
 import { buildExamAnalysis } from '../lib/examAnalysis.mjs';
@@ -206,26 +206,31 @@ function mostImprovedHtml(title, rows, devExamName) {
   </div>`;
 }
 
-/** Hides `hideEl` for the duration of one print/download, restoring it
- *  afterward — this is what actually makes "two separate reports on one
- *  screen" print as two separate documents instead of one long page: only
- *  the report you clicked Print/Download on is left in the DOM when
- *  window.print() (inside wirePrintOptions → printWithOptions) fires. Same
- *  'afterprint' + timeout safety-net pattern printWithOptions() itself uses,
- *  since 'afterprint' doesn't fire reliably in every browser's print/Save-as-
- *  PDF flow. */
-function wireExclusivePrint(root, idPrefix, hideEl) {
+/** Approved sketch, now live: ONE shared print/download toolbar with a tick
+ *  box per report ("Class Analysis Report" / "Top Students Report") instead
+ *  of two separate toolbars (which meant scrolling down to reach the second
+ *  one). Both ticked (the default) prints/downloads them together as one
+ *  combined document — Class Analysis pages, then Top Students pages, since
+ *  they're just sibling elements on the same printable page flow; ticking
+ *  only one hides the other's DOM for the duration of that one print/
+ *  download, same 'afterprint'/'focus'/timeout safety-net restore pattern
+ *  every other print helper in this app already uses. */
+function wireCombinedPrint(root, idPrefix, sections) {
   const btn = root.querySelector(`#${idPrefix}-print-btn`);
   if (!btn) return;
   const inner = btn.onclick;
   btn.onclick = (e) => {
-    if (!hideEl) { inner(e); return; }
-    hideEl.style.display = 'none';
+    const toHide = sections.filter((s) => s.checkbox && !s.checkbox.checked && s.el);
+    if (toHide.length === sections.length) {
+      toast('Tick at least one report to print or download.', 'err');
+      return;
+    }
+    toHide.forEach((s) => { s.el.style.display = 'none'; });
     let restored = false;
     const restore = () => {
       if (restored) return;
       restored = true;
-      hideEl.style.display = '';
+      toHide.forEach((s) => { s.el.style.display = ''; });
       window.removeEventListener('afterprint', restore);
       window.removeEventListener('focus', restore);
     };
@@ -270,7 +275,6 @@ async function load(root, classes, sel) {
   const analysis = buildExamAnalysis(bsRes, bands || []);
   const examClassName = `${cls ? cls.name : 'Class'} — ${bsRes.exam.name}`;
   const classSuggestedName = `${examClassName} — Class Analysis Report`.replace(/[\\/:*?"<>|]+/g, '');
-  const topSuggestedName = `${examClassName} — Top Students Report`.replace(/[\\/:*?"<>|]+/g, '');
 
   const overallSummaryRows = [analysis.class_grade_summary.overall];
   if (analysis.boys_count) overallSummaryRows.push(analysis.class_grade_summary.boys);
@@ -344,18 +348,25 @@ async function load(root, classes, sel) {
       </div>
     </div>`;
 
+  // Live feedback: "I must scroll down the analysis report to get top
+  // students report — introduce two buttons [tick boxes] in the same line
+  // where we have print... when both are ticked the report will come as one
+  // combined, if one is ticked that is what will print." Approved via sketch
+  // — one shared toolbar, tick boxes on the left, Download/Print controls on
+  // the right, instead of two separate per-report toolbars.
+  const combinedSuggestedName = `${examClassName} — Analysis Reports`.replace(/[\\/:*?"<>|]+/g, '');
   sheetEl.innerHTML = `
-    <div class="report-toolbar no-print">
-      <span class="muted" style="font-size:12px;font-weight:700">CLASS ANALYSIS REPORT</span>
-      <button class="btn secondary xlsx-download-btn" id="ea-download">⬇️ Download Excel</button>
-      ${printOptionsHtml('eac', 'portrait')}
+    <div class="report-toolbar no-print" style="justify-content:space-between">
+      <div class="ea-report-checks">
+        <label><input type="checkbox" id="ea-check-class" checked> Class Analysis Report</label>
+        <label><input type="checkbox" id="ea-check-top" checked> Top Students Report</label>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <button class="btn secondary xlsx-download-btn" id="ea-download">⬇️ Download Excel</button>
+        ${printOptionsHtml('ea', 'portrait')}
+      </div>
     </div>
     ${classAnalysisHtml}
-
-    <div class="report-toolbar no-print" style="margin-top:20px">
-      <span class="muted" style="font-size:12px;font-weight:700">TOP STUDENTS REPORT</span>
-      ${printOptionsHtml('eat', 'portrait')}
-    </div>
     ${topStudentsHtml}
   `;
 
@@ -366,10 +377,11 @@ async function load(root, classes, sel) {
   // small" — same tight-margin treatment broadsheet.mjs already uses for its
   // own wide grid (marginMm=5), just for both of these reports' left/right
   // margins rather than a wide table specifically.
-  wirePrintOptions(sheetEl, 'eac', classSuggestedName, 6);
-  wireExclusivePrint(sheetEl, 'eac', topReportEl);
-  wirePrintOptions(sheetEl, 'eat', topSuggestedName, 6);
-  wireExclusivePrint(sheetEl, 'eat', classReportEl);
+  wirePrintOptions(sheetEl, 'ea', combinedSuggestedName, 6);
+  wireCombinedPrint(sheetEl, 'ea', [
+    { checkbox: sheetEl.querySelector('#ea-check-class'), el: classReportEl },
+    { checkbox: sheetEl.querySelector('#ea-check-top'), el: topReportEl }
+  ]);
 
   sheetEl.querySelector('#ea-download').onclick = () => {
     const aoa = buildExamAnalysisAoa({ settings, exam: bsRes.exam, cls, analysis });
