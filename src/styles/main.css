@@ -400,6 +400,13 @@ html,body{max-width:100%;overflow-x:hidden}
 .card .card-h{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .card .card-h h3{font-size:15.5px}
 .card .card-b{padding:20px}
+/* Live feedback: "a lot of white space between the title of the graphs and
+   the graph itself... that gap should just be a small thing" — Students per
+   Class / Gender by Class sit right under a divider with nothing else in
+   the card, so the standard 20px card-b top padding plus the chart's own
+   axis margin read as one big empty band. Scoped to just these two chart
+   cards (.chart-card-b) so no other card-b is affected. */
+.card .card-b.chart-card-b{padding-top:6px}
 .card.pad{padding:20px}
 
 /* ---------- Stat tiles ---------- */

@@ -183,7 +183,7 @@ function genderTile(gender) {
 // fixed absolute cutoff, so this holds up for schools of any size.
 function studentsPerClassChart(perClass) {
   if (!perClass.length) return '<div class="chart-empty muted">No classes yet.</div>';
-  const W = 640, H = 220, padL = 34, padR = 12, padT = 20, padB = 34;
+  const W = 640, H = 220, padL = 34, padR = 12, padT = 10, padB = 34;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const maxVal = Math.max(1, ...perClass.map((c) => c.count || 0));
   const { niceStep, axisMax, numTicks } = niceAxis(maxVal);
@@ -227,20 +227,28 @@ function studentsPerClassChart(perClass) {
 // charts below so they stay visually consistent.
 function niceAxis(maxVal) {
   maxVal = Math.max(1, maxVal);
-  const rawStep = maxVal / 4;
-  const mag = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
-  const niceStep = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= rawStep) || mag * 10;
-  // Live feedback (round 2 — "the gap should just be a small thing, 1cm"):
-  // rounding UP to the next full niceStep (the old `ceil` here) could still
-  // leave up to one whole step of dead space above the tallest bar — e.g.
-  // maxVal=62 rounded its axis all the way to 80. Gridlines still land on
-  // clean round numbers (0/20/40/60 below), but the PLOT's own top (where
-  // bars actually reach) now tracks the real data with a fixed, small 8%
-  // headroom instead of a whole extra step — a consistently small gap no
-  // matter the data's scale, rather than one that grows with niceStep.
-  const numTicks = Math.max(1, Math.floor(maxVal / niceStep));
-  const axisMax = maxVal * 1.08;
-  return { niceStep, axisMax, numTicks };
+  // Live feedback (round 3 — "you are fixing the wrong problem"): round 2's
+  // fix (axisMax = maxVal*1.08, decoupled from the gridlines) shrank the
+  // dead space above the tallest BAR, but it left the topmost gridline
+  // sitting below axisMax by design — and axisMax is the plot's own
+  // ceiling (where padT starts). That gap between the top gridline
+  // (e.g. "200") and the chart's top edge is the actual complaint. Fix:
+  // search a few tick counts and keep axisMax = niceStep*numTicks exactly
+  // — the top gridline IS the ceiling again, zero gap — while still
+  // avoiding round 1's bug (a lone coarse step overshooting maxVal by up
+  // to 100%) by trying finer tick counts until the overshoot is small.
+  const candidates = [1, 2, 2.5, 5, 10];
+  let best = null;
+  for (let ticks = 4; ticks <= 8; ticks++) {
+    const rawStep = maxVal / ticks;
+    const mag = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
+    const niceStep = candidates.map((m) => m * mag).find((s) => s >= rawStep) || mag * 10;
+    const numTicks = Math.max(1, Math.ceil(maxVal / niceStep));
+    const axisMax = niceStep * numTicks;
+    best = { niceStep, axisMax, numTicks };
+    if (axisMax / maxVal <= 1.15) break; // close enough — stop searching
+  }
+  return best;
 }
 function truncateClassLabel(name) {
   const s = String(name || '');
@@ -252,7 +260,7 @@ function truncateClassLabel(name) {
 // existing gender gauge's colours.
 function genderByClassChart(perClass) {
   if (!perClass.length) return '<div class="chart-empty muted">No classes yet.</div>';
-  const W = 640, H = 220, padL = 34, padR = 12, padT = 20, padB = 34;
+  const W = 640, H = 220, padL = 34, padR = 12, padT = 10, padB = 34;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const maxVal = Math.max(1, ...perClass.map((c) => Math.max(c.M || 0, c.F || 0)));
   const { niceStep, axisMax, numTicks } = niceAxis(maxVal);
@@ -394,11 +402,11 @@ export async function viewDashboard(root) {
     <div class="dash-chart-row">
       <div class="card side-accent tile-blue">
         <div class="card-h" style="justify-content:center"><h3>Students per Class</h3></div>
-        <div class="card-b">${studentsPerClassChart(perClass)}</div>
+        <div class="card-b chart-card-b">${studentsPerClassChart(perClass)}</div>
       </div>
       <div class="card side-accent tile-indigo">
         <div class="card-h" style="justify-content:center"><h3>Gender by Class</h3></div>
-        <div class="card-b">${genderByClassChart(perClass)}</div>
+        <div class="card-b chart-card-b">${genderByClassChart(perClass)}</div>
       </div>
     </div>
     <div class="card side-accent tile-teal" id="dash-examgraph" style="margin-top:20px"></div>
