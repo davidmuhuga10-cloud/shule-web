@@ -265,23 +265,10 @@ input[placeholder^="🔍"]{border-color:#2563eb}
 .hint{font-size:12px;color:var(--muted);margin-top:5px}
 
 /* ---------- Layout ---------- */
-/* BUG FIX (live report): the offline banner (index.html, #offline-banner) is
-   position:fixed at top:0 with a z-index above everything (99999) so it's
-   never hidden behind other UI — but nothing here made room for it, so
-   whenever it showed it sat directly on top of the sticky .topbar and its
-   mobile hamburger button (.menu-toggle), covering both and leaving the
-   sidebar impossible to open on a phone — "school now can't do anything
-   there". index.html's script measures the banner's real rendered height
-   (it can wrap to two lines on a narrow phone) and publishes it as
-   --offline-banner-h on <html> whenever the banner is visible (0px
-   otherwise, the default below), and every fixed/sticky piece of chrome
-   that starts at the very top of the viewport is offset by that variable
-   so the banner sits in its own space above them instead of over them. */
-:root{--offline-banner-h:0px}
 #app{min-height:100vh}
 .shell{display:flex;min-height:100vh}
-.sidebar{width:var(--sidebar);background:var(--brand);color:#cfe3e2;position:fixed;top:var(--offline-banner-h);bottom:0;left:0;
-  display:flex;flex-direction:column;z-index:40;transition:transform .25s,top .15s}
+.sidebar{width:var(--sidebar);background:var(--brand);color:#cfe3e2;position:fixed;top:0;bottom:0;left:0;
+  display:flex;flex-direction:column;z-index:40;transition:transform .25s}
 .brand{padding:20px 20px 16px;display:flex;align-items:center;gap:11px;border-bottom:1px solid rgba(255,255,255,.08)}
 .brand .logo{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#e8890b);
   display:grid;place-items:center;color:#fff;font-weight:800;font-size:18px;flex-shrink:0}
@@ -350,13 +337,7 @@ body.finance-only-shell .sidebar{display:none}
 body.finance-only-shell .topbar .menu-toggle{display:none!important}
 body.finance-only-shell .main{margin-left:0}
 .topbar{height:62px;background:var(--surface);border-bottom:1px solid var(--line);display:flex;align-items:center;
-  gap:14px;padding:0 24px;position:sticky;top:var(--offline-banner-h);z-index:30;transition:top .15s}
-/* #app is a normal-flow element, so this is what actually pushes the topbar
-   (and everything below it) down out from under the banner before the user
-   has scrolled at all — .topbar's own "top" above only controls where it
-   re-sticks once scrolling starts. */
-body.has-offline-banner #app{margin-top:var(--offline-banner-h)}
-body.has-offline-banner .scrim{top:var(--offline-banner-h)}
+  gap:14px;padding:0 24px;position:sticky;top:0;z-index:30}
 .topbar .menu-toggle{display:none}
 .topbar .ctx{font-size:12.5px;color:var(--muted)}
 .topbar .ctx b{color:var(--ink)}
@@ -1328,6 +1309,26 @@ table.data td.num,table.data th.num{text-align:center}
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:35;display:none}
 .scrim.show{display:block}
 @media(max-width:960px){.scrim.show{display:block}}
+
+/* BUG FIX — the actual root cause of the offline toast reading as
+   permanently "stuck" no matter what the connectivity check decided:
+   this element used to carry `display:flex` directly in an inline
+   style="..." attribute, sitting right next to its `hidden` attribute.
+   An inline style always wins over the browser's own built-in rule that
+   makes a hidden element disappear (`[hidden]{display:none}`), so
+   setting `banner.hidden = true` from JS was flipping the attribute
+   correctly the entire time — confirmed directly in devtools — while
+   the toast stayed visually rendered regardless, because the inline
+   `display:flex` never stopped applying. Styling now lives here instead
+   of inline, and only applies display:flex when the element is NOT
+   hidden — so the hidden attribute's default behavior is never
+   overridden. */
+#offline-banner{position:fixed;bottom:16px;left:16px;right:16px;max-width:340px;margin:0 auto;z-index:99999;
+  background:#0f3d3e;color:#fff;padding:12px 14px;border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,.28);
+  font:600 13.5px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;align-items:center;gap:10px}
+#offline-banner:not([hidden]){display:flex}
+#offline-banner span{flex:1}
+#offline-banner button{background:#e8890b;color:#fff;border:none;border-radius:6px;padding:5px 12px;font:inherit;cursor:pointer;flex-shrink:0}
 
 /* ---------- Finance module ---------- */
 /* Live feedback: this bar used to sit in a fixed 100px box no matter how

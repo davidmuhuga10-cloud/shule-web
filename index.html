@@ -74,10 +74,12 @@
        disappears the moment it's back. Positioned to never overlap the
        sidebar/topbar on any screen size. Controlled by
        src/lib/offlineBanner.js (external file — see that file's header
-       for why it isn't an inline <script> here). -->
-  <div id="offline-banner" hidden style="position:fixed;bottom:16px;left:16px;right:16px;max-width:340px;margin:0 auto;z-index:99999;background:#0f3d3e;color:#fff;padding:12px 14px;border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,.28);font:600 13.5px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;gap:10px">
-    <span style="flex:1">📡 You're offline — reconnect to keep using ShuleTop.</span>
-    <button id="offline-retry" style="background:#e8890b;color:#fff;border:none;border-radius:6px;padding:5px 12px;font:inherit;cursor:pointer;flex-shrink:0">Retry</button>
+       for why it isn't an inline <script> here). Styling lives in
+       main.css, NOT an inline style attribute — see #offline-banner
+       there for exactly why that distinction is the fix for a real bug. -->
+  <div id="offline-banner" hidden>
+    <span>📡 You're offline — reconnect to keep using ShuleTop.</span>
+    <button id="offline-retry">Retry</button>
   </div>
 
   <div id="auth-screen" class="hidden"></div>
