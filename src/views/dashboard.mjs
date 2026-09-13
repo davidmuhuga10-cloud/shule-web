@@ -1,4 +1,4 @@
-import { esc, go, options, state } from '../app.js';
+import { esc, go, options, state, renderPrereqOrConnectivity } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { setNavIntent } from '../lib/navIntent.mjs';
 import { buildExamAnalysis } from '../lib/examAnalysis.mjs';
@@ -165,7 +165,14 @@ export async function viewDashboard(root) {
   // Phase 2: fetch the real numbers and replace the skeleton with the full
   // render (same markup this view has always produced) once they arrive.
   const res = await Db.dashboard.get();
-  if (!res.ok) { root.innerHTML = `<div class="card pad">⚠️ ${esc(res.message)}</div>`; return; }
+  // BUG FIX (live report — Dashboard showed a plain generic error box while
+  // offline instead of the shared "You're offline" screen every other
+  // module now shows). Same connectivity-aware screen, with a working
+  // "Try again" retry button, instead of a dead-end error line.
+  if (!res.ok) {
+    renderPrereqOrConnectivity(root, { ok: false, onRetry: () => viewDashboard(root) });
+    return;
+  }
   const { counts, smsBalance, gender, perClass, checklist, setupComplete } = res;
 
   const desktopTiles = [

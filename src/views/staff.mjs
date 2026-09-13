@@ -1,4 +1,4 @@
-import { esc, modal, closeModal, toast, confirmAction, options, go } from '../app.js';
+import { esc, modal, closeModal, toast, confirmAction, options, go, renderPrereqOrConnectivity } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { DENIABLE_MODULES } from '../lib/api/capabilities.mjs';
 
@@ -18,7 +18,14 @@ export async function viewStaff(root) {
 
 async function render(root) {
   const [res, usersRes] = await Promise.all([Db.staff.list(), Db.users.list()]);
-  const staff = (res.ok ? res.data : []).filter((s) => !isTeacher(s));
+  // BUG FIX (same class of issue as Classes & Streams/Teachers): a failed
+  // fetch used to silently fall back to an empty list, rendering as "no
+  // staff yet" instead of the shared offline/connectivity screen.
+  if (!res.ok) {
+    renderPrereqOrConnectivity(root, { ok: false, onRetry: () => render(root) });
+    return;
+  }
+  const staff = res.data.filter((s) => !isTeacher(s));
   // Login account per staff member, for the reset-password/enable-disable
   // actions below — those moved here from the old, now-admin-only "User
   // Accounts" screen (see userAccounts.mjs), so managing a staff member's

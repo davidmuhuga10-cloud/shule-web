@@ -6,7 +6,7 @@
  * duplicating it — same data, same login-provisioning flow, just a
  * teacher-focused view on top of it.
  */
-import { esc, initials, go, toast, confirmAction } from '../app.js';
+import { esc, initials, go, toast, confirmAction, renderPrereqOrConnectivity } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { openStaffModal, openAddChoiceModal } from './staff.mjs';
 
@@ -20,7 +20,14 @@ export async function viewTeachers(root) {
 
 async function render(root, query) {
   const res = await Db.staff.list();
-  const all = res.ok ? res.data : [];
+  // BUG FIX (same class of issue as Classes & Streams): a failed fetch used
+  // to silently fall back to an empty list, rendering as "no teachers yet"
+  // instead of the shared offline/connectivity screen. Show the real state.
+  if (!res.ok) {
+    renderPrereqOrConnectivity(root, { ok: false, onRetry: () => render(root, query) });
+    return;
+  }
+  const all = res.data;
   const teachers = all.filter(isTeacher);
   const q = String(query || '').trim().toLowerCase();
   const filtered = q ? teachers.filter((t) => String(t.full_name || '').toLowerCase().indexOf(q) !== -1) : teachers;

@@ -17,7 +17,7 @@
  * gone — creating a brand-new subject now happens inline from the stream's
  * "+ Add subject" picker.
  */
-import { esc, modal, closeModal, toast, confirmAction, options, renderLoading, withBusy, state } from '../app.js';
+import { esc, modal, closeModal, toast, confirmAction, options, renderLoading, withBusy, state, renderPrereqOrConnectivity } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { STANDARD_CLASS_LEVELS, classLevelsForCategory, levelBucketForClassName, PATHWAYS } from '../lib/api/academics.mjs';
 import { plainNameError } from '../lib/validators.mjs';
@@ -56,8 +56,18 @@ async function renderList(root) {
     </div></div>
   `;
   const [res, staffRes] = await Promise.all([Db.classes.list(), Db.staff.list()]);
-  const classes = res.ok ? res.data : [];
-  const staff = staffRes.ok ? staffRes.data : [];
+  // BUG FIX (live report — Classes & Streams silently showed "No classes
+  // yet" while offline, instead of the shared offline/connectivity screen
+  // every other module shows): a failed fetch used to fall back straight
+  // to an empty array, which then rendered indistinguishably from a school
+  // that genuinely has zero classes. Show the real "you're offline /
+  // couldn't load" state instead, same as students/attendance/messaging.
+  if (!res.ok || !staffRes.ok) {
+    renderPrereqOrConnectivity(root, { ok: false, onRetry: () => renderList(root) });
+    return;
+  }
+  const classes = res.data;
+  const staff = staffRes.data;
   const staffMap = {}; staff.forEach((s) => { staffMap[s.id] = s.full_name; });
 
   const rows = classes.length
