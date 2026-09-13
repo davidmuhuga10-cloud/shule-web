@@ -278,9 +278,14 @@ async function openSchoolDetail(schoolId, body, searchTerm) {
       </div></div>
       <div class="a-field"><label>Admin login on file</label><div>${detail.admin_profile ? esc(detail.admin_profile.name) + ' — ' + esc(detail.admin_profile.email || 'no email on file') : 'None found'}</div></div>
       <div class="a-field" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
-        <button class="a-btn secondary sm" id="a-lock-toggle">${detail.locked_at ? 'Unlock school' : 'Lock school'}</button>
-        <button class="a-btn secondary sm" id="a-login-as" ${!detail.admin_profile || !detail.admin_profile.email ? 'disabled' : ''}>Login as School</button>
-        <button class="a-btn danger sm" id="a-delete-school" ${detail.deleted_at ? 'disabled' : ''}>Delete school</button>
+        ${detail.deleted_at ? `
+          <button class="a-btn secondary sm" id="a-restore-school">Restore school</button>
+          <button class="a-btn danger sm" id="a-hard-delete-school">Delete Permanently Now</button>
+        ` : `
+          <button class="a-btn secondary sm" id="a-lock-toggle">${detail.locked_at ? 'Unlock school' : 'Lock school'}</button>
+          <button class="a-btn secondary sm" id="a-login-as" ${!detail.admin_profile || !detail.admin_profile.email ? 'disabled' : ''}>Login as School</button>
+          <button class="a-btn danger sm" id="a-delete-school">Delete school</button>
+        `}
       </div>
     `
   });
@@ -303,8 +308,11 @@ async function openSchoolDetail(schoolId, body, searchTerm) {
     close(); renderSchools(body, searchTerm);
   });
 
+  // Lock/Login-as/soft-Delete only render when the school isn't already
+  // deleted (see the button row above) — a deleted school shows Restore /
+  // Delete Permanently Now instead, wired further down.
   const lockBtn = modalRoot.querySelector('#a-lock-toggle');
-  lockBtn.onclick = () => withBusy(lockBtn, async () => {
+  if (lockBtn) lockBtn.onclick = () => withBusy(lockBtn, async () => {
     const willLock = !detail.locked_at;
     let reason = null;
     if (willLock) {
@@ -316,7 +324,7 @@ async function openSchoolDetail(schoolId, body, searchTerm) {
   });
 
   const loginAsBtn = modalRoot.querySelector('#a-login-as');
-  loginAsBtn.onclick = () => withBusy(loginAsBtn, async () => {
+  if (loginAsBtn) loginAsBtn.onclick = () => withBusy(loginAsBtn, async () => {
     // Open the tab SYNCHRONOUSLY, before any await — browsers only allow
     // window.open() to bypass the popup blocker while it's still running
     // inside the original click's call stack. We navigate this captured
@@ -362,8 +370,45 @@ async function openSchoolDetail(schoolId, body, searchTerm) {
     }
   });
 
+  const restoreBtn = modalRoot.querySelector('#a-restore-school');
+  if (restoreBtn) restoreBtn.onclick = () => withBusy(restoreBtn, async () => {
+    try { await rpc('admin_restore_school', { p_school_id: schoolId }); } catch (e) { return; }
+    toast('School restored.', 'ok');
+    close(); renderSchools(body, searchTerm);
+  });
+
+  // Live feedback ("this will be very tedious as we scale up... imagine a
+  // school with 5000 students") — manually deleting a school used to leave
+  // every one of its Supabase Auth logins behind, since a plain `delete
+  // from schools` cascades through every app table but has no idea auth
+  // schema exists. admin_hard_delete_school_now (0066 migration) fixes
+  // that at the root: it deletes every one of this school's auth.users
+  // rows in the SAME transaction as the school itself, so this one button
+  // — for a school ALREADY sitting in the soft-deleted/recoverable state —
+  // is genuinely everything, no follow-up trip to Authentication > Users
+  // needed no matter how many accounts the school has.
+  const hardDeleteBtn = modalRoot.querySelector('#a-hard-delete-school');
+  if (hardDeleteBtn) hardDeleteBtn.onclick = () => {
+    close();
+    modal({
+      title: `Permanently delete "${detail.name}"`,
+      bodyHtml: `<p>This cannot be undone — unlike "Delete school," there is no 30-day recovery window after this. Every student, staff, and parent login account for this school is removed along with all of its records.</p>
+        <p>Type the school's exact name to confirm:</p>
+        <div class="a-field"><input id="a-confirm-name" placeholder="${esc(detail.name)}"></div>`,
+      okLabel: 'Delete Permanently Now',
+      onOk: async (closeConfirm) => {
+        const typed = document.getElementById('a-confirm-name').value;
+        try {
+          await rpc('admin_hard_delete_school_now', { p_school_id: schoolId, p_confirm_name: typed });
+        } catch (e) { return; }
+        toast('School and all of its login accounts permanently deleted.', 'ok');
+        closeConfirm(); renderSchools(body, searchTerm);
+      }
+    });
+  };
+
   const deleteBtn = modalRoot.querySelector('#a-delete-school');
-  deleteBtn.onclick = () => {
+  if (deleteBtn) deleteBtn.onclick = () => {
     close();
     modal({
       title: `Delete "${detail.name}"`,
