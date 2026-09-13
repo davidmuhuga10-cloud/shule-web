@@ -40,10 +40,6 @@ export async function viewFinanceMessaging(root, access) {
 function render(root, access, classes, schoolName, sel) {
   const tpl = TEMPLATES[sel.template];
   root.innerHTML = `
-    <div class="card pad" style="margin-bottom:14px">
-      <p class="hint" style="margin:0">Send a fee-balance reminder using the exact same SMS system as the main Messaging module (same balance, same delivery log) — just with Finance's own templates and figures already filled in.</p>
-    </div>
-
     <div class="card" style="margin-bottom:14px">
       <div class="card-h"><h3>1. Choose a template</h3></div>
       <div class="card-b">

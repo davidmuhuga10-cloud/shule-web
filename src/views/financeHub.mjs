@@ -25,7 +25,6 @@ import { viewFinanceCollections } from './financeCollections.mjs';
 import { openStudentProfile } from './financeStudent.mjs';
 import { viewFinanceReports } from './financeReports.mjs';
 import { viewFinanceAccounting } from './financeAccounting.mjs';
-import { viewFinanceMessaging } from './financeMessaging.mjs';
 import { viewFinanceExpenses } from './financeExpenses.mjs';
 import { viewFinancePayroll } from './financePayroll.mjs';
 import { viewFinanceInventory } from './financeInventory.mjs';
@@ -86,7 +85,6 @@ const TABS = [
   { key: 'inventory', label: 'Inventory', ico: '📦' },
   { key: 'reports', label: 'Reports', ico: '🧾' },
   { key: 'transport', label: 'Transport Mgnt', ico: '🚌' },
-  { key: 'reminders', label: 'Reminders', ico: '🔔' },
   { key: 'preferences', label: 'Preferences', ico: '⚙️' },
   // Finance > Access — manage-level only (see viewFinanceHub's filtering
   // below) and never itself deniable via FINANCE_DENIABLE_TABS: someone who
@@ -268,7 +266,6 @@ export async function viewFinanceHub(root) {
     else if (key === 'collections') viewFinanceCollections(body, access);
     else if (key === 'reports') viewFinanceReports(body, access);
     else if (key === 'preferences') viewFinancePreferences(body, access);
-    else if (key === 'reminders') viewFinanceMessaging(body, access);
     else if (key === 'access') viewFinanceAccess(body, access);
     else viewFinanceTransport(body, access);
   };
@@ -290,7 +287,10 @@ export async function viewFinanceHub(root) {
     root.querySelectorAll('[data-tab]').forEach((b) => b.classList.remove('active'));
     toggleFinNav(false);
     renderLoading(body, 'Loading, please wait…');
-    viewMessaging(body);
+    // Passing `access` here is what shows the "Reminders" tab (formerly its
+    // own top-level Finance module, now a Messaging sub-tab, Finance-only —
+    // see messaging.mjs's viewMessaging() for why).
+    viewMessaging(body, access);
   };
   // BUG FIX (live report — an admin who ends up in Finance with no OTHER
   // tab open, e.g. straight after school signup, had no obvious way back

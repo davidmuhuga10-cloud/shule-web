@@ -26,6 +26,7 @@ import { Db } from '../lib/api/index.mjs';
 import { groupMessagesByBatch } from '../lib/api/messaging.mjs';
 import { takeNavIntent } from '../lib/navIntent.mjs';
 import { renderSmsCredits } from './smsCredits.mjs';
+import { viewFinanceMessaging } from './financeMessaging.mjs';
 
 // Item 5: one option per card — no "message type" vs "scope" split, no
 // dropdown. Exam Results lives here too (doc item 6, closing line: "Under
@@ -54,7 +55,14 @@ function smsCount(bodyText) {
   return { total, budget: segments * 160, segments };
 }
 
-export async function viewMessaging(root) {
+/** financeAccess: pass Finance's own access object (e.g. {canManage}) only
+ *  when this is mounted FROM Finance (financeHub.mjs's "💬 Messages" link)
+ *  — that's what adds the "Reminders" tab (financeMessaging.mjs, formerly
+ *  its own top-level Finance module) alongside Compose/History/SMS
+ *  Credits. Left undefined for the normal Academic-side Messaging route,
+ *  which never shows Reminders — it's Finance-only, per its own fee
+ *  balances/templates. */
+export async function viewMessaging(root, financeAccess) {
   // Perf/UX fix: paint the page shell instantly instead of leaving the
   // router's bare spinner up for the full round trip — see examDesk.mjs's
   // viewExamDesk for the fuller explanation of why this matters.
@@ -69,7 +77,7 @@ export async function viewMessaging(root) {
     Db.classes.list(), Db.students.list({}), Db.staff.list(), Db.results.listExams()
   ]);
   if (!classesRes.ok || !studentsRes.ok || !staffRes.ok || !examsRes.ok) {
-    renderPrereqOrConnectivity(root, { ok: false, onRetry: () => viewMessaging(root) });
+    renderPrereqOrConnectivity(root, { ok: false, onRetry: () => viewMessaging(root, financeAccess) });
     return;
   }
   const classes = classesRes.data;
@@ -90,24 +98,26 @@ export async function viewMessaging(root) {
     customNote: '',
     ccEnabled: false,
     ccStaffIds: []
-  });
+  }, financeAccess);
 }
 
-function render(root, data, sel) {
+function render(root, data, sel, financeAccess) {
   root.innerHTML = `
     <div class="page-head"><div><h2>Messaging</h2></div></div>
     <div class="fin-tabs">
       <button data-tab="compose" class="${sel.tab === 'compose' ? 'active' : ''}">Compose</button>
       <button data-tab="history" class="${sel.tab === 'history' ? 'active' : ''}">History</button>
       <button data-tab="sms-credits" class="${sel.tab === 'sms-credits' ? 'active' : ''}">SMS Credits</button>
+      ${financeAccess ? `<button data-tab="reminders" class="${sel.tab === 'reminders' ? 'active' : ''}">Reminders</button>` : ''}
     </div>
     <div id="msg-body"></div>
   `;
-  root.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => render(root, data, { ...sel, tab: b.dataset.tab }));
+  root.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => render(root, data, { ...sel, tab: b.dataset.tab }, financeAccess));
 
   const body = root.querySelector('#msg-body');
   if (sel.tab === 'compose') renderCompose(body, data, sel, root);
   else if (sel.tab === 'sms-credits') renderSmsCredits(body);
+  else if (sel.tab === 'reminders' && financeAccess) viewFinanceMessaging(body, financeAccess);
   else renderHistory(body, data);
 }
 
