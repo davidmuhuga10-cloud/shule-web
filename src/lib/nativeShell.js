@@ -1,19 +1,13 @@
 /**
  * nativeShell.js — native Android app shell (ShuleTop wrapped via Capacitor
- * for the Play Store). This site is loaded as-is inside the native WebView,
- * so this file is the only native-specific code and it does nothing when
- * the page is opened in a normal browser: window.Capacitor only exists
- * inside the wrapped app. Handles the hardware/gesture back button (walk
- * the in-app hash history instead of closing the app outright) and paints
- * the status bar to match the brand's dark teal sidebar.
+ * for the Play Store). This site loads as-is inside the native WebView, so
+ * this file does nothing when opened in a normal browser: window.Capacitor
+ * only exists inside the wrapped app. Handles the hardware/gesture back
+ * button (walk the in-app hash history instead of closing the app) and
+ * paints the status bar to match the brand's dark teal sidebar.
  *
- * Extracted out of an inline <script> block into this external file as a
- * BUG FIX (v53), same reason as offlineBanner.js: this site's CSP is
- * "script-src 'self'" with no 'unsafe-inline' by deliberate design (see
- * netlify.toml), and an inline <script> block silently never executes
- * under it. This one going silent meant the back-button handling and
- * status-bar theming likely never worked in the shipped app either, with
- * no visible error beyond a console message.
+ * External file rather than an inline <script> block for the same reason
+ * as offlineBanner.js — the site's CSP blocks inline script execution.
  */
 (function () {
   if (!window.Capacitor || !window.Capacitor.isNativePlatform || !window.Capacitor.isNativePlatform()) return;

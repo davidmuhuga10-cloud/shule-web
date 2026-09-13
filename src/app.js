@@ -1035,7 +1035,7 @@ const NAV = {
     // entry (above Dashboard); 'People' stays removed for good.
     { section: 'Academics' },
     { route: 'dashboard', label: 'Dashboard', ico: '🏠' },
-    { route: 'students', label: 'Students', ico: '🎒' },
+    { route: 'students', label: 'Students Info', ico: '🎒' },
     // Live feedback: on the actual phone this still showed as "Classes &
     // Str…" with the ellipsis despite the full label measuring as fitting
     // in this sandbox's Playwright check — the real device's rendered
@@ -1071,7 +1071,7 @@ const NAV = {
     // same as the admin nav above.
     { route: 'finance', label: 'Finance', ico: '💰', hideUnless: 'financeAccess' },
     { section: 'People' },
-    { route: 'students', label: 'Students', ico: '🎒' },
+    { route: 'students', label: 'Students Info', ico: '🎒' },
     { section: 'Daily' },
     { route: 'attendance', label: 'Attendance', ico: '🗓️' },
     { route: 'messaging', label: 'Messaging', ico: '💬' },
