@@ -1,6 +1,7 @@
 :root{
   --bg:#f4f6f9; --surface:#ffffff; --ink:#1b2733; --muted:#6b7a8d;
   --line:#e6ebf1; --brand:#0f3d3e; --brand-2:#12726e; --accent:#f5a623;
+  --topbar-h:62px;
   /* BUG FIX (live report — "teachers are not seeing the boxes" when keying
      in marks): every form field (input/select/textarea) used to border with
      --line above, a near-white #e6ebf1 that's barely distinguishable from
@@ -336,7 +337,7 @@ input[placeholder^="🔍"]{border-color:#2563eb}
 body.finance-only-shell .sidebar{display:none}
 body.finance-only-shell .topbar .menu-toggle{display:none!important}
 body.finance-only-shell .main{margin-left:0}
-.topbar{height:62px;background:var(--surface);border-bottom:1px solid var(--line);display:flex;align-items:center;
+.topbar{height:var(--topbar-h);background:var(--surface);border-bottom:1px solid var(--line);display:flex;align-items:center;
   gap:14px;padding:0 24px;position:sticky;top:0;z-index:30}
 .topbar .menu-toggle{display:none}
 .topbar .ctx{font-size:12.5px;color:var(--muted)}
@@ -1309,26 +1310,6 @@ table.data td.num,table.data th.num{text-align:center}
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:35;display:none}
 .scrim.show{display:block}
 @media(max-width:960px){.scrim.show{display:block}}
-
-/* BUG FIX — the actual root cause of the offline toast reading as
-   permanently "stuck" no matter what the connectivity check decided:
-   this element used to carry `display:flex` directly in an inline
-   style="..." attribute, sitting right next to its `hidden` attribute.
-   An inline style always wins over the browser's own built-in rule that
-   makes a hidden element disappear (`[hidden]{display:none}`), so
-   setting `banner.hidden = true` from JS was flipping the attribute
-   correctly the entire time — confirmed directly in devtools — while
-   the toast stayed visually rendered regardless, because the inline
-   `display:flex` never stopped applying. Styling now lives here instead
-   of inline, and only applies display:flex when the element is NOT
-   hidden — so the hidden attribute's default behavior is never
-   overridden. */
-#offline-banner{position:fixed;bottom:16px;left:16px;right:16px;max-width:340px;margin:0 auto;z-index:99999;
-  background:#0f3d3e;color:#fff;padding:12px 14px;border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,.28);
-  font:600 13.5px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;align-items:center;gap:10px}
-#offline-banner:not([hidden]){display:flex}
-#offline-banner span{flex:1}
-#offline-banner button{background:#e8890b;color:#fff;border:none;border-radius:6px;padding:5px 12px;font:inherit;cursor:pointer;flex-shrink:0}
 
 /* ---------- Finance module ---------- */
 /* Live feedback: this bar used to sit in a fixed 100px box no matter how

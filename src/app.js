@@ -1584,7 +1584,11 @@ async function exitImpersonation() {
  * connection actually drops — rather than letting whatever's mid-request
  * fail with a generic error and leaving someone guessing why. Deliberately
  * doesn't try to be clever about it (no retry queue, no offline banner
- * that lingers) — just names the actual problem the moment it happens. */
+ * that lingers) — just names the actual problem the moment it happens.
+ *
+ * (This replaced a corner-toast "offline banner" with its own polling
+ * connectivity probe — removed per explicit feedback that this simpler,
+ * instant approach worked better and the banner never felt reliable.) */
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch((e) => console.error('Service worker registration failed', e));

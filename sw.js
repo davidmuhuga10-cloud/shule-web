@@ -32,7 +32,6 @@ const PRECACHE_URLS = [
   '/src/lib/config.js',
   '/src/lib/studentEmail.shared.js',
   '/src/lib/phone.shared.js',
-  '/src/lib/offlineBanner.js',
   '/src/lib/nativeShell.js',
   '/src/app.js'
 ];

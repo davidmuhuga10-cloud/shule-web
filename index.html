@@ -70,18 +70,6 @@
   <div id="modal-root"></div>
   <div id="scrim" class="scrim"></div>
 
-  <!-- Small corner toast: appears when the device loses connectivity,
-       disappears the moment it's back. Positioned to never overlap the
-       sidebar/topbar on any screen size. Controlled by
-       src/lib/offlineBanner.js (external file — see that file's header
-       for why it isn't an inline <script> here). Styling lives in
-       main.css, NOT an inline style attribute — see #offline-banner
-       there for exactly why that distinction is the fix for a real bug. -->
-  <div id="offline-banner" hidden>
-    <span>📡 You're offline — reconnect to keep using ShuleTop.</span>
-    <button id="offline-retry">Retry</button>
-  </div>
-
   <div id="auth-screen" class="hidden"></div>
 
   <div id="app" class="hidden">
@@ -125,14 +113,13 @@
   </div>
 
   <script src="src/lib/config.js"></script>
-  <script src="src/lib/offlineBanner.js"></script>
   <script src="src/lib/studentEmail.shared.js"></script>
   <script src="src/lib/phone.shared.js"></script>
   <script type="module" src="src/app.js"></script>
 
   <!-- Native Android app shell (Capacitor-wrapped app only — see that
-       file's header). External file for the same CSP reason as
-       offlineBanner.js above. -->
+       file's header). External file because the site's CSP blocks inline
+       <script> execution. -->
   <script src="src/lib/nativeShell.js"></script>
 </body>
 </html>

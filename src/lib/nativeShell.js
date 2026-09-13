@@ -6,8 +6,8 @@
  * button (walk the in-app hash history instead of closing the app) and
  * paints the status bar to match the brand's dark teal sidebar.
  *
- * External file rather than an inline <script> block for the same reason
- * as offlineBanner.js — the site's CSP blocks inline script execution.
+ * External file rather than an inline <script> block because the site's
+ * CSP blocks inline script execution.
  */
 (function () {
   if (!window.Capacitor || !window.Capacitor.isNativePlatform || !window.Capacitor.isNativePlatform()) return;
