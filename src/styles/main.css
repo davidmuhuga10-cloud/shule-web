@@ -699,7 +699,16 @@ table.data td.num,table.data th.num{text-align:center}
 .print-header .ph-logo{flex:0 0 auto}
 .print-header .ph-logo-img{width:56px;height:56px}
 .print-header .ph-center{flex:1;min-width:0;text-align:center}
-.print-header .ph-school{font-size:19px;font-weight:800;color:var(--grid-text);line-height:1.25}
+/* Live feedback: "when school name is too large it pushes everything down
+   — imagine a person registered a school with 12 names" — with no cap this
+   grew to as many lines as the name needed, pushing the report title bar
+   and the whole grid below it further down every single printout. Clamped
+   to 2 lines with an ellipsis on the 2nd — a short name like "Bright Minds
+   Academy" is unaffected (fits on one line), a very long one like "Morning
+   Glory Preparatory and Junior School" wraps onto exactly 2 lines and then
+   trails off with "…" instead of a 3rd/4th line. */
+.print-header .ph-school{font-size:19px;font-weight:800;color:var(--grid-text);line-height:1.25;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 .print-header .ph-address{flex:0 0 auto;text-align:right;font-size:11px;color:var(--grid-text);line-height:1.55;white-space:nowrap}
 /* The "green rectangle" title bar — was Report-Form-only (.report
    .r-title-bar); now the one shared component every printable report uses
@@ -722,7 +731,16 @@ table.data td.num,table.data th.num{text-align:center}
 .fin-report-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--bg);
   border:1px solid var(--line);border-radius:10px;padding:6px 8px}
 .print-opts{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.print-opts select{padding:8px 10px;border:1px solid var(--input-border);border-radius:8px;font-size:13px;background:#fff}
+/* Live feedback: "the buttons look scattered — print, download to excel,
+   landscape — arrange them well" — the actual bug: the app-wide `input,
+   select,textarea{width:100%}` rule (main.css) was never overridden here,
+   so this select's flex-basis came out as "100% of the toolbar", leaving
+   no room on that line for the Print button next to it and shoving it down
+   onto its own row — while the separate Download Excel button (not a
+   flex-sibling of this select) stayed put, producing the misaligned,
+   scattered look. width:auto (sized to its own content, same as the
+   buttons beside it) is all that was missing. */
+.print-opts select{padding:8px 10px;border:1px solid var(--input-border);border-radius:8px;font-size:13px;background:#fff;width:auto;flex:0 0 auto}
 /* Toolbar for Download/Print/paper-size controls, sat ABOVE the printable
    report card (not mixed into the print header itself) so the card below
    it is a true preview of exactly what prints. */

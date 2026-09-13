@@ -253,8 +253,17 @@ async function load(root, classes, sel) {
 
   sheetEl.innerHTML = `
     <div class="report-toolbar no-print">
-      <button class="btn secondary" id="bs-download">⬇️ Download Excel</button>
-      ${printOptionsHtml('bs', 'landscape', { lockOrientation: true })}
+      <!-- Live feedback: "the buttons look scattered — arrange them well" —
+           Download Excel + the print controls used to be loose siblings in
+           this toolbar; every Finance report already groups its own
+           equivalent pair into one visually distinct pill (.fin-report-
+           actions, see financeTrail.mjs/financeReports.mjs) instead of
+           leaving them to float separately, so this now matches that same
+           established pattern rather than inventing a new one. -->
+      <div class="fin-report-actions">
+        <button class="btn secondary" id="bs-download">⬇️ Download Excel</button>
+        ${printOptionsHtml('bs', 'landscape', { lockOrientation: true })}
+      </div>
     </div>
     <div class="card">
       <!-- Sprint Review bug: this div used to carry border-bottom:1px solid
