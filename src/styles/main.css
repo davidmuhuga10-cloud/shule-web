@@ -273,7 +273,16 @@ input[placeholder^="🔍"]{border-color:#2563eb}
 .brand{padding:20px 20px 16px;display:flex;align-items:center;gap:11px;border-bottom:1px solid rgba(255,255,255,.08)}
 .brand .logo{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#e8890b);
   display:grid;place-items:center;color:#fff;font-weight:800;font-size:18px;flex-shrink:0}
-.brand h1{color:#fff;font-size:17px;letter-spacing:.3px}
+/* Live feedback: "when school name is too large it pushes everything down
+   — under dashboard, how it's pushing all other modules down... both in
+   academics and finance" — the printable-report header (.ph-school) got
+   this same clamp earlier, but this is a DIFFERENT element (the sidebar's
+   own brand header) that had no cap at all — a long name just kept
+   wrapping onto as many lines as it needed, shoving the whole nav list
+   (Exams, Reports, ...) further down the sidebar. Clamped to 2 lines with
+   an ellipsis, same treatment as the print header. */
+.brand h1{color:#fff;font-size:17px;letter-spacing:.3px;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 .brand small{color:#8fb5b3;font-size:11px;display:block}
 /* Live feedback: "I like what I see on the Finance module... the wide
    navigation bar... just replicate everything on Academics side also for
@@ -1827,7 +1836,11 @@ table.data td.num,table.data th.num{text-align:center}
    (the outer app sidebar's own header) so this is a literal replica, not a
    smaller lookalike — see the logo-sizing comment in financeHub.mjs. */
 .fin-brand{padding:20px 20px 16px;display:flex;align-items:center;gap:11px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:8px}
-.fin-brand-name{color:#fff;font-size:17px;font-weight:700;letter-spacing:.3px;line-height:1.25}
+/* Same clamp as .brand h1 above (the outer sidebar's own header) — Finance
+   has its own standalone side nav with its own brand block, so it needed
+   the identical fix separately ("both in academics and finance"). */
+.fin-brand-name{color:#fff;font-size:17px;font-weight:700;letter-spacing:.3px;line-height:1.25;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 .fin-brand small{color:#8fb5b3;font-size:11px;display:block}
 /* A little more breathing room between items ("increase the space between
    modules a little bit... make sure the menu has the scrollable feature")
