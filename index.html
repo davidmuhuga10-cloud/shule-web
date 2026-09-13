@@ -121,73 +121,14 @@
     </div>
   </div>
 
-  <script>
-    (function () {
-      var banner = document.getElementById('offline-banner');
-      var retryBtn = document.getElementById('offline-retry');
-      var pollTimer = null;
-
-      // BUG FIX (live report, phone): showing this banner used to cover the
-      // sidebar's hamburger button with no way to reach it — "blocking the
-      // navigation bar the 3 lines so school now can't do anything there".
-      // Root cause: the banner is position:fixed at the very top with a huge
-      // z-index (by design, so real connectivity loss is never hidden), but
-      // nothing made room for it elsewhere, so it sat ON TOP of the topbar
-      // instead of above it. Fix: measure the banner's own real height
-      // (it can wrap to 2 lines on a narrow phone, so this is never assumed)
-      // and publish it as a CSS variable + body class main.css uses to push
-      // the topbar/sidebar/scrim down clear of the banner while it's shown.
-      function syncOffset() {
-        if (!banner) return;
-        var h = banner.hidden ? 0 : banner.getBoundingClientRect().height;
-        document.documentElement.style.setProperty('--offline-banner-h', h + 'px');
-        document.body.classList.toggle('has-offline-banner', h > 0);
-      }
-      function show() { if (banner) banner.hidden = false; syncOffset(); startPolling(); }
-      function hide() { if (banner) banner.hidden = true; syncOffset(); stopPolling(); }
-      window.addEventListener('resize', syncOffset);
-
-      // BUG FIX (live report on the Play Store/Capacitor build): this
-      // banner got permanently stuck reading "You're offline" even once
-      // the device was fully connected and every other part of the app
-      // was working fine — including right after tapping Retry, which
-      // just reloaded the page into the exact same stuck state.
-      // Root cause: navigator.onLine and the browser's 'online'/'offline'
-      // events (which the original version trusted directly) are well
-      // documented to be unreliable inside Android's WebView — the thing
-      // that actually renders this app once Capacitor wraps it for the
-      // Play Store — and can get stuck reporting the wrong value
-      // indefinitely on some devices/Android versions. Trusting them WAS
-      // the bug. Now neither is trusted directly — they're only used as a
-      // hint to check sooner. Whether the banner is actually shown or
-      // hidden is always decided by a real, tiny network request (this
-      // site's own robots.txt, cache-busted so a cached response can't
-      // lie about it): while the banner is showing, that check re-runs
-      // every few seconds and hides it the instant a request actually
-      // succeeds, no matter what navigator.onLine claims.
-      function verifyConnectivity() {
-        if (typeof fetch !== 'function') return;
-        fetch('/robots.txt?_=' + Date.now(), { cache: 'no-store' })
-          .then(function (res) { if (res && res.ok) hide(); else show(); })
-          .catch(function () { show(); });
-      }
-      function startPolling() {
-        if (pollTimer) return;
-        pollTimer = setInterval(verifyConnectivity, 5000);
-      }
-      function stopPolling() {
-        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-      }
-
-      window.addEventListener('offline', verifyConnectivity);
-      window.addEventListener('online', verifyConnectivity);
-      if (retryBtn) retryBtn.onclick = verifyConnectivity;
-      // Real verification on load too — not a navigator.onLine check —
-      // since a stuck-false reading there was exactly what caused the
-      // original bug to reappear on every reload.
-      verifyConnectivity();
-    })();
-  </script>
+  <!-- BUG FIX (v53): this used to be an inline <script> block here. This
+       site's CSP is deliberately "script-src 'self'" with NO
+       'unsafe-inline' (see netlify.toml) — an inline block silently never
+       executes under it (a console error, nothing visible in the UI), so
+       every previous fix to this banner's logic was dead code on every
+       real device. Moved to an external file, which 'self' already
+       permits with no change to the CSP. -->
+  <script src="src/lib/offlineBanner.js"></script>
 
   <script src="src/lib/config.js"></script>
   <script src="src/lib/studentEmail.shared.js"></script>
@@ -195,35 +136,9 @@
   <script type="module" src="src/app.js"></script>
 
   <!-- Native Android app shell (ShuleTop wrapped via Capacitor for the Play
-       Store). This site is loaded as-is inside the native WebView, so this
-       block is the only native-specific code and it does nothing when the
-       page is opened in a normal browser: window.Capacitor only exists
-       inside the wrapped app. Handles the hardware/gesture back button
-       (walk the in-app hash history instead of closing the app outright)
-       and paints the status bar to match the brand's dark teal sidebar. -->
-  <script>
-    (function () {
-      if (!window.Capacitor || !window.Capacitor.isNativePlatform || !window.Capacitor.isNativePlatform()) return;
-      var Plugins = window.Capacitor.Plugins || {};
-      if (Plugins.StatusBar) {
-        try {
-          Plugins.StatusBar.setBackgroundColor({ color: '#0f3d3e' });
-          Plugins.StatusBar.setStyle({ style: 'LIGHT' }); // light icons for a dark status bar
-        } catch (e) { /* best-effort */ }
-      }
-      if (Plugins.App) {
-        Plugins.App.addListener('backButton', function () {
-          var atRoot = !location.hash || location.hash === '#/' || location.hash === '#' ||
-            location.hash.replace(/^#\/?/, '').split('/')[0] === '' ||
-            document.getElementById('auth-screen') && !document.getElementById('auth-screen').classList.contains('hidden');
-          if (!atRoot && history.length > 1) {
-            history.back();
-          } else {
-            Plugins.App.exitApp();
-          }
-        });
-      }
-    })();
-  </script>
+       Store). Moved to an external file (BUG FIX v53, same CSP reason as
+       offlineBanner.js above) — this was an inline <script> block that the
+       site's own CSP silently blocked from ever executing. -->
+  <script src="src/lib/nativeShell.js"></script>
 </body>
 </html>
