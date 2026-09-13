@@ -16,6 +16,7 @@ import { viewUsers as renderUserAccounts } from './userAccounts.mjs';
 import { viewAcademicCalendar as renderAcademicCalendar } from './academicCalendar.mjs';
 import { viewPermissions as renderPermissions } from './permissionsSettings.mjs';
 import { takeNavIntent } from '../lib/navIntent.mjs';
+import { renderLoading } from '../app.js';
 
 const TABS = [
   { key: 'profile', label: 'School Settings', render: renderSchoolProfile },
@@ -34,18 +35,38 @@ export async function viewSettingsHub(root) {
 
   root.innerHTML = `
     <div class="page-head"><div><h2>Settings</h2><p>School profile, admin access, and the academic calendar — all in one place.</p></div></div>
-    <div class="fin-tabs">
+    <div class="fin-tabs wrap-tabs">
       ${TABS.map((t) => `<button data-tab="${t.key}" class="${t.key === active ? 'active' : ''}">${t.label}</button>`).join('')}
     </div>
     <div id="settings-tab-body"></div>
   `;
 
   const body = root.querySelector('#settings-tab-body');
-  const showTab = (key) => {
+  // Live feedback: "setting is not using our login 'please wait' under its
+  // modules... so you can keep pressing pressing several times" — every
+  // other tabbed module (Finance, Transport, Notes & Reversals) shows a
+  // loading placeholder and effectively can't be re-entered mid-load;
+  // this one used to call tab.render(body) directly with nothing shown
+  // while its own fetch was still in flight, so a few fast clicks queued
+  // up several renders racing into the same body. `token` makes only the
+  // MOST RECENT click's render actually allowed to touch the DOM, and the
+  // buttons are disabled for the moment it takes to switch — not a
+  // generic spinner overlay, just enough to stop a stray double-click
+  // from doing anything.
+  let token = 0;
+  const showTab = async (key) => {
+    const myToken = ++token;
     active = key;
-    root.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === key));
+    const tabButtons = root.querySelectorAll('[data-tab]');
+    tabButtons.forEach((b) => {
+      b.classList.toggle('active', b.dataset.tab === key);
+      b.disabled = true;
+    });
+    renderLoading(body, 'Loading, please wait…');
     const tab = TABS.find((t) => t.key === key);
-    tab.render(body);
+    await tab.render(body);
+    if (myToken !== token) return; // a newer tab click landed while this one was still loading
+    tabButtons.forEach((b) => { b.disabled = false; });
   };
   root.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => showTab(b.dataset.tab));
   showTab(active);

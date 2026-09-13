@@ -65,6 +65,25 @@ function statTile(ico, val, lab, cls, route) {
   </div>`;
 }
 
+// Mobile-only "Bulk SMS Balance" tile (live feedback: "seeing an emoji
+// under bulk sms balance" — same fix as genderTile() below, just for this
+// one tile). No icon badge at all, unlike every other mobile stat tile —
+// deliberately, per the agreed design: number + label only.
+function statTileNoIcon(val, lab, cls) {
+  const accent = CAT_ACCENT[cls] || '';
+  return `<div class="stat stat-vertical ${accent}">
+    <div class="s-val">${val}</div>
+    <div class="s-lab">${lab}</div>
+  </div>`;
+}
+function statTileNoIconSkeleton(lab, cls) {
+  const accent = CAT_ACCENT[cls] || '';
+  return `<div class="stat stat-vertical ${accent}">
+    <div class="skeleton" style="width:48px;height:26px;margin:0 auto 6px"></div>
+    <div class="s-lab">${lab}</div>
+  </div>`;
+}
+
 // Desktop SMS tile (approved layout, round 2): icon on its own line, then
 // the balance, then "Bulk SMS Balance" below it, all centered — distinct
 // from the standard icon-beside-text stat tile used everywhere else, so
@@ -142,8 +161,11 @@ function genderGaugeHtml(m, f, size) {
 // tile, replacing the older straight split-bar (genderBarHtml, kept below
 // only as dead code history/reference — no longer called here).
 function genderTile(gender) {
+  // Live feedback: the icon badge here was showing as a stray/odd emoji on
+  // real devices ("seeing an emoji under gender boys vs girls tile") — the
+  // gauge between the two counts already makes this tile's purpose obvious
+  // without one, unlike the plain number tiles above it.
   return `<div class="stat stat-blue gender-tile">
-    <div class="s-ico t-blue">🚻</div>
     <div class="s-body">
       <div class="g-side"><div class="g-num" style="color:#2563eb">${gender.M || 0}</div><div class="g-lab">Boys</div></div>
       <div class="g-mid">${genderGaugeHtml(gender.M, gender.F, 60)}</div>
@@ -164,14 +186,11 @@ function studentsPerClassChart(perClass) {
   const W = 640, H = 220, padL = 34, padR = 12, padT = 20, padB = 34;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const maxVal = Math.max(1, ...perClass.map((c) => c.count || 0));
-  const rawStep = maxVal / 4;
-  const mag = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
-  const niceStep = [1, 2, 5, 10].map((m) => m * mag).find((s) => s >= rawStep) || mag * 10;
-  const axisMax = niceStep * 4;
+  const { niceStep, axisMax, numTicks } = niceAxis(maxVal);
   const y = (v) => padT + plotH - (v / axisMax) * plotH;
   const groupW = plotW / perClass.length;
   const barW = Math.min(34, groupW * 0.5);
-  const gridlines = [0, 1, 2, 3, 4].map((i) => {
+  const gridlines = Array.from({ length: numTicks + 1 }, (_, i) => i).map((i) => {
     const v = niceStep * i;
     const yy = y(v);
     return `<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" class="chart-grid"/>
@@ -196,6 +215,33 @@ function studentsPerClassChart(perClass) {
     ${bars}
   </svg>`;
 }
+// Live feedback: "remove the row above 200 its not making sense -its
+// empty, so 200 should be almost where the divider of the title is" — the
+// old axis always forced exactly 4 gridlines at niceStep*4, which could
+// land WAY above the tallest bar (e.g. a max of 208 rounded its step up to
+// 100, then multiplied by 4 to axisMax=400 — nearly half the chart empty
+// above the data). This picks a step from a finer candidate set (adding
+// 2.5, not just 1/2/5/10) and only draws as many gridlines as it takes to
+// reach the data's actual max, so the topmost gridline sits close to the
+// tallest bar instead of leaving a mostly-empty top band. Shared by both
+// charts below so they stay visually consistent.
+function niceAxis(maxVal) {
+  maxVal = Math.max(1, maxVal);
+  const rawStep = maxVal / 4;
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
+  const niceStep = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= rawStep) || mag * 10;
+  // Live feedback (round 2 — "the gap should just be a small thing, 1cm"):
+  // rounding UP to the next full niceStep (the old `ceil` here) could still
+  // leave up to one whole step of dead space above the tallest bar — e.g.
+  // maxVal=62 rounded its axis all the way to 80. Gridlines still land on
+  // clean round numbers (0/20/40/60 below), but the PLOT's own top (where
+  // bars actually reach) now tracks the real data with a fixed, small 8%
+  // headroom instead of a whole extra step — a consistently small gap no
+  // matter the data's scale, rather than one that grows with niceStep.
+  const numTicks = Math.max(1, Math.floor(maxVal / niceStep));
+  const axisMax = maxVal * 1.08;
+  return { niceStep, axisMax, numTicks };
+}
 function truncateClassLabel(name) {
   const s = String(name || '');
   return s.length > 9 ? s.slice(0, 8) + '…' : s;
@@ -209,15 +255,12 @@ function genderByClassChart(perClass) {
   const W = 640, H = 220, padL = 34, padR = 12, padT = 20, padB = 34;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const maxVal = Math.max(1, ...perClass.map((c) => Math.max(c.M || 0, c.F || 0)));
-  const rawStep = maxVal / 4;
-  const mag = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
-  const niceStep = [1, 2, 5, 10].map((m) => m * mag).find((s) => s >= rawStep) || mag * 10;
-  const axisMax = niceStep * 4;
+  const { niceStep, axisMax, numTicks } = niceAxis(maxVal);
   const y = (v) => padT + plotH - (v / axisMax) * plotH;
   const groupW = plotW / perClass.length;
   const barW = Math.min(14, groupW * 0.22);
   const gap = Math.min(4, groupW * 0.06);
-  const gridlines = [0, 1, 2, 3, 4].map((i) => {
+  const gridlines = Array.from({ length: numTicks + 1 }, (_, i) => i).map((i) => {
     const v = niceStep * i;
     const yy = y(v);
     return `<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" class="chart-grid"/>
@@ -255,8 +298,8 @@ export async function viewDashboard(root) {
       statTileSkeleton('🏫', 'Classes', 't-amber', 'classes'),
       statTileSkeleton('🔀', 'Streams', 't-purple', 'classes'),
       statTileSkeleton('👨‍🏫', 'Teachers', 't-green', 'staff-teachers'),
-      statTileSkeleton('💬', 'Bulk SMS Balance', 't-teal'),
-      `<div class="stat stat-blue gender-tile"><div class="s-ico t-blue">🚻</div><div class="skeleton" style="width:100%;height:32px"></div></div>`
+      statTileNoIconSkeleton('Bulk SMS Balance', 't-teal'),
+      `<div class="stat stat-blue gender-tile"><div class="skeleton" style="width:100%;height:32px"></div></div>`
     ].join('')}</div>
     <div class="dash-top-row">
       <div class="stats-desktop">${[
@@ -313,7 +356,7 @@ export async function viewDashboard(root) {
     statTile('🏫', counts.classes, 'Classes', 't-amber', 'classes'),
     statTile('🔀', counts.streams, 'Streams', 't-purple', 'classes'),
     statTile('👨‍🏫', counts.teachers, 'Teachers', 't-green', 'staff-teachers'),
-    statTile('💬', smsLabel, 'Bulk SMS Balance', 't-teal'),
+    statTileNoIcon(smsLabel, 'Bulk SMS Balance', 't-teal'),
     genderTile(gender)
   ].join('');
 
@@ -429,10 +472,26 @@ async function loadExamGraph(el) {
     const analysis = buildExamAnalysis(bsRes, []);
     const bySubject = analysis.per_subject.slice().sort((a, b) => b.mean_marks - a.mean_marks);
     const maxMark = Math.max(1, ...bySubject.map((s) => s.mean_marks));
-    body.innerHTML = bySubject.map((s) => `
+    // Live feedback: "use different colours... best subjects mid subjects
+    // least performed all different colours" — every bar used to be one
+    // flat color regardless of how the subject actually did. Tiers by
+    // RANK (top third/middle third/bottom third of this exam's own subject
+    // list), not a fixed mark cutoff, since "least performed" is relative
+    // to the rest of this exam, not an absolute score — same reasoning as
+    // studentsPerClassChart's ratio-based bar colors above, just applied
+    // to a ranked list instead of a ratio. Same three hex values as those
+    // charts' teal/amber/red, so this reads as the same house style.
+    const tierClass = (i, total) => {
+      if (total <= 1) return 'eg-good';
+      const third = Math.max(1, Math.ceil(total / 3));
+      if (i < third) return 'eg-good';
+      if (i < third * 2) return 'eg-mid';
+      return 'eg-low';
+    };
+    body.innerHTML = bySubject.map((s, i) => `
       <div class="dash-eg-row">
         <div class="dash-eg-lab">${esc(s.subject_name)}</div>
-        <div class="dash-eg-track"><div class="dash-eg-fill" style="width:${(s.mean_marks / maxMark * 100).toFixed(1)}%"></div></div>
+        <div class="dash-eg-track"><div class="dash-eg-fill ${tierClass(i, bySubject.length)}" style="width:${(s.mean_marks / maxMark * 100).toFixed(1)}%"></div></div>
         <div class="dash-eg-val">${s.mean_marks.toFixed(1)}</div>
       </div>`).join('');
   };
