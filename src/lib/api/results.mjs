@@ -205,14 +205,21 @@ async function computeClassAverage(supabase, examId, classId) {
     const weight = paper ? (Number(paper.weight) || 1) : 1;
     const rowOutOf = paper ? (Number(paper.out_of) || 100) : examOutOf;
     const effective = (Number(r.score) * weight / rowOutOf) * examOutOf;
-    byStudent[r.student_id] = byStudent[r.student_id] || { total: 0, counted: 0 };
+    byStudent[r.student_id] = byStudent[r.student_id] || { total: 0, counted: 0, bySubject: {} };
     byStudent[r.student_id].total += effective;
     byStudent[r.student_id].counted++;
+    // Most-Improved (per-subject) needs a single effective score per
+    // subject for this exam; if a subject somehow has more than one
+    // scored row for a student (shouldn't normally happen), keep the
+    // last one rather than summing — summing would silently inflate
+    // a "per-subject score" into something that isn't comparable to
+    // the current exam's per-subject score.
+    byStudent[r.student_id].bySubject[r.subject_id] = effective;
   });
   const students = Object.values(byStudent).filter((s) => s.counted > 0);
-  if (!students.length) return { average: 0, students_sat: 0 };
+  if (!students.length) return { average: 0, students_sat: 0, by_student: {} };
   const avg = students.reduce((a, s) => a + (s.total / s.counted), 0) / students.length;
-  return { average: Math.round(avg * 100) / 100, students_sat: students.length };
+  return { average: Math.round(avg * 100) / 100, students_sat: students.length, by_student: byStudent };
 }
 
 /** Round 2 §10 — shared min-subjects resolver for callers (publishExam)
@@ -1195,7 +1202,12 @@ export function createResultsApi(supabase, gradingApi) {
           deviationExam = {
             exam_id: devExam.id, exam_name: devExam.name,
             class_average: comparison.average, students_sat: comparison.students_sat,
-            delta: Math.round((classAverage - comparison.average) * 100) / 100
+            delta: Math.round((classAverage - comparison.average) * 100) / 100,
+            // "Most Improved" (Exam Analysis → Top Students report) diffs
+            // each student's current-exam total/per-subject score against
+            // their entry here, keyed by student_id. Only present when the
+            // deviation exam actually had scored results.
+            by_student: comparison.by_student || {}
           };
         }
       }

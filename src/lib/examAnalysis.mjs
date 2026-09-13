@@ -133,13 +133,74 @@ export function buildExamAnalysis(bs, bands) {
       scores: (s) => s.scores[sub.id], gradeLabelOf: (s) => (s.grades[sub.id] || {}).grade_label || '',
       pointsOf: (s) => (s.grades[sub.id] || {}).points, bandLabels, bands
     });
+    // "By Stream" / "By Gender" (feedback: "analysis and comparison of boys
+    // and girls under each subjects, if there are more than one stream it
+    // should compare streams also there") — same band-breakdown shape as
+    // `summary` above, just one row per stream / per gender instead of one
+    // row for the whole class. By Stream is entirely omitted when the class
+    // has a single stream (nothing to compare).
+    const subOpts = {
+      scores: (s) => s.scores[sub.id], gradeLabelOf: (s) => (s.grades[sub.id] || {}).grade_label || '',
+      pointsOf: (s) => (s.grades[sub.id] || {}).points, bandLabels, bands
+    };
+    const byStream = streamNames.length > 1
+      ? streamNames.map((name) => gradeSummaryRow(name, students.filter((s) => s.stream_name === name), subOpts))
+      : [];
+    const byGender = [
+      gradeSummaryRow('Boys', boys, subOpts),
+      gradeSummaryRow('Girls', girls, subOpts)
+    ];
     return {
       subject_id: sub.id, subject_name: sub.name, subject_code: sub.code || '',
       entries: withScore.length, mean_marks: meanMarks === null ? 0 : meanMarks,
       mean_points: meanPoints === null ? 0 : meanPoints,
       performance_level: meanPoints === null ? '' : levelForPoints(meanPoints, bands),
-      top_students: top, top_boys: topBoys, top_girls: topGirls, summary
+      top_students: top, top_boys: topBoys, top_girls: topGirls, summary,
+      by_stream: byStream, by_gender: byGender
     };
+  });
+
+  // "Most Improved" (overall + per-subject) — top 2 students by delta
+  // against whichever exam is set as this class's Deviation Exam. Omitted
+  // entirely (empty arrays) when no deviation exam is configured, or it had
+  // no scored results to compare against — never shown "empty" in the report.
+  const devByStudent = (bs.deviation_exam && bs.deviation_exam.by_student) || null;
+  let mostImprovedOverall = [];
+  if (devByStudent) {
+    mostImprovedOverall = counted
+      .map((s) => {
+        const prev = devByStudent[s.student_id];
+        if (!prev || !prev.counted) return null;
+        const prevAvg = prev.total / prev.counted;
+        return {
+          admission_no: s.admission_no, full_name: s.full_name, stream_name: s.stream_name,
+          previous_score: Math.round(prevAvg * 100) / 100, current_score: Math.round(s.average * 100) / 100,
+          delta: Math.round((s.average - prevAvg) * 100) / 100
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.delta - a.delta)
+      .slice(0, 2);
+  }
+  perSubject.forEach((p) => {
+    p.most_improved = [];
+    if (!devByStudent) return;
+    p.most_improved = students
+      .map((s) => {
+        const cur = s.scores[p.subject_id];
+        if (cur === null || cur === undefined) return null;
+        const prev = devByStudent[s.student_id];
+        const prevScore = prev && prev.bySubject ? prev.bySubject[p.subject_id] : undefined;
+        if (prevScore === null || prevScore === undefined) return null;
+        return {
+          admission_no: s.admission_no, full_name: s.full_name, stream_name: s.stream_name,
+          previous_score: Math.round(prevScore * 100) / 100, current_score: Math.round(cur * 100) / 100,
+          delta: Math.round((cur - prevScore) * 100) / 100
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.delta - a.delta)
+      .slice(0, 2);
   });
 
   const learningAreaStats = perSubject.slice()
@@ -174,6 +235,7 @@ export function buildExamAnalysis(bs, bands) {
     top_students_overall: topStudentsOverall, top_boys_overall: topBoysOverall, top_girls_overall: topGirlsOverall,
     learning_area_stats: learningAreaStats,
     class_grade_summary: classGradeSummary,
-    per_subject: perSubject
+    per_subject: perSubject,
+    most_improved_overall: mostImprovedOverall
   };
 }

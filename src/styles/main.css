@@ -2155,3 +2155,28 @@ table.data td.num,table.data th.num{text-align:center}
 .mh-detail-meta b{font-size:17px}
 @media (max-width:560px){.mh-detail-meta{grid-template-columns:repeat(2,1fr)}}
 
+/* ---- Exam Analysis redesign (Class Analysis Report / Top Students Report):
+   Zeraki-style charts, podium + most-improved cards. Deliberately no
+   divider/underline anywhere in this block — every "separator" is spacing
+   only (see examAnalysis.mjs's section headings), per repeated feedback
+   that straight lines under headings/above subject blocks read as clutter. */
+.ea-chart-card{border:1px solid var(--line);border-radius:var(--radius-sm);padding:12px 14px;background:var(--surface)}
+.ea-chart-h{font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);margin-bottom:8px}
+.ea-chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px}
+@media (max-width:860px),print{.ea-chart-grid{grid-template-columns:1fr}}
+.ea-podium{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:14px}
+.ea-podium-c{border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px 10px;text-align:center;background:var(--bg)}
+.ea-podium-c.p1{background:linear-gradient(160deg,var(--brand),var(--brand-2));color:#fff;border-color:transparent}
+.ea-podium-rank{font-size:11px;font-weight:750;letter-spacing:.04em;opacity:.8}
+.ea-podium-name{font-weight:750;font-size:13.5px;margin-top:4px}
+.ea-podium-sub{font-size:11px;opacity:.75;margin-top:2px}
+.ea-podium-score{font-size:20px;font-weight:800;margin-top:8px}
+.ea-mi-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
+.ea-mi-c{border:1px solid var(--ok-bg);background:var(--ok-bg);border-radius:var(--radius-sm);padding:10px 12px}
+.ea-mi-name{font-weight:700;font-size:12.5px}
+.ea-mi-sub{font-size:10.5px;color:var(--muted);margin-top:1px}
+.ea-mi-delta{font-weight:800;color:var(--ok);margin-top:6px;font-size:13px}
+.ea-mi-scores{font-size:11px;color:var(--muted);margin-top:2px}
+.ea-mi-note{font-size:11px;color:var(--muted);margin-top:8px;font-style:italic}
+@media print{.ea-podium,.ea-mi-grid{grid-template-columns:1fr 1fr 1fr}.ea-mi-grid{grid-template-columns:1fr 1fr}}
+
