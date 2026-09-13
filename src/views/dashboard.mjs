@@ -15,6 +15,35 @@ function firstName() {
   return ((state.profile && state.profile.name) || '').trim().split(/\s+/)[0] || '';
 }
 
+// Dashboard hero band (design review round 5, approved): replaces the plain
+// .page-head greeting with a teal band (matching the app's brand colour)
+// plus three quick-action chips that jump straight to the screens an admin
+// most often lands on the dashboard to reach. Static — doesn't depend on
+// the dashboard's own data fetch — so it's identical in the Phase 1
+// skeleton and the Phase 2 full render, same as the old .page-head was.
+function heroHtml() {
+  return `<div class="dash-hero">
+    <div>
+      <h2>${greetingWord()}, ${esc(firstName())}</h2>
+      <p>Here is what's happening at ${esc((state.settings && state.settings.school_name) || 'your school')}.</p>
+    </div>
+    <div class="dash-hero-actions">
+      <button type="button" class="hero-chip" data-hero-route="students">🎒 Add Student</button>
+      <button type="button" class="hero-chip" data-hero-route="staff-teachers">👨‍🏫 Add a Teacher</button>
+      <button type="button" class="hero-chip" data-hero-route="messaging">📢 Send Announcement</button>
+    </div>
+  </div>`;
+}
+function wireHeroActions(root) {
+  root.querySelectorAll('.hero-chip[data-hero-route]').forEach((btn) => {
+    btn.onclick = () => {
+      const route = btn.getAttribute('data-hero-route');
+      if (route === 'staff-teachers') setNavIntent('staff-teachers', { tab: 'teachers' });
+      go(route);
+    };
+  });
+}
+
 // Phase 2f (brief §2/§3): the mobile and desktop dashboards intentionally show
 // DIFFERENT tile sets — desktop is a clean 2×2 of the four core setup metrics,
 // mobile fits 6 (adding Teachers, Bulk SMS Balance and a combined Gender tile)
@@ -123,12 +152,104 @@ function genderTile(gender) {
   </div>`;
 }
 
+// "Students per Class" (design review round 5, approved): a vertical bar
+// per class with a real Y axis, replacing the old plain table. Same
+// nice-step axis maths financeDashboard.mjs's own charts already use
+// (budgetVsPaidChart et al.) so this reads as the same house style, just
+// applied to headcounts instead of currency. Bar colour flags relative
+// class size (teal = well filled, amber = mid, red = thin) rather than a
+// fixed absolute cutoff, so this holds up for schools of any size.
+function studentsPerClassChart(perClass) {
+  if (!perClass.length) return '<div class="chart-empty muted">No classes yet.</div>';
+  const W = 640, H = 220, padL = 34, padR = 12, padT = 20, padB = 34;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const maxVal = Math.max(1, ...perClass.map((c) => c.count || 0));
+  const rawStep = maxVal / 4;
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
+  const niceStep = [1, 2, 5, 10].map((m) => m * mag).find((s) => s >= rawStep) || mag * 10;
+  const axisMax = niceStep * 4;
+  const y = (v) => padT + plotH - (v / axisMax) * plotH;
+  const groupW = plotW / perClass.length;
+  const barW = Math.min(34, groupW * 0.5);
+  const gridlines = [0, 1, 2, 3, 4].map((i) => {
+    const v = niceStep * i;
+    const yy = y(v);
+    return `<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" class="chart-grid"/>
+      <text x="${padL - 6}" y="${yy + 3}" class="chart-axis-label" text-anchor="end">${Math.round(v)}</text>`;
+  }).join('');
+  const bars = perClass.map((c, i) => {
+    const cx = padL + groupW * i + groupW / 2;
+    const v = c.count || 0;
+    const barH = plotH - (y(v) - padT);
+    const ratio = v / maxVal;
+    const fill = ratio >= 0.65 ? '#127a6b' : ratio >= 0.3 ? '#f5a623' : '#d64545';
+    return `
+      <rect x="${(cx - barW / 2).toFixed(1)}" y="${y(v).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0, barH).toFixed(1)}" rx="3" fill="${fill}"><title>${esc(c.name)}: ${v} students</title></rect>
+      <text x="${cx.toFixed(1)}" y="${(y(v) - 6).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="700" fill="var(--ink)">${v}</text>
+      <text x="${cx.toFixed(1)}" y="${H - padB + 16}" class="chart-axis-label" text-anchor="middle">${esc(truncateClassLabel(c.name))}</text>
+    `;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" class="chart-svg" role="img" aria-label="Students per class">
+    ${gridlines}
+    <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H - padB}" class="chart-axis-line"/>
+    <line x1="${padL}" y1="${H - padB}" x2="${W - padR}" y2="${H - padB}" class="chart-axis-line"/>
+    ${bars}
+  </svg>`;
+}
+function truncateClassLabel(name) {
+  const s = String(name || '');
+  return s.length > 9 ? s.slice(0, 8) + '…' : s;
+}
+
+// "Gender by Class" (design review round 5, approved): grouped boys/girls
+// bars per class, same axis maths as above, blue/pink matching the
+// existing gender gauge's colours.
+function genderByClassChart(perClass) {
+  if (!perClass.length) return '<div class="chart-empty muted">No classes yet.</div>';
+  const W = 640, H = 220, padL = 34, padR = 12, padT = 20, padB = 34;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const maxVal = Math.max(1, ...perClass.map((c) => Math.max(c.M || 0, c.F || 0)));
+  const rawStep = maxVal / 4;
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
+  const niceStep = [1, 2, 5, 10].map((m) => m * mag).find((s) => s >= rawStep) || mag * 10;
+  const axisMax = niceStep * 4;
+  const y = (v) => padT + plotH - (v / axisMax) * plotH;
+  const groupW = plotW / perClass.length;
+  const barW = Math.min(14, groupW * 0.22);
+  const gap = Math.min(4, groupW * 0.06);
+  const gridlines = [0, 1, 2, 3, 4].map((i) => {
+    const v = niceStep * i;
+    const yy = y(v);
+    return `<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" class="chart-grid"/>
+      <text x="${padL - 6}" y="${yy + 3}" class="chart-axis-label" text-anchor="end">${Math.round(v)}</text>`;
+  }).join('');
+  const bars = perClass.map((c, i) => {
+    const cx = padL + groupW * i + groupW / 2;
+    const m = c.M || 0, f = c.F || 0;
+    const mH = plotH - (y(m) - padT), fH = plotH - (y(f) - padT);
+    return `
+      <rect x="${(cx - barW - gap / 2).toFixed(1)}" y="${y(m).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0, mH).toFixed(1)}" rx="2.5" class="chart-bar-boys"><title>${esc(c.name)} — Boys: ${m}</title></rect>
+      <rect x="${(cx + gap / 2).toFixed(1)}" y="${y(f).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0, fH).toFixed(1)}" rx="2.5" class="chart-bar-girls"><title>${esc(c.name)} — Girls: ${f}</title></rect>
+      <text x="${(cx - barW - gap / 2 + barW / 2).toFixed(1)}" y="${(y(m) - 6).toFixed(1)}" text-anchor="middle" font-size="8.5" font-weight="700" fill="var(--ink)">${m}</text>
+      <text x="${(cx + gap / 2 + barW / 2).toFixed(1)}" y="${(y(f) - 6).toFixed(1)}" text-anchor="middle" font-size="8.5" font-weight="700" fill="var(--ink)">${f}</text>
+      <text x="${cx.toFixed(1)}" y="${H - padB + 16}" class="chart-axis-label" text-anchor="middle">${esc(truncateClassLabel(c.name))}</text>
+    `;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" class="chart-svg" role="img" aria-label="Gender split per class">
+    ${gridlines}
+    <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H - padB}" class="chart-axis-line"/>
+    <line x1="${padL}" y1="${H - padB}" x2="${W - padR}" y2="${H - padB}" class="chart-axis-line"/>
+    ${bars}
+  </svg>
+  <div class="chart-legend"><span><i class="chart-swatch chart-bar-boys"></i>Boys</span><span><i class="chart-swatch chart-bar-girls"></i>Girls</span></div>`;
+}
+
 export async function viewDashboard(root) {
   // Phase 1: paint the shell immediately — header, tile skeletons (still
   // clickable, since routes are static), empty gender/per-class cards. No
   // await before this point.
   root.innerHTML = `
-    <div class="page-head"><div><h2>${greetingWord()}, ${esc(firstName())}</h2><p>Here is what's happening at ${esc((state.settings && state.settings.school_name) || 'your school')}.</p></div></div>
+    ${heroHtml()}
     <div class="stats-mobile">${[
       statTileSkeleton('🎒', 'Students', 't-blue', 'students'),
       statTileSkeleton('🏫', 'Classes', 't-amber', 'classes'),
@@ -144,23 +265,27 @@ export async function viewDashboard(root) {
         statTileSkeleton('🔀', 'Streams', 't-purple', 'classes'),
         statTileSkeleton('👨‍🏫', 'Teachers', 't-green', 'staff-teachers')
       ].join('')}</div>
-      <div class="dash-sms-tile">${statTileVerticalSkeleton('💬', 'Bulk SMS Balance', 't-teal')}</div>
+      <div class="dash-sms-tile">${statTileVerticalSkeleton('💬', 'Bulk SMS Balance', 't-rose')}</div>
       <div class="card side-accent tile-blue dash-gender-desktop">
         <div class="card-h"><h3>Students by gender</h3></div>
         <div class="card-b"><div class="skeleton" style="width:100%;height:48px"></div></div>
       </div>
     </div>
-    <div class="card">
-      <div class="card-h"><h3>Students per class</h3></div>
-      <div class="card-b table-wrap">
-        <table class="data"><thead><tr><th>Class</th><th class="num">Students</th></tr></thead>
-        <tbody><tr><td colspan="2"><div class="skeleton" style="width:100%;height:16px"></div></td></tr></tbody></table>
+    <div class="dash-chart-row">
+      <div class="card side-accent tile-blue">
+        <div class="card-h" style="justify-content:center"><h3>Students per Class</h3></div>
+        <div class="card-b"><div class="skeleton" style="width:100%;height:210px"></div></div>
+      </div>
+      <div class="card side-accent tile-indigo">
+        <div class="card-h" style="justify-content:center"><h3>Gender by Class</h3></div>
+        <div class="card-b"><div class="skeleton" style="width:100%;height:210px"></div></div>
       </div>
     </div>
   `;
   root.querySelectorAll('.stat.clickable[data-route]').forEach((tile) => {
     tile.onclick = () => go(tile.getAttribute('data-route'));
   });
+  wireHeroActions(root);
 
   // Phase 2: fetch the real numbers and replace the skeleton with the full
   // render (same markup this view has always produced) once they arrive.
@@ -203,10 +328,6 @@ export async function viewDashboard(root) {
       </div>`
     : `<div class="card-b"><p class="muted" style="margin:0">No active students yet.</p></div>`;
 
-  const perClassRows = perClass.length
-    ? perClass.map((c) => `<tr><td>${esc(c.name)}</td><td class="num">${c.count}</td></tr>`).join('')
-    : `<tr><td colspan="2" class="muted center">No classes yet.</td></tr>`;
-
   // Academic year/term now live inside Settings' "Academic Years & Terms"
   // tab rather than their own route — data-tab tells the click handler
   // below which tab to open once there.
@@ -217,24 +338,27 @@ export async function viewDashboard(root) {
     </li>`).join('');
 
   root.innerHTML = `
-    <div class="page-head"><div><h2>${greetingWord()}, ${esc(firstName())}</h2><p>Here is what's happening at ${esc((state.settings && state.settings.school_name) || 'your school')}.</p></div></div>
+    ${heroHtml()}
     <div class="stats-mobile">${mobileTiles}</div>
     <div class="dash-top-row">
       <div class="stats-desktop">${desktopTiles}</div>
-      <div class="dash-sms-tile">${statTileVertical('💬', smsLabel, 'Bulk SMS Balance', 't-teal')}</div>
+      <div class="dash-sms-tile">${statTileVertical('💬', smsLabel, 'Bulk SMS Balance', 't-rose')}</div>
       <div class="card side-accent tile-blue dash-gender-desktop">
         <div class="card-h"><h3>Students by gender</h3></div>
         ${genderBlock}
       </div>
     </div>
-    <div class="card side-accent tile-blue">
-      <div class="card-h"><h3>Students per class</h3></div>
-      <div class="card-b table-wrap">
-        <table class="data"><thead><tr><th>Class</th><th class="num">Students</th></tr></thead>
-        <tbody>${perClassRows}</tbody></table>
+    <div class="dash-chart-row">
+      <div class="card side-accent tile-blue">
+        <div class="card-h" style="justify-content:center"><h3>Students per Class</h3></div>
+        <div class="card-b">${studentsPerClassChart(perClass)}</div>
+      </div>
+      <div class="card side-accent tile-indigo">
+        <div class="card-h" style="justify-content:center"><h3>Gender by Class</h3></div>
+        <div class="card-b">${genderByClassChart(perClass)}</div>
       </div>
     </div>
-    <div class="card" id="dash-examgraph" style="margin-top:20px"></div>
+    <div class="card side-accent tile-teal" id="dash-examgraph" style="margin-top:20px"></div>
     ${!setupComplete ? `<div class="card" style="margin-top:20px">
       <div class="card-h"><h3>Getting set up</h3></div>
       <div class="card-b"><ul class="checklist" id="setup-checklist">${checklistHtml}</ul></div>
@@ -253,6 +377,7 @@ export async function viewDashboard(root) {
   root.querySelectorAll('.stat.clickable[data-route]').forEach((tile) => {
     tile.onclick = () => go(tile.getAttribute('data-route'));
   });
+  wireHeroActions(root);
 
   // Phase 3 (brief item 5): "Last Exam Analyzed" — its own small fetch,
   // kicked off after the main dashboard has already painted rather than

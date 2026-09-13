@@ -372,6 +372,28 @@ html,body{max-width:100%;overflow-x:hidden}
 .page-head{display:flex;align-items:flex-start;gap:16px;margin-bottom:20px;flex-wrap:wrap}
 .page-head h2{font-size:22px}
 .page-head p{margin:3px 0 0;color:var(--muted);font-size:13.5px}
+/* Dashboard hero band (design review, round 5 — approved): replaces the
+   plain .page-head greeting on the main Dashboard only, with a teal band
+   matching the app's own brand colour and three quick-action chips that
+   jump straight to Add Student / Add a Teacher / Send Announcement —
+   "a lot of space to the right... quick access icons" was the same live
+   feedback Finance's own .fin-quick-actions already answered; this is the
+   Dashboard's equivalent. Every other screen keeps the plain .page-head
+   untouched. */
+.dash-hero{background:var(--brand);border-radius:14px;padding:22px 24px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;color:#fff}
+.dash-hero h2{margin:0;font-size:22px;color:#fff}
+.dash-hero p{margin:4px 0 0;color:rgba(255,255,255,.72);font-size:13.5px}
+.dash-hero-actions{display:flex;gap:10px;flex-wrap:wrap}
+.hero-chip{display:inline-flex;align-items:center;gap:7px;padding:9px 14px;border-radius:999px;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.14);color:#fff;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.hero-chip:hover{background:rgba(255,255,255,.22)}
+@media screen and (max-width:960px){
+  /* "Remove the quick access icons on mobile, not needed" (approved
+     feedback) — same reasoning as .fin-quick-actions: a phone already
+     stacks the hero to one column with the destinations one tap away via
+     the nav, so there's no dead space here to fill. */
+  .dash-hero-actions{display:none}
+  .dash-hero{padding:18px 18px;border-radius:12px}
+}
 
 /* ---------- Cards ---------- */
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
@@ -457,6 +479,13 @@ html,body{max-width:100%;overflow-x:hidden}
 .stat.stat-vertical .s-lab{margin-top:0}
 .dash-top-row .dash-gender-desktop{flex:1;min-width:220px;display:flex;flex-direction:column}
 .dash-top-row .dash-gender-desktop .gender-panel{flex:1}
+/* Students per Class + Gender by Class — side by side on desktop (design
+   review round 5, approved), stacked on mobile like every other dashboard
+   card (see the max-width:960px override below). */
+.dash-chart-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
+@media screen and (max-width:960px){
+  .dash-chart-row{grid-template-columns:1fr}
+}
 .gender-panel{display:flex;flex-direction:column;justify-content:center;gap:4px;padding:22px;flex:1}
 .gender-panel .g-row{display:flex;align-items:center;justify-content:center;gap:14px}
 .gender-panel .g-side{text-align:center;flex:0 0 auto}
@@ -1426,6 +1455,11 @@ table.data td.num,table.data th.num{text-align:center}
    third palette. */
 .chart-bar-income{fill:var(--primary)}
 .chart-bar-expense{fill:var(--danger)}
+/* Dashboard's "Gender by Class" chart — blue/pink reuses the same boys/
+   girls colours as the existing gender gauge (genderGaugeHtml in
+   dashboard.mjs) rather than inventing a third pair. */
+.chart-bar-boys{fill:#2563eb}
+.chart-bar-girls{fill:#db2777}
 /* Same "avoid gray" fix as the axis above — this was var(--muted) too. */
 .chart-legend{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin-top:10px;font-size:12px;color:var(--ink)}
 .chart-legend-pie{gap:8px 14px}
@@ -1436,6 +1470,8 @@ table.data td.num,table.data th.num{text-align:center}
 .chart-swatch.chart-bar-paid{background:#f2994a}
 .chart-swatch.chart-bar-income{background:var(--primary)}
 .chart-swatch.chart-bar-expense{background:var(--danger)}
+.chart-swatch.chart-bar-boys{background:#2563eb}
+.chart-swatch.chart-bar-girls{background:#db2777}
 .chart-empty{padding:30px 10px;text-align:center;font-size:13px}
 /* Live feedback: "a lot of space to the right top of the dashboard... quick
    access icons" — fills the empty width next to the greeting on wider

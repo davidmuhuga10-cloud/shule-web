@@ -81,10 +81,21 @@ export function createDashboardApi(supabase) {
         else if (g === 'FEMALE' || g === 'F') gender.F++;
       });
 
-      const perClass = (classes || []).map((c) => ({
-        name: c.name,
-        count: (students || []).filter((s) => String(s.class_id) === String(c.id)).length
-      })).sort((a, b) => b.count - a.count);
+      // Dashboard redesign (round 5, approved): the "Gender by Class" chart
+      // needs a boys/girls split per class, not just the total — the
+      // students rows fetched above already carry `gender` + `class_id`, so
+      // this reuses that same array (no extra query) exactly the way the
+      // school-wide gender split above does.
+      const perClass = (classes || []).map((c) => {
+        const inClass = (students || []).filter((s) => String(s.class_id) === String(c.id));
+        let m = 0, f = 0;
+        inClass.forEach((s) => {
+          const g = String(s.gender || '').toUpperCase();
+          if (g === 'MALE' || g === 'M') m++;
+          else if (g === 'FEMALE' || g === 'F') f++;
+        });
+        return { name: c.name, count: inClass.length, M: m, F: f };
+      }).sort((a, b) => b.count - a.count);
 
       const active = {
         academic_year_id: yearRow ? yearRow.id : '',
