@@ -650,7 +650,13 @@ table.data td.num,table.data th.num{text-align:center}
    which is what actually earns back print-scale room and bigger text
    overall — this one change matters more than any color/border tweak. */
 .mark-list-grid th.paper-col{width:52px}
-.mark-list-grid th.sum-col,.mark-list-grid td.sum-col{width:46px}
+/* Live feedback (BUG): "dev column is truncating some columns" — DEV can
+   show up to 7 characters ("-12.35"), which didn't fit this column's old
+   46px width at this table's font-size, and .mark-list-grid td{overflow:
+   hidden} silently clipped it rather than visibly overflowing. Widened
+   just enough for the longest real value (a 2dp deviation with a sign) to
+   sit comfortably. */
+.mark-list-grid th.sum-col,.mark-list-grid td.sum-col{width:54px}
 /* Sprint Review redo: the earned/possible ("870/1200") format moved from
    the per-student TT MKS column to the class-level TOTAL row's subject
    columns (subj-col, already 70px — wider than sum-col — which is enough
@@ -662,6 +668,12 @@ table.data td.num,table.data th.num{text-align:center}
    shaded like the header row so they read as a summary, not just two more
    student rows. */
 .mark-list-grid .bs-agg-row td{background:#f7f9fb;font-weight:700}
+/* Live feedback: "PL has some background colours — remove the gray
+   background colour in that column" — .badge.grade (main.css) carries a
+   grey pill fill used on several OTHER reports (Report Form, Transcript,
+   Exam Analysis) that weren't part of this complaint, so this only
+   overrides it inside the Mark List's own grid rather than everywhere. */
+.mark-list-grid .badge.grade{background:none;padding:0;border-radius:0}
 /* System Fixes brief §15: Mark List summary stat tables (Class Grade
    Summary / Gender Grade Summary / Grade Breakdown by Subject), replacing
    the old single "Class average" line.

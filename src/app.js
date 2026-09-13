@@ -168,13 +168,73 @@ export function printLandscape() {
  *  "page" property + a named @page rule is unreliable across browsers, this
  *  boring swap-in/swap-out approach is not. */
 const PRINT_PAPER_SIZES = { A4: 'A4', A5: 'A5', Letter: 'letter' };
+// Real paper dimensions in mm (portrait orientation), used only to compute
+// the printable width in autoFitPrintWidth() below — PRINT_PAPER_SIZES
+// above is the separate string the @page CSS rule itself wants.
+const PAPER_DIMENSIONS_MM = { A4: [210, 297], A5: [148, 210], Letter: [215.9, 279.4] };
+const PX_PER_MM = 96 / 25.4;
+
+/** Live feedback: "this is very tedious... dev column is truncating some
+ *  columns... try to hard force it to not cut out any columns when
+ *  printing" — investigating found the actual mechanism: the Mark List's
+ *  grid uses table-layout:fixed with an explicit px width on every column
+ *  (main.css), so its TOTAL rendered width is just the sum of those widths
+ *  — completely independent of the screen or paper size. A school with
+ *  enough subjects easily sums past even a landscape A4's printable width.
+ *  On screen that's fine (.table-wrap scrolls). On PRINT, a browser does
+ *  NOT wrap overflowing content onto a second page horizontally — it just
+ *  clips everything past the page edge, silently dropping whichever
+ *  columns landed off the right side (DEV/STREAM POS/OVR POS, being
+ *  right-most, are exactly what a school would see vanish). Depending on
+ *  the browser/driver, "Fit to printable area" can ALSO kick in and
+ *  aggressively rescale the whole page down to whatever ratio it computes,
+ *  which is what produces the "perfect on screen, blurry once printed"
+ *  complaint — an uncontrolled rescale of already-small 11.5px/13.5px text.
+ *  Fix: compute the exact scale needed ourselves, right before printing,
+ *  against the REAL printable width for the orientation/paper/margin about
+ *  to be used, and apply it as a plain CSS transform (not the non-standard
+ *  `zoom` property, which prints inconsistently across engines). This
+ *  guarantees every column survives onto the page — nothing is ever
+ *  clipped — and the shrink is never more aggressive than the table
+ *  actually needs, which is as WYSIWYG as a forced print rescale can be. */
+function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm) {
+  if (!tableEl) return () => {};
+  const [shortMm, longMm] = PAPER_DIMENSIONS_MM[paperSize] || PAPER_DIMENSIONS_MM.A4;
+  const pageWidthMm = orientation === 'landscape' ? longMm : shortMm;
+  const printableWidthPx = (pageWidthMm - 2 * (marginMm || 10)) * PX_PER_MM;
+  const naturalWidth = tableEl.scrollWidth;
+  const scale = naturalWidth > printableWidthPx ? printableWidthPx / naturalWidth : 1;
+  if (scale >= 1) return () => {};
+  const wrap = tableEl.parentElement;
+  const prevTransform = tableEl.style.transform;
+  const prevOrigin = tableEl.style.transformOrigin;
+  const prevWrapHeight = wrap ? wrap.style.height : '';
+  const prevWrapOverflow = wrap ? wrap.style.overflow : '';
+  tableEl.style.transformOrigin = 'top left';
+  tableEl.style.transform = `scale(${scale})`;
+  // The transform shrinks the table VISUALLY but its layout box (what the
+  // page reserves room for) stays full size — without this, the page would
+  // reserve the old, un-scaled height and print a trailing near-blank page.
+  if (wrap) {
+    wrap.style.height = (tableEl.offsetHeight * scale) + 'px';
+    wrap.style.overflow = 'hidden';
+  }
+  return () => {
+    tableEl.style.transform = prevTransform;
+    tableEl.style.transformOrigin = prevOrigin;
+    if (wrap) { wrap.style.height = prevWrapHeight; wrap.style.overflow = prevWrapOverflow; }
+  };
+}
+
 /** marginMm (optional) lets one specific screen ask for tighter page
  *  margins than the 10mm app-wide default — added for Next Sprint 2 §8 (the
  *  Mark List's own margins halved, ~5mm, to make room for a larger font
  *  within the same page width) without touching every other printable
  *  screen that shares this same function (Class List, Score Sheet, Report
- *  Form, Finance statements, etc.). */
-export function printWithOptions(orientation, paperSize, marginMm) {
+ *  Form, Finance statements, etc.). `fitEl` (optional, DOM element) is the
+ *  wide printable table, if any, to run through autoFitPrintWidth() above —
+ *  only the Mark List passes one today. */
+export function printWithOptions(orientation, paperSize, marginMm, fitEl) {
   const size = PRINT_PAPER_SIZES[paperSize] || 'A4';
   const orient = orientation === 'landscape' ? 'landscape' : 'portrait';
   const margin = Number.isFinite(marginMm) && marginMm > 0 ? marginMm : 10;
@@ -182,7 +242,8 @@ export function printWithOptions(orientation, paperSize, marginMm) {
   style.id = 'print-options-override';
   style.textContent = `@page{size:${size} ${orient};margin:${margin}mm}`;
   document.head.appendChild(style);
-  const cleanup = () => { style.remove(); window.removeEventListener('afterprint', cleanup); };
+  const unfit = autoFitPrintWidth(fitEl, orient, size, margin);
+  const cleanup = () => { style.remove(); unfit(); window.removeEventListener('afterprint', cleanup); };
   window.addEventListener('afterprint', cleanup);
   window.print();
   // Safety net: afterprint doesn't fire in every browser/print-preview flow
@@ -213,11 +274,21 @@ export function printOptionsHtml(idPrefix, defaultOrientation, opts) {
       <button class="btn secondary" id="${idPrefix}-print-btn">🖨️ Print</button>
     </div>`;
   }
+  // Live feedback (Mark List): "this should always print as landscape" — a
+  // wide subjects x students grid genuinely never fits a portrait page, so
+  // for a screen that opts in with opts.lockOrientation the Portrait choice
+  // is removed entirely rather than left for someone to pick by mistake.
+  // Paper size stays choosable — only the orientation is forced. The hidden
+  // input keeps the same #idPrefix-orient id wirePrintOptions() already
+  // reads, so nothing else about the wiring needs to know about this mode.
+  const lockOrientation = opts && opts.lockOrientation;
   return `<div class="print-opts no-print">
-    <select id="${idPrefix}-orient" title="Orientation">
+    ${lockOrientation
+      ? `<input type="hidden" id="${idPrefix}-orient" value="landscape">`
+      : `<select id="${idPrefix}-orient" title="Orientation">
       <option value="portrait" ${landscapeDefault ? '' : 'selected'}>Portrait</option>
       <option value="landscape" ${landscapeDefault ? 'selected' : ''}>Landscape</option>
-    </select>
+    </select>`}
     <select id="${idPrefix}-size" title="Paper size">
       <option value="A4" selected>A4</option>
       <option value="A5">A5</option>
@@ -230,13 +301,18 @@ export function printOptionsHtml(idPrefix, defaultOrientation, opts) {
  *  e.g. 'Grade 10 Classlist'") is applied to document.title just before
  *  printing and restored right after — browsers' "Save as PDF" print target
  *  defaults its filename to the page title, so this is what actually makes
- *  that suggestion show up in the save dialog. */
-export function wirePrintOptions(root, idPrefix, suggestedFilename, marginMm) {
+ *  that suggestion show up in the save dialog. `fitSelector` (optional) is a
+ *  CSS selector, resolved against `root` at click time, for a wide printable
+ *  table that must never lose columns off the page — see
+ *  autoFitPrintWidth()/printWithOptions() above. Only the Mark List passes
+ *  this today. */
+export function wirePrintOptions(root, idPrefix, suggestedFilename, marginMm, fitSelector) {
   const btn = root.querySelector(`#${idPrefix}-print-btn`);
   if (!btn) return;
   btn.onclick = () => {
     const orient = root.querySelector(`#${idPrefix}-orient`).value;
     const size = root.querySelector(`#${idPrefix}-size`).value;
+    const fitEl = fitSelector ? root.querySelector(fitSelector) : null;
     if (suggestedFilename) {
       // POST-BUILD AUDIT (Sidebar_Performance_Login_Audit_Fixes.docx item
       // 7, BUG): a blind 5-second timeout used to be the ONLY safety net
@@ -269,7 +345,7 @@ export function wirePrintOptions(root, idPrefix, suggestedFilename, marginMm) {
       window.addEventListener('focus', restore);
       setTimeout(restore, 120000);
     }
-    printWithOptions(orient, size, marginMm);
+    printWithOptions(orient, size, marginMm, fitEl);
   };
 }
 export function initials(name) {
@@ -1542,6 +1618,13 @@ function renderImpersonationBanner() {
   if ($('#impersonation-banner')) return;
   const bar = document.createElement('div');
   bar.id = 'impersonation-banner';
+  // Live feedback: "when supporting a school and I try to print am getting
+  // this on top" — this banner had no .no-print, so it was the first thing
+  // on every printed page while impersonating a school (screenshot showed
+  // the red "Viewing as ... — Admin Mode" bar sitting above the actual
+  // report). .no-print is already stripped out by the app-wide @media
+  // print rule (main.css) — this banner just never opted in.
+  bar.className = 'no-print';
   bar.style.cssText = 'position:sticky;top:0;z-index:9999;background:#b91c1c;color:#fff;padding:8px 16px;display:flex;align-items:center;justify-content:center;gap:14px;font-weight:600;font-size:14px';
   bar.innerHTML = `<span>🔒 Viewing as <b>${esc(state.impersonation.school_name)}</b> — Admin Mode</span><button id="impersonation-exit" class="btn sm" style="background:#fff;color:#b91c1c">Exit &amp; close this tab</button>`;
   document.body.insertBefore(bar, document.body.firstChild);

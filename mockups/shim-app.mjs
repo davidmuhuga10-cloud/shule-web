@@ -44,13 +44,23 @@ export function printWithOptions() { /* no-op in the screenshot harness */ }
 // Mirrors app.js's real printOptionsHtml()/wirePrintOptions() so the
 // harness can verify these controls render correctly — actual printing is
 // a no-op here, same as printLandscape() above.
-export function printOptionsHtml(idPrefix, defaultOrientation) {
+export function printOptionsHtml(idPrefix, defaultOrientation, opts) {
   const landscapeDefault = defaultOrientation === 'landscape';
+  if (opts && opts.simple) {
+    return `<div class="print-opts print-opts-simple no-print">
+      <input type="hidden" id="${idPrefix}-orient" value="${landscapeDefault ? 'landscape' : 'portrait'}">
+      <input type="hidden" id="${idPrefix}-size" value="A4">
+      <button class="btn secondary" id="${idPrefix}-print-btn">🖨️ Print</button>
+    </div>`;
+  }
+  const lockOrientation = opts && opts.lockOrientation;
   return `<div class="print-opts no-print">
-    <select id="${idPrefix}-orient" title="Orientation">
+    ${lockOrientation
+      ? `<input type="hidden" id="${idPrefix}-orient" value="landscape">`
+      : `<select id="${idPrefix}-orient" title="Orientation">
       <option value="portrait" ${landscapeDefault ? '' : 'selected'}>Portrait</option>
       <option value="landscape" ${landscapeDefault ? 'selected' : ''}>Landscape</option>
-    </select>
+    </select>`}
     <select id="${idPrefix}-size" title="Paper size">
       <option value="A4" selected>A4</option>
       <option value="A5">A5</option>

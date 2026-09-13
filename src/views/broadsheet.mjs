@@ -89,7 +89,15 @@ function render(root, exams, classes, sel) {
 // here reading from `settings`).
 function cell(score, gr, showLevels, tintClass) {
   if (score === null || score === undefined) return `<td class="num${tintClass}">—</td>`;
-  return `<td class="num mark-cell${tintClass}"><b>${score}</b>${showLevels && gr && gr.grade_label ? ` <span class="mark-grade">${esc(gr.grade_label)}</span>` : ''}</td>`;
+  // Live feedback: "trying to avoid marks being in bold can help us a
+  // little — let's just have the headers and total and average at the
+  // bottom as the only bold. PL, total marks, ovr position should also be
+  // in bold" — this used to wrap every individual subject mark in <b>,
+  // which is the bulk of the ink on the page fighting the header/summary
+  // rows for attention. Plain weight now; the header row (.mark-list-grid
+  // th), the TOTAL/AVERAGE rows (.bs-agg-row), and the per-student TT
+  // MKS/PL/OVR POS cells below keep their bold.
+  return `<td class="num mark-cell${tintClass}">${score}${showLevels && gr && gr.grade_label ? ` <span class="mark-grade">${esc(gr.grade_label)}</span>` : ''}</td>`;
 }
 
 /** Plain-number cell for one paper's raw score — no grade badge (Learning
@@ -246,7 +254,7 @@ async function load(root, classes, sel) {
   sheetEl.innerHTML = `
     <div class="report-toolbar no-print">
       <button class="btn secondary" id="bs-download">⬇️ Download Excel</button>
-      ${printOptionsHtml('bs', 'landscape')}
+      ${printOptionsHtml('bs', 'landscape', { lockOrientation: true })}
     </div>
     <div class="card">
       <!-- Sprint Review bug: this div used to carry border-bottom:1px solid
@@ -259,7 +267,7 @@ async function load(root, classes, sel) {
         ${printHeaderHtml(settings)}
         ${reportTitleBarHtml(`${res.exam.name} — Mark List — ${cls ? cls.name : ''}`)}
       </div>
-      <div class="card-b table-wrap"><table class="mark-list-grid">
+      <div class="card-b table-wrap" id="bs-table-wrap"><table class="mark-list-grid">
         <thead><tr><th class="id-col">Adm. No.</th><th class="name-col">Name</th><th class="str-col">Stream</th>
           ${res.subjects.map((s, i) => subjectHeaderHtml(s, i)).join('')}
           <th class="num sum-col">SBJ</th><th class="num sum-col">TT MKS</th><th class="num sum-col">MN MKS</th><th class="num sum-col">PL</th>
@@ -269,7 +277,7 @@ async function load(root, classes, sel) {
           ${res.subjects.map((sub, i) => subjectRowCellsHtml(sub, s, showLevels, i)).join('')}
           <td class="num sum-col">${s.subject_count}</td>
           <td class="num sum-col"><b>${Math.round(s.total)}</b></td><td class="num sum-col">${s.average.toFixed(2)}</td>
-          <td class="num sum-col">${showLevels ? `<span class="badge grade">${esc(s.overall_grade || '—')}</span>` : '—'}</td>
+          <td class="num sum-col">${showLevels ? `<span class="badge grade"><b>${esc(s.overall_grade || '—')}</b></span>` : '—'}</td>
           <td class="num sum-col">${s.total_points === null ? '—' : s.total_points.toFixed(2)}</td><td class="num sum-col">${s.mean_points === null ? '—' : s.mean_points.toFixed(2)}</td>
           <td class="num sum-col">${s.deviation > 0 ? '+' : ''}${s.deviation.toFixed(2)}</td>
           <td class="num sum-col">${s.stream_position || '—'}</td><td class="num sum-col"><b>${s.position || '—'}</b></td>
@@ -280,8 +288,12 @@ async function load(root, classes, sel) {
   `;
   // Next Sprint 2 §8: margins halved (10mm -> 5mm) specifically for this
   // screen so there's room to bump the grid's font size without the wide,
-  // many-subject-column table overflowing the printed page width.
-  wirePrintOptions(sheetEl, 'bs', `${cls ? cls.name : 'Class'} Mark List — ${res.exam.name}`, 5);
+  // many-subject-column table overflowing the printed page width. The 5th
+  // arg (new) is the fit-target selector — see autoFitPrintWidth() in
+  // app.js: this table's fixed column widths can sum wider than even a
+  // landscape page once a school has enough subjects, and this guarantees
+  // no column is ever silently clipped off the printed page.
+  wirePrintOptions(sheetEl, 'bs', `${cls ? cls.name : 'Class'} Mark List — ${res.exam.name}`, 5, '.mark-list-grid');
   sheetEl.querySelector('#bs-download').onclick = () => {
     const streamSel = root.querySelector('#bs-stream');
     const streamName = streamSel && streamSel.selectedIndex > 0 ? streamSel.options[streamSel.selectedIndex].textContent : '';
