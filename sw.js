@@ -60,11 +60,6 @@ function isCacheable(request, url) {
   if (request.method !== 'GET') return false; // never touch a write
   if (url.origin !== self.location.origin) return false; // never touch Supabase or anything external
   if (url.pathname.startsWith('/.netlify/functions/')) return false; // never touch an API call
-  // The offline toast probes this with a fresh cache-busting query string
-  // every time — caching it is pure waste (each URL is a distinct, never
-  // reused cache key) and it must always be a real network attempt for
-  // the connectivity check to mean anything.
-  if (url.pathname === '/robots.txt') return false;
   return true;
 }
 
