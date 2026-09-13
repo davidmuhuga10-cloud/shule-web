@@ -16,7 +16,7 @@
  * printing). Each report has its own Print/Download control; printing one
  * temporarily hides the other so only that report ends up on paper/PDF.
  */
-import { esc, options, renderPrereq, renderPrereqOrConnectivity, loader, go, printOptionsHtml, wirePrintOptions, toast, withBusy } from '../app.js';
+import { esc, options, renderPrereq, renderPrereqOrConnectivity, loader, go, printOptionsHtml, wirePrintOptions } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { downloadXlsxAOA } from '../lib/xlsxUtil.mjs';
 import { buildExamAnalysis } from '../lib/examAnalysis.mjs';
@@ -120,8 +120,14 @@ function gradeSummaryTable(title, rows, bandLabels) {
  *  SVG (no charting library) since this is a printed report, not a live
  *  dashboard — it has to render identically in a browser's print/Save-as-PDF
  *  path with no JS re-render at print time. */
+// Live feedback (repeated): "lines, borders, axis should not be gray... deep
+// black" + "change the colour from green to pink or blue a sharper colour" —
+// both charts' axes/gridlines/labels are pure black, and the data
+// line/bars use a sharp blue instead of the earlier teal (which read as
+// "green" to the school) — CHART_COLOR is the one place that controls both.
+const CHART_COLOR = '#1d4ed8';
 function lineChartSvg(perSubject) {
-  if (!perSubject.length) return '<div class="muted" style="font-size:12px">No data yet.</div>';
+  if (!perSubject.length) return '<div style="font-size:12px;color:#000">No data yet.</div>';
   const W = 560, H = 210, padL = 30, padR = 14, padT = 14, padB = 34;
   const n = perSubject.length;
   const maxV = Math.max(4, ...perSubject.map((s) => s.mean_points)) * 1.15;
@@ -130,35 +136,41 @@ function lineChartSvg(perSubject) {
   const points = perSubject.map((s, i) => ({ x: padL + stepX * i, y: yFor(s.mean_points), s }));
   const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
   const gridY = [0, 0.25, 0.5, 0.75, 1].map((f) => padT + f * (H - padT - padB));
-  const grid = gridY.map((y) => `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W - padR}" y2="${y.toFixed(1)}" stroke="#e6ebf1" stroke-width="1"/>`).join('');
-  const gridLabels = gridY.map((y) => `<text x="${padL - 6}" y="${(y + 3).toFixed(1)}" font-size="9" fill="#6b7a8d" text-anchor="end">${Math.round(maxV * (1 - (y - padT) / (H - padT - padB)))}</text>`).join('');
-  const dots = points.map((p) => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.2" fill="#0f3d3e"/><text x="${p.x.toFixed(1)}" y="${(p.y - 8).toFixed(1)}" font-size="9.5" fill="#1b2733" text-anchor="middle" font-weight="700">${p.s.mean_points.toFixed(1)}</text>`).join('');
-  const labels = points.map((p) => `<text x="${p.x.toFixed(1)}" y="${H - padB + 16}" font-size="9" fill="#6b7a8d" text-anchor="middle">${esc((p.s.subject_code || p.s.subject_name || '').slice(0, 10))}</text>`).join('');
-  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img">${grid}${gridLabels}<path d="${path}" fill="none" stroke="#12726e" stroke-width="2.4"/>${dots}${labels}</svg>`;
+  const grid = gridY.map((y) => `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W - padR}" y2="${y.toFixed(1)}" stroke="#000" stroke-width="0.6"/>`).join('');
+  const gridLabels = gridY.map((y) => `<text x="${padL - 6}" y="${(y + 3).toFixed(1)}" font-size="9" fill="#000" text-anchor="end">${Math.round(maxV * (1 - (y - padT) / (H - padT - padB)))}</text>`).join('');
+  const dots = points.map((p) => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.2" fill="${CHART_COLOR}"/><text x="${p.x.toFixed(1)}" y="${(p.y - 8).toFixed(1)}" font-size="9.5" fill="#000" text-anchor="middle" font-weight="700">${p.s.mean_points.toFixed(1)}</text>`).join('');
+  const labels = points.map((p) => `<text x="${p.x.toFixed(1)}" y="${H - padB + 16}" font-size="9" fill="#000" text-anchor="middle">${esc((p.s.subject_code || p.s.subject_name || '').slice(0, 10))}</text>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img">${grid}${gridLabels}<path d="${path}" fill="none" stroke="${CHART_COLOR}" stroke-width="2.4"/>${dots}${labels}</svg>`;
 }
 
 /** Zeraki-style bar chart — Overall Grade Distribution, one bar per band
  *  (plus an "X" bucket for ungraded/absent), from the combined class's
- *  band_counts already computed by buildExamAnalysis(). */
+ *  band_counts already computed by buildExamAnalysis(). Now with a Y axis
+ *  (gridlines + counts) to match the line chart, per feedback that it was
+ *  missing one. */
 function barChartSvg(bandLabels, overallRow) {
   const cats = bandLabels.concat(['X']);
   const counts = cats.map((l) => (l === 'X' ? overallRow.x_count : (overallRow.band_counts[l] || 0)));
-  const W = 560, H = 210, padL = 26, padR = 14, padT = 14, padB = 30;
+  const W = 560, H = 210, padL = 28, padR = 14, padT = 14, padB = 30;
   const maxV = Math.max(1, ...counts) * 1.2;
   const n = cats.length;
   const slot = (W - padL - padR) / n;
   const barW = Math.min(34, slot * 0.55);
-  const yFor = (v) => padT + (1 - (v / maxV)) * (H - padT - padB);
+  const plotH = H - padT - padB;
+  const yFor = (v) => padT + (1 - (v / maxV)) * plotH;
+  const gridY = [0, 0.25, 0.5, 0.75, 1].map((f) => padT + f * plotH);
+  const grid = gridY.map((y) => `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W - padR}" y2="${y.toFixed(1)}" stroke="#000" stroke-width="0.6"/>`).join('');
+  const gridLabels = gridY.map((y) => `<text x="${padL - 6}" y="${(y + 3).toFixed(1)}" font-size="9" fill="#000" text-anchor="end">${Math.round(maxV * (1 - (y - padT) / plotH))}</text>`).join('');
   const bars = cats.map((l, i) => {
     const cx = padL + slot * i + slot / 2;
     const y = yFor(counts[i]);
-    const h = (padT + (H - padT - padB)) - y;
-    return `<rect x="${(cx - barW / 2).toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="#0f3d3e" rx="2"/>
-      <text x="${cx.toFixed(1)}" y="${(y - 5).toFixed(1)}" font-size="9.5" fill="#1b2733" text-anchor="middle" font-weight="700">${counts[i]}</text>
-      <text x="${cx.toFixed(1)}" y="${H - padB + 14}" font-size="9.5" fill="#6b7a8d" text-anchor="middle">${esc(l)}</text>`;
+    const h = (padT + plotH) - y;
+    return `<rect x="${(cx - barW / 2).toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="${CHART_COLOR}" rx="2"/>
+      <text x="${cx.toFixed(1)}" y="${(y - 5).toFixed(1)}" font-size="9.5" fill="#000" text-anchor="middle" font-weight="700">${counts[i]}</text>
+      <text x="${cx.toFixed(1)}" y="${H - padB + 14}" font-size="9.5" fill="#000" text-anchor="middle">${esc(l)}</text>`;
   }).join('');
-  const base = padT + (H - padT - padB);
-  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img"><line x1="${padL}" y1="${base}" x2="${W - padR}" y2="${base}" stroke="#e6ebf1" stroke-width="1"/>${bars}</svg>`;
+  const base = padT + plotH;
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img">${grid}${gridLabels}<line x1="${padL}" y1="${base}" x2="${W - padR}" y2="${base}" stroke="#000" stroke-width="1"/>${bars}</svg>`;
 }
 
 function medal(rank) { return rank === 1 ? '🥇' : rank === 2 ? '🥈' : '🥉'; }
@@ -227,21 +239,20 @@ function wireExclusivePrint(root, idPrefix, hideEl) {
 async function load(root, classes, sel) {
   const sheetEl = root.querySelector('#ea-sheet');
   sheetEl.innerHTML = loader();
-  // Round 3 §16: "explicitly ask which specific exam should be used as the
-  // deviation comparison" — this was previously only settable buried inside
-  // Publish Results' "Save and Publish" modal (which also republishes the
-  // exam every time just to change it); listDeviationExamChoices()/
-  // savePublishSettings() already existed for that, so they're reused here
-  // to let it be picked directly from Exam Analysis instead.
-  const [bsRes, settingsRes, bands, deviationChoicesRes] = await Promise.all([
-    Db.results.getBroadsheet(sel), Db.settings.get(), Db.grading.defaultScaleBands(), Db.results.listDeviationExamChoices(sel.exam_id, sel.class_id)
+  // Live feedback: "remove the info for deviation exam... that's already
+  // entered while analysing the exam before it's published, use that info —
+  // if not included ignore and show analysis report as it should be, if
+  // included use that info." The manual "Deviation Exam" picker card that
+  // used to live on this screen (Round 3 §16) is gone — getBroadsheet()
+  // already resolves whatever was configured at publish time (exam_classes.
+  // deviation_exam_id, set via Publish Results) straight into
+  // bsRes.deviation_exam, and both reports below already render nothing
+  // deviation-related whenever that's null. Nothing left here needs
+  // listDeviationExamChoices() or a Save button.
+  const [bsRes, settingsRes, bands] = await Promise.all([
+    Db.results.getBroadsheet(sel), Db.settings.get(), Db.grading.defaultScaleBands()
   ]);
   if (!bsRes.ok) { sheetEl.innerHTML = `<div class="card pad">⚠️ ${esc(bsRes.message)}</div>`; return; }
-  const deviationChoices = deviationChoicesRes.ok ? deviationChoicesRes.data : [];
-  // getBroadsheet() already resolves the currently-configured comparison
-  // (if any) into bsRes.deviation_exam — reused here as the picker's
-  // current selection rather than a second lookup of exam_classes.
-  const currentDeviationExamId = bsRes.deviation_exam ? bsRes.deviation_exam.exam_id : '';
   const settings = settingsRes.ok ? settingsRes.data : {};
   const cls = classes.find((c) => c.id === sel.class_id);
 
@@ -272,14 +283,14 @@ async function load(root, classes, sel) {
         ${reportTitleBarHtml(`${bsRes.exam.name} — Class Analysis Report — ${cls ? cls.name : ''}`)}
       </div>
       <div class="card-b">
-        <div class="grid3" style="text-align:center">
-          <div><div class="muted" style="font-size:11px">STUDENTS WHO SAT</div><div style="font-size:22px;font-weight:800">${analysis.students_sat}</div></div>
+        <div class="ea-stat-row">
+          <div class="ea-stat-tile"><div class="ea-stat-l">STUDENTS WHO SAT</div><div class="ea-stat-v">${analysis.students_sat}</div></div>
           <!-- Sprint Review correction (final): every aggregate figure
                (Mean Marks, Mean Points, and every figure below) keeps 2dp
                — only an individual subject's own score rounds to a whole
                number. -->
-          <div><div class="muted" style="font-size:11px">MEAN MARKS</div><div style="font-size:22px;font-weight:800">${analysis.mean_marks.toFixed(2)}</div></div>
-          <div><div class="muted" style="font-size:11px">MEAN POINTS</div><div style="font-size:22px;font-weight:800">${analysis.mean_points.toFixed(2)}</div></div>
+          <div class="ea-stat-tile"><div class="ea-stat-l">MEAN MARKS</div><div class="ea-stat-v">${analysis.mean_marks.toFixed(2)}</div></div>
+          <div class="ea-stat-tile"><div class="ea-stat-l">MEAN POINTS</div><div class="ea-stat-v">${analysis.mean_points.toFixed(2)}</div></div>
         </div>
         <div class="center" style="margin-top:8px"><span class="badge grade">${esc(analysis.performance_level || '—')}</span></div>
         ${bsRes.deviation_exam ? `
@@ -329,22 +340,11 @@ async function load(root, classes, sel) {
           ${topTable(`Top Girls - ${sub.subject_name}`, sub.top_girls)}
           ${bsRes.deviation_exam ? mostImprovedHtml(`MOST IMPROVED — ${sub.subject_name.toUpperCase()}`, sub.most_improved, bsRes.deviation_exam.exam_name) : ''}
         `).join('')}
-        ${!bsRes.deviation_exam ? `<div class="ea-mi-note" style="margin-top:18px">Set a Deviation Exam above to also show "Most Improved" sections here.</div>` : ''}
+        ${!bsRes.deviation_exam ? `<div class="ea-mi-note" style="margin-top:18px">Set a Deviation Exam when publishing this exam for this class to also show "Most Improved" sections here.</div>` : ''}
       </div>
     </div>`;
 
   sheetEl.innerHTML = `
-    <div class="card no-print" style="margin-bottom:16px">
-      <div class="card-b" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <div class="field" style="flex:1;min-width:240px;margin:0">
-          <label>Deviation Exam — compare this class's performance against</label>
-          <select id="ea-deviation"><option value="">None</option>${options(deviationChoices, 'id', 'name', currentDeviationExamId)}</select>
-        </div>
-        <button class="btn secondary" id="ea-deviation-save">Save</button>
-      </div>
-      ${!deviationChoices.length ? `<div class="card-b" style="padding-top:0"><p class="hint" style="margin:0">No qualifying prior exam yet for this class — a Deviation Exam becomes selectable once another exam has at least one published subject here.</p></div>` : ''}
-    </div>
-
     <div class="report-toolbar no-print">
       <span class="muted" style="font-size:12px;font-weight:700">CLASS ANALYSIS REPORT</span>
       <button class="btn secondary xlsx-download-btn" id="ea-download">⬇️ Download Excel</button>
@@ -375,11 +375,4 @@ async function load(root, classes, sel) {
     const aoa = buildExamAnalysisAoa({ settings, exam: bsRes.exam, cls, analysis });
     downloadXlsxAOA(classSuggestedName, aoa, 'Exam Analysis');
   };
-  sheetEl.querySelector('#ea-deviation-save').onclick = (e) => withBusy(e.currentTarget, async () => {
-    const val = sheetEl.querySelector('#ea-deviation').value;
-    const r = await Db.results.savePublishSettings(sel.exam_id, sel.class_id, { deviation_exam_id: val });
-    if (!r.ok) { toast(r.message, 'err'); return; }
-    toast(val ? 'Deviation exam saved.' : 'Deviation exam cleared.', 'ok');
-    load(root, classes, sel);
-  }, 'Saving…');
 }

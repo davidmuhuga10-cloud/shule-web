@@ -2160,23 +2160,39 @@ table.data td.num,table.data th.num{text-align:center}
    divider/underline anywhere in this block — every "separator" is spacing
    only (see examAnalysis.mjs's section headings), per repeated feedback
    that straight lines under headings/above subject blocks read as clutter. */
-.ea-chart-card{border:1px solid var(--line);border-radius:var(--radius-sm);padding:12px 14px;background:var(--surface)}
-.ea-chart-h{font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);margin-bottom:8px}
+/* Live feedback (repeated): "lines, borders, axis should not be gray... you
+   should adopt deep black" / "any gray text in analysis report replace it
+   with pure black — any report should not have gray." Every border/line/
+   axis/text color in this block is pure black (#000) instead of the app's
+   usual var(--line)/var(--muted) greys — deliberate, scoped to this report
+   only (other reports keep their normal grey chrome). */
+.ea-chart-card{border:1px solid #000;border-radius:var(--radius-sm);padding:12px 14px;background:var(--surface)}
+.ea-chart-h{font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.03em;color:#000;margin-bottom:8px}
 .ea-chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px}
 @media (max-width:860px),print{.ea-chart-grid{grid-template-columns:1fr}}
+/* Stat row (Students Who Sat / Mean Marks / Mean Points) — tinted tiles,
+   restored after live feedback ("i also expected to see some good colour
+   like you had shown me on the preview... its like most were dropped while
+   shipping eg student who sat for the exam, mean marks they had some
+   backgrounds"). Same tinted-box language _reportCard.mjs's own
+   .r-summary .box already uses elsewhere in the app. */
+.ea-stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:4px}
+.ea-stat-tile{background:#f7f9fb;border:1px solid #000;border-radius:9px;padding:12px 8px;text-align:center}
+.ea-stat-l{font-size:11px;font-weight:700;color:#000}
+.ea-stat-v{font-size:22px;font-weight:800;color:#000;margin-top:4px}
 .ea-podium{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:14px}
-.ea-podium-c{border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px 10px;text-align:center;background:var(--bg)}
-.ea-podium-c.p1{background:linear-gradient(160deg,var(--brand),var(--brand-2));color:#fff;border-color:transparent}
+.ea-podium-c{border:1px solid #000;border-radius:var(--radius-sm);padding:14px 10px;text-align:center;background:var(--bg)}
+.ea-podium-c.p1{background:linear-gradient(160deg,var(--brand),var(--brand-2));color:#fff;border-color:#000}
 .ea-podium-rank{font-size:11px;font-weight:750;letter-spacing:.04em;opacity:.8}
 .ea-podium-name{font-weight:750;font-size:13.5px;margin-top:4px}
 .ea-podium-sub{font-size:11px;opacity:.75;margin-top:2px}
 .ea-podium-score{font-size:20px;font-weight:800;margin-top:8px}
 .ea-mi-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
 .ea-mi-c{border:1px solid var(--ok-bg);background:var(--ok-bg);border-radius:var(--radius-sm);padding:10px 12px}
-.ea-mi-name{font-weight:700;font-size:12.5px}
-.ea-mi-sub{font-size:10.5px;color:var(--muted);margin-top:1px}
+.ea-mi-name{font-weight:700;font-size:12.5px;color:#000}
+.ea-mi-sub{font-size:10.5px;color:#000;margin-top:1px}
 .ea-mi-delta{font-weight:800;color:var(--ok);margin-top:6px;font-size:13px}
-.ea-mi-scores{font-size:11px;color:var(--muted);margin-top:2px}
-.ea-mi-note{font-size:11px;color:var(--muted);margin-top:8px;font-style:italic}
+.ea-mi-scores{font-size:11px;color:#000;margin-top:2px}
+.ea-mi-note{font-size:11px;color:#000;margin-top:8px;font-style:italic}
 @media print{.ea-podium,.ea-mi-grid{grid-template-columns:1fr 1fr 1fr}.ea-mi-grid{grid-template-columns:1fr 1fr}}
 

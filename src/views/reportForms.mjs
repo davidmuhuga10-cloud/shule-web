@@ -39,21 +39,38 @@ function autoFitReportsToOnePage(container, orientation, paperSize, marginMm) {
     const wrap = el.parentElement;
     const prevTransform = el.style.transform;
     const prevOrigin = el.style.transformOrigin;
+    const prevWidth = el.style.width;
     const prevWrapHeight = wrap ? wrap.style.height : '';
     const prevWrapOverflow = wrap ? wrap.style.overflow : '';
-    el.style.transformOrigin = 'top center';
-    el.style.transform = `scale(${scale})`;
+    // BUG FIX (live feedback: a downloaded Report Form "leaves a lot of
+    // space left right top and bottom"): a plain `scale(${scale})` shrinks
+    // the report on BOTH axes, not just the vertical overflow it's meant to
+    // fix — with transform-origin centered, that left visible blank bands
+    // down the left and right of every page this ever kicked in on, not
+    // just a trimmed bottom. Widening the box to 100/scale% BEFORE scaling
+    // it down by the same factor, anchored top-left, cancels the shrink out
+    // horizontally — the element still ends up exactly 100% of the page
+    // width, only its height is what's actually being compressed. The
+    // widened box can reflow (a table wraps less at a wider width), so the
+    // scale is recomputed against its real height at that width rather
+    // than reused from the 100%-width measurement above.
+    el.style.transformOrigin = 'top left';
+    el.style.width = `${(100 / scale).toFixed(3)}%`;
+    const widenedHeight = el.scrollHeight;
+    const effectiveScale = widenedHeight > printableHeightPx ? printableHeightPx / widenedHeight : 1;
+    el.style.transform = `scale(${effectiveScale})`;
     // Same reasoning as autoFitPrintWidth(): the transform shrinks the
     // report VISUALLY but its layout box stays full size unless the
     // wrapping element's reserved height is explicitly shrunk to match —
     // otherwise a near-blank trailing page prints below the shrunk content.
     if (wrap) {
-      wrap.style.height = (naturalHeight * scale) + 'px';
+      wrap.style.height = (widenedHeight * effectiveScale) + 'px';
       wrap.style.overflow = 'hidden';
     }
     cleanups.push(() => {
       el.style.transform = prevTransform;
       el.style.transformOrigin = prevOrigin;
+      el.style.width = prevWidth;
       if (wrap) { wrap.style.height = prevWrapHeight; wrap.style.overflow = prevWrapOverflow; }
     });
   });
@@ -150,7 +167,7 @@ function render(root, exams, classes, intent, settings) {
     const orientEl = root.querySelector('#rf-orient'), sizeEl = root.querySelector('#rf-size');
     const orient = orientEl ? orientEl.value : 'portrait';
     const size = sizeEl ? sizeEl.value : 'A4';
-    rfRestoreFit = autoFitReportsToOnePage(root.querySelector('#rf-card'), orient, size, 10);
+    rfRestoreFit = autoFitReportsToOnePage(root.querySelector('#rf-card'), orient, size, 5);
     // Same safety net as app.js's printWithOptions()'s own @page-override
     // cleanup: 'afterprint' doesn't fire in every browser/print-preview flow
     // (e.g. cancelling before the dialog fully engages), so this scale-down
@@ -364,7 +381,11 @@ function render(root, exams, classes, intent, settings) {
         printed++;
       });
       if (!printed) { cardEl.innerHTML = `<div class="card pad">⚠️ No accessible report cards for this class/exam yet.</div>`; return; }
-      wirePrintOptions(printBar, 'rf', `Report Forms — ${classes.find((c) => c.id === classId) ? classes.find((c) => c.id === classId).name : ''}`);
+      // Live feedback: a downloaded Report Form "leaves a lot of space left
+      // right top and bottom" — same tight-margin treatment now used
+      // elsewhere (broadsheet.mjs's marginMm=5, examAnalysis.mjs's
+      // marginMm=6) instead of the 10mm default.
+      wirePrintOptions(printBar, 'rf', `Report Forms — ${classes.find((c) => c.id === classId) ? classes.find((c) => c.id === classId).name : ''}`, 5);
       return;
     }
 
@@ -380,7 +401,7 @@ function render(root, exams, classes, intent, settings) {
     const cardBody = document.createElement('div');
     cardEl.appendChild(cardBody);
     renderReportCard(cardBody, res.data, { ...extra, feeBalance });
-    wirePrintOptions(printBar, 'rf', `Report Form — ${res.data.student ? res.data.student.full_name : ''}`);
+    wirePrintOptions(printBar, 'rf', `Report Form — ${res.data.student ? res.data.student.full_name : ''}`, 5);
   };
 
   // Round 6 §6 (performance/perceived-freeze): the class/arm selects used
