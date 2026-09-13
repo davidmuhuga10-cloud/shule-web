@@ -51,6 +51,7 @@ function orderedSubjectList(settings, subjects) {
 function render(root, settings, subjects) {
   const showAll = String(settings.teachers_see_all_reports) === 'true';
   const showPathways = String(settings.show_pathway_summary) === 'true';
+  const showFeeBalance = String(settings.show_fee_balance_on_report) === 'true';
   // UNLIKE every other toggle on this screen, this one defaults to ON when
   // the key is genuinely absent (an existing school from before this
   // setting existed, or a race with the backfill migration) — see the
@@ -79,7 +80,14 @@ function render(root, settings, subjects) {
         <label style="display:flex;align-items:center;gap:12px;cursor:pointer">
           <input type="checkbox" id="perm-show-pathways" ${showPathways ? 'checked' : ''}>
           <span><b>Show a STEM / Social Sciences / Arts &amp; Sport Science pathway summary on Report Forms</b><br>
-          <span class="hint" style="margin:0">CBC "pathways" are a Senior School (Grade 10-12) concept — leave this off for schools/classes that don't use them yet. Off by default; tick it if your school wants that row added to the Report Form.</span></span>
+          <span class="hint" style="margin:0">CBC "pathways" are a Senior School (Grade 10-12) concept — leave this off for schools/classes that don't use them yet. Off by default; tick it if your school wants that row added to the Report Form. Even when on, it only appears for a student whose own class/stream actually has a pathway assigned.</span></span>
+        </label>
+      </div>
+      <div class="card-b" style="border-top:1px solid var(--line)">
+        <label style="display:flex;align-items:center;gap:12px;cursor:pointer">
+          <input type="checkbox" id="perm-show-fee-balance" ${showFeeBalance ? 'checked' : ''}>
+          <span><b>Show fee balance on Report Forms</b><br>
+          <span class="hint" style="margin:0">Off by default. When on, a box at the bottom of every printed Report Form shows that student's current fee balance, picked up live from Finance.</span></span>
         </label>
       </div>
     </div>
@@ -122,6 +130,13 @@ function render(root, settings, subjects) {
     const r = await Db.settings.save({ show_pathway_summary: String(val) });
     if (!r.ok) { toast(r.message, 'err'); e.target.checked = !val; return; }
     toast(val ? 'Pathway summary will now show on Report Forms.' : 'Pathway summary removed from Report Forms.', 'ok');
+  };
+
+  root.querySelector('#perm-show-fee-balance').onchange = async (e) => {
+    const val = e.target.checked;
+    const r = await Db.settings.save({ show_fee_balance_on_report: String(val) });
+    if (!r.ok) { toast(r.message, 'err'); e.target.checked = !val; return; }
+    toast(val ? 'Fee balance will now show on Report Forms.' : 'Fee balance removed from Report Forms.', 'ok');
   };
 
   root.querySelector('#perm-show-papers').onchange = async (e) => {

@@ -221,13 +221,28 @@ const COLLECTIONS = [
   { id: 'col-13', student_id: 'stu-2005', receipt_no: 'RCT-000113', amount: 8000, mode: 'cash', status: 'active', created_at: '2026-05-19', term_id: TERM_ID, academic_year_id: AY_ID, reference: '' },
   { id: 'col-14', student_id: 'stu-2007', receipt_no: 'RCT-000114', amount: 19000, mode: 'paybill', status: 'active', created_at: '2026-05-20', term_id: TERM_ID, academic_year_id: AY_ID, reference: 'QGH5D6E7F8' },
   { id: 'col-15', student_id: 'stu-2008', receipt_no: 'RCT-000115', amount: 9500, mode: 'cash', status: 'active', created_at: '2026-05-21', term_id: TERM_ID, academic_year_id: AY_ID, reference: '' },
-  { id: 'col-16', student_id: 'stu-1002', receipt_no: 'RCT-000090', amount: 12000, mode: 'other', status: 'reversed', created_at: '2026-04-30', term_id: TERM_ID, academic_year_id: AY_ID, reference: 'entered against wrong student' },
+  { id: 'col-16', student_id: 'stu-1002', receipt_no: 'RCT-000090', amount: 12000, mode: 'other', status: 'reversed', created_at: '2026-04-30', term_id: TERM_ID, academic_year_id: AY_ID, reference: 'entered against wrong student', reversed_reason: 'Entered against the wrong student', reversed_at: '2026-05-01' },
   { id: 'col-17', student_id: 'stu-2009', receipt_no: 'RCT-000116', amount: 19000, mode: 'bank', status: 'active', created_at: '2026-05-22', term_id: TERM_ID, academic_year_id: AY_ID, reference: 'DEP-88401' },
   { id: 'col-18', student_id: 'stu-2010', receipt_no: 'RCT-000117', amount: 4000, mode: 'cash', status: 'active', created_at: '2026-05-25', term_id: TERM_ID, academic_year_id: AY_ID, reference: '' }
 ];
 function collectionView(c) {
   const s = ALL_FIN_STUDENTS.find((x) => x.id === c.student_id);
   return { ...c, students: s ? { id: s.id, full_name: s.full_name, admission_no: s.admission_no, classes: s.classes } : null };
+}
+// financeTrail.mjs's "Notes & Reversals" screen — same shape as the real
+// finance.mjs creditNotes.list()/debitNotes.list(), including the joined
+// student/class and an optional 'active'/'reversed' status filter.
+function notesListView(notes, q) {
+  q = q || {};
+  let rows = notes.map((n) => {
+    const s = ALL_FIN_STUDENTS.find((x) => x.id === n.student_id);
+    return { ...n, students: s ? { id: s.id, full_name: s.full_name, admission_no: s.admission_no, classes: s.classes } : null, created_by_profile: { name: 'Jane Wanjiru' } };
+  });
+  if (q.academic_year_id) rows = rows.filter((n) => n.academic_year_id === q.academic_year_id);
+  if (q.term_id) rows = rows.filter((n) => n.term_id === q.term_id);
+  if (q.status === 'active') rows = rows.filter((n) => !n.reversed_at);
+  if (q.status === 'reversed') rows = rows.filter((n) => !!n.reversed_at);
+  return rows.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 }
 function studentPaid(studentId) {
   return COLLECTIONS.filter((c) => c.student_id === studentId && c.status === 'active').reduce((a, c) => a + c.amount, 0);
@@ -238,10 +253,12 @@ const TOTAL_EXPECTED = ALL_FIN_STUDENTS.reduce((a, s) => a + studentExpected(s.i
 // A couple of debit/credit notes so financeStudent.mjs's notes table and
 // the Invoicing tab's Debit/Credit Notes sub-tabs both have something real.
 const DEBIT_NOTES = [
-  { id: 'dn-1', student_id: 'stu-1003', vote_head_id: 'vh-activity', amount: 500, reason: 'Lost textbook — Mathematics', created_at: '2026-05-02', academic_year_id: AY_ID, term_id: TERM_ID, finance_vote_heads: { name: 'Activity Fee' } }
+  { id: 'dn-1', student_id: 'stu-1003', vote_head_id: 'vh-activity', amount: 500, reason: 'Lost textbook — Mathematics', created_at: '2026-05-02', academic_year_id: AY_ID, term_id: TERM_ID, finance_vote_heads: { name: 'Activity Fee' } },
+  { id: 'dn-2', student_id: 'stu-1006', vote_head_id: 'vh-tuition', amount: 1500, reason: 'Undercharged — wrong fee structure applied', created_at: '2026-04-28', academic_year_id: AY_ID, term_id: TERM_ID, finance_vote_heads: { name: 'Tuition' }, reversed_at: '2026-04-29' }
 ];
 const CREDIT_NOTES = [
-  { id: 'cn-1', student_id: 'stu-1004', vote_head_id: 'vh-tuition', amount: 2000, reason: 'Sibling discount', created_at: '2026-05-05', academic_year_id: AY_ID, term_id: TERM_ID, finance_vote_heads: { name: 'Tuition' } }
+  { id: 'cn-1', student_id: 'stu-1004', vote_head_id: 'vh-tuition', amount: 2000, reason: 'Sibling discount', created_at: '2026-05-05', academic_year_id: AY_ID, term_id: TERM_ID, finance_vote_heads: { name: 'Tuition' } },
+  { id: 'cn-2', student_id: 'stu-2005', vote_head_id: 'vh-activity', amount: 800, reason: 'Reversal of debit note: entered in error', created_at: '2026-04-29', academic_year_id: AY_ID, term_id: TERM_ID, finance_vote_heads: { name: 'Activity Fee' } }
 ];
 function studentBalance(studentId) {
   const dn = DEBIT_NOTES.filter((n) => n.student_id === studentId).reduce((a, n) => a + n.amount, 0);
@@ -372,10 +389,13 @@ export const Db = {
         counts: { students: 486, staff: 34, teachers: 28, classes: 9, streams: 15, subjects: 12, exams: 3 },
         smsBalance: 1250,
         gender: { M: 251, F: 235 },
+        // M/F per class (dashboard redesign, round 5): mirrors what
+        // dashboard.mjs's real API now derives from the students it
+        // already fetches — see src/lib/api/dashboard.mjs.
         perClass: [
-          { name: 'Grade 8', count: 62 }, { name: 'Grade 7', count: 58 }, { name: 'Grade 6', count: 55 },
-          { name: 'Grade 5', count: 51 }, { name: 'Grade 4', count: 49 }, { name: 'Grade 3', count: 47 },
-          { name: 'Grade 2', count: 44 }, { name: 'Grade 1', count: 40 }, { name: 'PP2', count: 40 }
+          { name: 'Grade 8', count: 62, M: 33, F: 29 }, { name: 'Grade 7', count: 58, M: 30, F: 28 }, { name: 'Grade 6', count: 55, M: 27, F: 28 },
+          { name: 'Grade 5', count: 51, M: 26, F: 25 }, { name: 'Grade 4', count: 49, M: 24, F: 25 }, { name: 'Grade 3', count: 47, M: 25, F: 22 },
+          { name: 'Grade 2', count: 44, M: 23, F: 21 }, { name: 'Grade 1', count: 40, M: 21, F: 19 }, { name: 'PP2', count: 40, M: 22, F: 18 }
         ],
         checklist: [
           { key: 'academic_year', label: 'Create an academic year', done: true, route: '#/settings' },
@@ -466,7 +486,8 @@ export const Db = {
     },
     async setRole() { return { ok: true }; },
     async resetPassword() { return { ok: true, defaultPassword: 'changeme123' }; },
-    async setLoginStatus() { return { ok: true }; }
+    async setLoginStatus() { return { ok: true }; },
+    async updateOwnProfile(payload) { return { ok: true, data: { name: payload.name, phone: payload.phone } }; }
   },
   staff: {
     async list() {
@@ -583,7 +604,7 @@ export const Db = {
       return {
         ok: true,
         data: {
-          student: { full_name: s.full_name, admission_no: s.admission_no, class_name: 'Grade 8', stream_name: STREAMS.find((st) => st.id === s.stream_id).name, gender: s.gender },
+          student: { full_name: s.full_name, admission_no: s.admission_no, class_name: 'Grade 8', stream_name: STREAMS.find((st) => st.id === s.stream_id).name, gender: s.gender, stream_pathway: '' },
           exam: { name: 'End Term 2 Exam', out_of: 100, exam_type: 'end_term' },
           session_name: '2026 Academic Year', term_name: 'Term 2',
           subjects, total: Math.round(total * 100) / 100, average,
@@ -602,7 +623,13 @@ export const Db = {
         const data = ALL_FIN_STUDENTS.filter((s) => s.full_name.toLowerCase().indexOf(q) !== -1 || s.admission_no.toLowerCase().indexOf(q) !== -1).slice(0, 30);
         return { ok: true, data };
       },
+      async byClass(classId) { return { ok: true, data: ALL_FIN_STUDENTS.filter((s) => s.class_id === classId) }; },
+      async allActive() { return { ok: true, data: ALL_FIN_STUDENTS }; },
       async balance(id) { return { ok: true, data: { balance: studentBalance(id) } }; },
+      // Mirrors the real report_card_fee_balance() RPC (migration 0067) —
+      // Report Forms' optional fee-balance box (see reportForms.mjs's
+      // loadFeeBalance()) reads this, not balance() above.
+      async reportCardBalance(id) { return { ok: true, data: studentBalance(id) }; },
       async openingBalance() { return { ok: true, data: null }; },
       async openingBalancesForYear() { return { ok: true, data: {} }; },
       async bulkOpeningBalances(rows) { return { ok: true, data: { imported: (rows || []).length } }; },
@@ -637,11 +664,13 @@ export const Db = {
     debitNotes: {
       async forStudent(id) { return { ok: true, data: DEBIT_NOTES.filter((n) => n.student_id === id) }; },
       async issue() { return { ok: true }; },
+      async list(q) { return { ok: true, data: notesListView(DEBIT_NOTES, q) }; },
       async reverse() { return { ok: true }; }
     },
     creditNotes: {
       async forStudent(id) { return { ok: true, data: CREDIT_NOTES.filter((n) => n.student_id === id) }; },
       async issue() { return { ok: true }; },
+      async list(q) { return { ok: true, data: notesListView(CREDIT_NOTES, q) }; },
       async reverse() { return { ok: true }; }
     },
     invoices: {
@@ -654,6 +683,9 @@ export const Db = {
         q = q || {};
         let rows = COLLECTIONS.map(collectionView);
         if (q.student_id) rows = rows.filter((c) => c.student_id === q.student_id);
+        if (q.status) rows = rows.filter((c) => c.status === q.status);
+        if (q.academic_year_id) rows = rows.filter((c) => c.academic_year_id === q.academic_year_id);
+        if (q.term_id) rows = rows.filter((c) => c.term_id === q.term_id);
         rows = rows.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         if (q.limit) rows = rows.slice(0, q.limit);
         return { ok: true, data: rows };
@@ -748,6 +780,7 @@ export const Db = {
         return { ok: true, data: { invoiced_count: total - already, skipped_count: already } };
       },
       async assign() { return { ok: true }; },
+      async assignBulk(studentIds) { return { ok: true, data: { succeeded: studentIds || [], failed: [] } }; },
       async classAssignments() {
         const data = ROUTE_ASSIGNMENTS.map((a) => {
           const s = ALL_FIN_STUDENTS.find((x) => x.id === a.student_id);

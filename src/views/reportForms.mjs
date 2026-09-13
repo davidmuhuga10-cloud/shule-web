@@ -6,12 +6,66 @@ import { isContactInfoComplete, renderMissingContactInfo } from '../lib/printHea
 
 const BATCH_VALUE = '__all__';
 
+// Live feedback: "enforce report forms should always be one page no matter
+// what — sometimes when printing it's giving 2 pages, fix and enforce
+// that." Report Forms already has several height-reducing measures further
+// down the render chain (_reportCard.mjs's transposed Grade Descriptors
+// table, optional sections that only render when actually configured), but
+// none of that is a HARD guarantee — a school with a long custom motto, a
+// grading scale with many bands, or (now) the new fee-balance box added on
+// top can still tip a report over one page's worth of height. This is the
+// backstop: measured against the REAL printable height for whichever
+// orientation/paper/margin is about to be used (same approach as app.js's
+// autoFitPrintWidth() — column-width fitting for Mark List — mirrored here
+// for vertical height instead), every rendered `.report` block that's
+// taller than one page gets scaled down just enough to fit, right before
+// window.print() actually runs, and restored immediately after. Kept local
+// to this file (not folded into the shared autoFitPrintWidth/
+// printWithOptions in app.js) since it's the only screen where "the whole
+// page must never exceed one sheet" applies — Mark List/Class List/etc want
+// the opposite (never lose a column, page count is not the constraint).
+const PAPER_DIMENSIONS_MM = { A4: [210, 297], A5: [148, 210], Letter: [215.9, 279.4] };
+const PX_PER_MM = 96 / 25.4;
+function autoFitReportsToOnePage(container, orientation, paperSize, marginMm) {
+  if (!container) return () => {};
+  const [shortMm, longMm] = PAPER_DIMENSIONS_MM[paperSize] || PAPER_DIMENSIONS_MM.A4;
+  const pageHeightMm = orientation === 'landscape' ? shortMm : longMm;
+  const printableHeightPx = (pageHeightMm - 2 * (marginMm || 10)) * PX_PER_MM;
+  const cleanups = [];
+  container.querySelectorAll('.report').forEach((el) => {
+    const naturalHeight = el.scrollHeight;
+    const scale = naturalHeight > printableHeightPx ? printableHeightPx / naturalHeight : 1;
+    if (scale >= 1) return;
+    const wrap = el.parentElement;
+    const prevTransform = el.style.transform;
+    const prevOrigin = el.style.transformOrigin;
+    const prevWrapHeight = wrap ? wrap.style.height : '';
+    const prevWrapOverflow = wrap ? wrap.style.overflow : '';
+    el.style.transformOrigin = 'top center';
+    el.style.transform = `scale(${scale})`;
+    // Same reasoning as autoFitPrintWidth(): the transform shrinks the
+    // report VISUALLY but its layout box stays full size unless the
+    // wrapping element's reserved height is explicitly shrunk to match —
+    // otherwise a near-blank trailing page prints below the shrunk content.
+    if (wrap) {
+      wrap.style.height = (naturalHeight * scale) + 'px';
+      wrap.style.overflow = 'hidden';
+    }
+    cleanups.push(() => {
+      el.style.transform = prevTransform;
+      el.style.transformOrigin = prevOrigin;
+      if (wrap) { wrap.style.height = prevWrapHeight; wrap.style.overflow = prevWrapOverflow; }
+    });
+  });
+  return () => cleanups.forEach((fn) => fn());
+}
+
 export async function viewReports(root) {
   // Perf/UX fix: paint the page shell instantly instead of leaving the
   // router's bare spinner up for the full round trip — see examDesk.mjs's
   // viewExamDesk for the fuller explanation of why this matters.
   root.innerHTML = `
-    <div class="page-head no-print"><div><h2>Report Forms</h2><p>Pick a class, then an exam and a student, to generate their report form — or choose "Print all" to batch-print a whole class at once.</p></div></div>
+    <div class="page-head no-print"><div><h2>Report Forms</h2></div></div>
     <div class="card"><div class="card-b">
       <div class="skeleton" style="width:100%;height:60px;margin-bottom:12px"></div>
       <div class="skeleton" style="width:100%;height:60px"></div>
@@ -50,7 +104,6 @@ function termDatesCardHtml(settings) {
   return `
     <div class="card no-print" style="margin-bottom:16px">
       <div class="card-b">
-        <p class="hint" style="margin:0 0 10px">Optional dates shown on every printed Report Form (e.g. "School closes on 12 Dec 2026").</p>
         <div class="grid2">
           <div class="field"><label>School closed on</label><input id="rf-closed-on" type="date" value="${esc(String(settings.school_closed_on || '').slice(0, 10))}"></div>
           <div class="field"><label>Next term begins on</label><input id="rf-next-term" type="date" value="${esc(String(settings.next_term_begins_on || '').slice(0, 10))}"></div>
@@ -70,7 +123,7 @@ function render(root, exams, classes, intent, settings) {
   // in once a class is chosen (see refreshExams below), scoped to just the
   // exams that class was actually assigned to.
   root.innerHTML = `
-    <div class="page-head no-print"><div><h2>Report Forms</h2><p>Pick a class, then an exam and a student, to generate their report form — or choose "Print all" to batch-print a whole class at once.</p></div></div>
+    <div class="page-head no-print"><div><h2>Report Forms</h2></div></div>
     <div class="card no-print" style="margin-bottom:16px">
       <div class="card-b grid4">
         <div class="field"><label>Class</label><select id="rf-class">${options(classes, 'id', 'name', intent.class_id || '', 'Choose a class')}</select></div>
@@ -82,6 +135,35 @@ function render(root, exams, classes, intent, settings) {
     ${termDatesCardHtml(settings)}
     <div id="rf-card"></div>
   `;
+
+  // One-page enforcement (see autoFitReportsToOnePage() above): hooked to
+  // window's beforeprint/afterprint rather than threaded through
+  // printWithOptions/wirePrintOptions, so it works identically whether
+  // Print is triggered from the toolbar button, the browser's own Ctrl+P,
+  // or the OS print menu — anything that ends up calling window.print().
+  // render() can run more than once per page load (re-navigating back to
+  // Report Forms), so any previous pair is removed first rather than
+  // stacking duplicate listeners across visits.
+  if (root._rfRemovePrintFit) { root._rfRemovePrintFit(); root._rfRemovePrintFit = null; }
+  let rfRestoreFit = null;
+  const rfBeforePrint = () => {
+    const orientEl = root.querySelector('#rf-orient'), sizeEl = root.querySelector('#rf-size');
+    const orient = orientEl ? orientEl.value : 'portrait';
+    const size = sizeEl ? sizeEl.value : 'A4';
+    rfRestoreFit = autoFitReportsToOnePage(root.querySelector('#rf-card'), orient, size, 10);
+    // Same safety net as app.js's printWithOptions()'s own @page-override
+    // cleanup: 'afterprint' doesn't fire in every browser/print-preview flow
+    // (e.g. cancelling before the dialog fully engages), so this scale-down
+    // must never be allowed to linger and affect the on-screen view.
+    setTimeout(rfAfterPrint, 5000);
+  };
+  const rfAfterPrint = () => { if (rfRestoreFit) { rfRestoreFit(); rfRestoreFit = null; } };
+  window.addEventListener('beforeprint', rfBeforePrint);
+  window.addEventListener('afterprint', rfAfterPrint);
+  root._rfRemovePrintFit = () => {
+    window.removeEventListener('beforeprint', rfBeforePrint);
+    window.removeEventListener('afterprint', rfAfterPrint);
+  };
 
   root.querySelector('#rf-dates-save').onclick = (e) => withBusy(e.currentTarget, async () => {
     const payload = {
@@ -194,6 +276,17 @@ function render(root, exams, classes, intent, settings) {
     };
   };
 
+  // Permissions > Report Forms > "Show fee balance on Report Forms": fetched
+  // per-student (a balance isn't something loadExtra()'s once-per-class
+  // context can share), only when the toggle is on, and never allowed to
+  // block the report itself — a Finance hiccup here shouldn't stop the
+  // whole report card from printing, so a failed lookup just omits the box.
+  const loadFeeBalance = async (settings, studentId) => {
+    if (String(settings.show_fee_balance_on_report) !== 'true') return null;
+    const res = await Db.finance.students.reportCardBalance(studentId);
+    return res.ok ? res.data : null;
+  };
+
   // Round 6 §6 (performance): loadExtra() does 4 round trips including
   // getBroadsheet() — a whole-class, every-subject query — to build the
   // teacher-names/class-averages/settings/bands context every report card
@@ -255,7 +348,11 @@ function render(root, exams, classes, intent, settings) {
       // highest-value cause identified for "report forms... take too long to
       // generate." Firing every request at once and awaiting the whole batch
       // turns "N round trips in series" into "1 round trip's worth of wait."
-      const results = await Promise.all(students.map((s) => Db.results.getReportCard(examId, s.student_id)));
+      const showBalance = String(extra.settings.show_fee_balance_on_report) === 'true';
+      const [results, balances] = await Promise.all([
+        Promise.all(students.map((s) => Db.results.getReportCard(examId, s.student_id))),
+        showBalance ? Promise.all(students.map((s) => loadFeeBalance(extra.settings, s.student_id))) : Promise.resolve(students.map(() => null))
+      ]);
       let printed = 0;
       students.forEach((s, i) => {
         const res = results[i];
@@ -263,7 +360,7 @@ function render(root, exams, classes, intent, settings) {
         const page = document.createElement('div');
         page.className = 'batch-page';
         cardEl.appendChild(page);
-        renderReportCard(page, res.data, extra);
+        renderReportCard(page, res.data, { ...extra, feeBalance: balances[i] });
         printed++;
       });
       if (!printed) { cardEl.innerHTML = `<div class="card pad">⚠️ No accessible report cards for this class/exam yet.</div>`; return; }
@@ -271,7 +368,7 @@ function render(root, exams, classes, intent, settings) {
       return;
     }
 
-    const res = await Db.results.getReportCard(examId, studentId);
+    const [res, feeBalance] = await Promise.all([Db.results.getReportCard(examId, studentId), loadFeeBalance(extra.settings, studentId)]);
     if (!res.ok) { cardEl.innerHTML = `<div class="card pad">⚠️ ${esc(res.message)}</div>`; return; }
     cardEl.innerHTML = '';
     // Same top-of-page placement + shared print controls for the
@@ -282,7 +379,7 @@ function render(root, exams, classes, intent, settings) {
     cardEl.appendChild(printBar);
     const cardBody = document.createElement('div');
     cardEl.appendChild(cardBody);
-    renderReportCard(cardBody, res.data, extra);
+    renderReportCard(cardBody, res.data, { ...extra, feeBalance });
     wirePrintOptions(printBar, 'rf', `Report Form — ${res.data.student ? res.data.student.full_name : ''}`);
   };
 

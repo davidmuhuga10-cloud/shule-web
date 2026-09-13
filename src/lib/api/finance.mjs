@@ -435,6 +435,20 @@ export function createFinanceApi(supabase) {
       if (error) return err(error.message);
       return ok(data);
     },
+    /** Report Forms' optional fee-balance box (Permissions > Report Forms >
+     *  "Show fee balance on Report Forms"). Deliberately a SEPARATE RPC from
+     *  balance() above: finance_student_balance() requires finance_can_
+     *  collect() (finance staff), which a teacher/student/parent viewing a
+     *  report card does not hold and should not need — a parent must be able
+     *  to see their OWN child's balance on the report without being granted
+     *  finance access. report_card_fee_balance() instead reuses get_report_
+     *  card()'s own authorization (admin/teacher, the student themself, or
+     *  their parent) and returns only the single headline number. */
+    async reportCardBalance(studentId) {
+      const { data, error } = await supabase.rpc('report_card_fee_balance', { p_student_id: studentId });
+      if (error) return err(error.message);
+      return ok(data);
+    },
     async openingBalance(studentId, academicYearId) {
       const { data, error } = await supabase.from('finance_opening_balances').select('*').eq('student_id', studentId).eq('academic_year_id', academicYearId).maybeSingle();
       if (error) return err(error.message);

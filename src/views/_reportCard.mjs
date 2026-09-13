@@ -80,6 +80,18 @@ export function renderReportCard(container, data, extra) {
   // of leaving an empty-looking gap.
   const hasDeviation = !!classAvgBySubject && subjects.some((sub) => classAvgBySubject[sub.subject_id] !== undefined && classAvgBySubject[sub.subject_id] !== null);
 
+  // Round: the school-wide "show pathway summary" toggle used to be the
+  // ONLY gate here — but CBC "pathways" only exist for Senior Secondary
+  // (Grade 10-12) streams (assigned at stream-creation time — see
+  // classes.mjs/academics.mjs), while clusterSummaryHtml() below classifies
+  // by SUBJECT NAME keywords, which match ordinary subjects (Math, English,
+  // Science...) at every grade level. That let the pathway summary appear
+  // for students with no pathway at all. get_report_card() (migration 0067)
+  // now also returns this student's own stream_pathway, so it's shown only
+  // when BOTH the school-wide toggle is on AND this specific student's
+  // stream actually has a pathway assigned — never at any cost otherwise.
+  const showPathwaySummary = settings.show_pathway_summary === 'true' && !!String(s.stream_pathway || '').trim();
+
   container.innerHTML = `
     <div class="report">
       <div class="r-head">
@@ -125,9 +137,10 @@ export function renderReportCard(container, data, extra) {
           }).join('') || `<tr><td colspan="${hasDeviation ? 6 : 5}" class="muted center">No marks recorded for this exam.</td></tr>`}</tbody>
         </table></div>
         ${classAvgBySubject ? `<p class="hint no-print" style="margin:6px 0 0">Performance Level column = this subject's grade band, written out (e.g. "Exceeding expectation").${hasDeviation ? ' Dev. (vs Class) = this student\'s score minus the class average for that learning area, in this exam — no prior exam is used or needed here.' : ' A Dev. (vs Class) column appears once there\'s a class average to compare against — e.g. once more than one student\'s results are recorded for this exam.'} A class-wide comparison against a chosen prior exam is available under Exam Analysis.</p>` : ''}
-        ${settings.show_pathway_summary === 'true' ? clusterSummaryHtml(subjects) : ''}
+        ${showPathwaySummary ? clusterSummaryHtml(subjects) : ''}
         ${remarksHtml(s, data.overall_grade, bands)}
         ${termDatesHtml(settings)}
+        ${feeBalanceHtml(extra.feeBalance)}
         ${descriptorsHtml(bands)}
       </div>
       ${mottoHtml(settings)}
@@ -216,6 +229,28 @@ function termDatesHtml(settings) {
       <thead><tr><th>Term Ends</th><th>Next Term Begins</th></tr></thead>
       <tbody><tr><td>${closed ? esc(closed) : '—'}</td><td>${nextTerm ? esc(nextTerm) : '—'}</td></tr></tbody>
     </table>
+  `;
+}
+
+/** Permissions > Report Forms > "Show fee balance on Report Forms": a small
+ *  box at the bottom of the printed form showing the student's current fee
+ *  balance, picked up live from Finance (report_card_fee_balance() RPC —
+ *  see reportForms.mjs's loadFeeBalance()). `balance` is null both when the
+ *  toggle is off and when the lookup failed/is unavailable — either way
+ *  nothing prints, same "only show what's actually configured" rule as
+ *  termDatesHtml() above. A positive balance reads as owing; zero or
+ *  negative (credit/overpayment) reads as clear, styled distinctly so a
+ *  parent scanning the form can tell at a glance which it is. */
+function feeBalanceHtml(balance) {
+  if (balance === null || balance === undefined) return '';
+  const n = Number(balance) || 0;
+  const owing = n > 0;
+  const fmt = (v) => `KES ${Math.abs(v).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `
+    <div class="r-fee-balance${owing ? ' owing' : ' clear'}">
+      <span class="r-fee-balance-l">Fee Balance</span>
+      <span class="r-fee-balance-v">${owing ? fmt(n) : (n < 0 ? `${fmt(n)} credit` : fmt(0))}</span>
+    </div>
   `;
 }
 
