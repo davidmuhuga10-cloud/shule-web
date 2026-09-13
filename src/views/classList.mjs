@@ -124,7 +124,7 @@ async function load(root, classes, sel) {
 
   listEl.innerHTML = `
     <div class="report-toolbar no-print">
-      <button class="btn secondary" id="cl-download">⬇️ Download Excel</button>
+      <button class="btn secondary xlsx-download-btn" id="cl-download">⬇️ Download</button>
       ${printOptionsHtml('cl', 'portrait')}
     </div>
     <div class="card">

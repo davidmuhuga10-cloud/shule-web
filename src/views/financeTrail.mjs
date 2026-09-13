@@ -115,7 +115,7 @@ async function renderNotesTab(root, access, settings, years, terms, sel) {
       </div>
       <div class="spacer"></div>
       <div class="fin-report-actions">
-        <button class="btn secondary" id="ftl-xlsx">⬇️ Excel</button>
+        <button class="btn secondary xlsx-download-btn" id="ftl-xlsx">⬇️ Download</button>
         ${printOptionsHtml('ftl', 'landscape', { simple: true })}
       </div>
     </div>
@@ -210,7 +210,7 @@ async function renderReversedTab(root, access, settings, years, terms, sel) {
       <div class="fin-filters">${yearTermFilterHtml('ftl', years, terms, sel)}</div>
       <div class="spacer"></div>
       <div class="fin-report-actions">
-        <button class="btn secondary" id="ftl-xlsx">⬇️ Excel</button>
+        <button class="btn secondary xlsx-download-btn" id="ftl-xlsx">⬇️ Download</button>
         ${printOptionsHtml('ftl', 'landscape', { simple: true })}
       </div>
     </div>

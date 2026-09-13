@@ -265,13 +265,30 @@ export function printWithOptions(orientation, paperSize, marginMm, fitEl) {
  *  The orientation/size are still rendered as hidden inputs with the same
  *  ids wirePrintOptions() reads, so nothing else about how printing is
  *  wired needs to change. */
+// Live feedback: "remove download excel on phone, also print — let's just
+// have download only, do this in all places" — on a phone, a separate
+// Excel button (each view's own, tagged .xlsx-download-btn — see main.css)
+// PLUS an orientation/paper-size picker PLUS a Print button is a lot of
+// competing controls for a small toolbar, and "print" itself is a confusing
+// verb on a phone with no printer attached (what actually happens is the
+// OS's Save-as-PDF sheet — that IS a download). So on phones, every one of
+// these screens collapses down to a single button. It's still the exact
+// same #idPrefix-print-btn element wirePrintOptions() already wires up
+// (this never touches that mechanism, just how it's labelled/what's next to
+// it) — only its own text swaps via the two spans below + main.css's
+// max-width:960px rule, and the orientation/size pickers + the sibling
+// Excel button hide alongside it. A screen with no separate Excel button at
+// all (Report Forms, Score Sheet's own print, every Timetable print) still
+// gets the same swap, since "Print" -> "Download" reads right there too —
+// tapping it still opens the OS print sheet either way.
+const PRINT_BTN_LABEL_HTML = `<span class="print-btn-label-desktop">🖨️ Print</span><span class="print-btn-label-mobile">⬇️ Download</span>`;
 export function printOptionsHtml(idPrefix, defaultOrientation, opts) {
   const landscapeDefault = defaultOrientation === 'landscape';
   if (opts && opts.simple) {
     return `<div class="print-opts print-opts-simple no-print">
       <input type="hidden" id="${idPrefix}-orient" value="${landscapeDefault ? 'landscape' : 'portrait'}">
       <input type="hidden" id="${idPrefix}-size" value="A4">
-      <button class="btn secondary" id="${idPrefix}-print-btn">🖨️ Print</button>
+      <button class="btn secondary" id="${idPrefix}-print-btn">${PRINT_BTN_LABEL_HTML}</button>
     </div>`;
   }
   // Live feedback (Mark List): "this should always print as landscape" — a
@@ -294,7 +311,7 @@ export function printOptionsHtml(idPrefix, defaultOrientation, opts) {
       <option value="A5">A5</option>
       <option value="Letter">Letter</option>
     </select>
-    <button class="btn secondary" id="${idPrefix}-print-btn">🖨️ Print</button>
+    <button class="btn secondary" id="${idPrefix}-print-btn">${PRINT_BTN_LABEL_HTML}</button>
   </div>`;
 }
 /** suggestedFilename (optional, feature brief §2: "suggest a clear file name

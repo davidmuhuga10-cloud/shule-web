@@ -118,7 +118,7 @@ async function load(root, classes, subjects, sel) {
 
   sheetEl.innerHTML = `
     <div class="report-toolbar no-print">
-      <button class="btn secondary" id="ss-download">⬇️ Download</button>
+      <button class="btn secondary xlsx-download-btn" id="ss-download">⬇️ Download</button>
       ${printOptionsHtml('ss', 'portrait')}
     </div>
     <div class="card">

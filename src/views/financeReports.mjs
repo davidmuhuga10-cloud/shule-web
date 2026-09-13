@@ -86,7 +86,7 @@ async function loadBalances(root, settings, classes, sel) {
       <div class="spacer"></div>
       <div class="fin-report-actions">
         <button class="btn secondary" id="fb-send-balances">📨 Send balance messages</button>
-        <button class="btn secondary" id="fb-xlsx">⬇️ Excel</button>
+        <button class="btn secondary xlsx-download-btn" id="fb-xlsx">⬇️ Download</button>
         ${printOptionsHtml('fb', 'landscape', { simple: true })}
       </div>
     </div>
@@ -267,7 +267,7 @@ async function loadVoteHead(root, settings, years, terms, sel) {
       </div>
       <div class="spacer"></div>
       <div class="fin-report-actions">
-        <button class="btn secondary" id="fv-xlsx">⬇️ Excel</button>
+        <button class="btn secondary xlsx-download-btn" id="fv-xlsx">⬇️ Download</button>
         ${printOptionsHtml('fv', 'portrait', { simple: true })}
       </div>
     </div>
@@ -310,7 +310,7 @@ async function loadCashbook(root, settings, sel) {
       </div>
       <div class="spacer"></div>
       <div class="fin-report-actions">
-        <button class="btn secondary" id="fcb-xlsx">⬇️ Excel</button>
+        <button class="btn secondary xlsx-download-btn" id="fcb-xlsx">⬇️ Download</button>
         ${printOptionsHtml('fcb', 'portrait', { simple: true })}
       </div>
     </div>
@@ -399,7 +399,7 @@ async function loadTrial(root, settings, years, terms, sel) {
       </div>
       <div class="spacer"></div>
       <div class="fin-report-actions">
-        <button class="btn secondary" id="ft-xlsx">⬇️ Excel</button>
+        <button class="btn secondary xlsx-download-btn" id="ft-xlsx">⬇️ Download</button>
         ${printOptionsHtml('ft', 'portrait', { simple: true })}
       </div>
     </div>

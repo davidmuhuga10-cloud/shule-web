@@ -153,7 +153,7 @@ async function load(root, classes, sel) {
       ${!deviationChoices.length ? `<div class="card-b" style="padding-top:0"><p class="hint" style="margin:0">No qualifying prior exam yet for this class — a Deviation Exam becomes selectable once another exam has at least one published subject here.</p></div>` : ''}
     </div>
     <div class="report-toolbar no-print">
-      <button class="btn secondary" id="ea-download">⬇️ Download Excel</button>
+      <button class="btn secondary xlsx-download-btn" id="ea-download">⬇️ Download</button>
       ${printOptionsHtml('ea', 'portrait')}
     </div>
     <div class="card">

@@ -198,7 +198,7 @@ async function loadInvoicing(root, access, settings, routes, years, terms, sel) 
         <span class="muted"><b>${lastRoster.length}</b> assigned · <b>${lastRoster.length - notInvoicedCount}</b> invoiced · <b>${notInvoicedCount}</b> not yet invoiced${sel.status ? ` · showing <b>${rows.length}</b> (${sel.status === 'invoiced' ? 'Invoiced' : 'Not invoiced'} only)` : ''}</span>
         <div class="spacer"></div>
         <div class="fin-report-actions">
-          <button class="btn secondary" id="fti-xlsx">⬇️ Excel</button>
+          <button class="btn secondary xlsx-download-btn" id="fti-xlsx">⬇️ Download</button>
           ${printOptionsHtml('fti', 'portrait', { simple: true })}
         </div>
       </div>
@@ -478,8 +478,8 @@ async function loadReport(root, settings, routes, years, terms, sel) {
       </div>
       <div class="spacer"></div>
       <div class="fin-report-actions">
-        <button class="btn secondary" id="ftr-xlsx-detail">⬇️ Excel — Invoiced/Not Invoiced (all students)</button>
-        <button class="btn secondary" id="ftr-xlsx">⬇️ Excel — Summary</button>
+        <button class="btn secondary xlsx-download-btn" id="ftr-xlsx-detail">⬇️ Download — Invoiced/Not Invoiced (all students)</button>
+        <button class="btn secondary xlsx-download-btn" id="ftr-xlsx">⬇️ Download — Summary</button>
         ${printOptionsHtml('ftr', 'portrait', { simple: true })}
       </div>
     </div>

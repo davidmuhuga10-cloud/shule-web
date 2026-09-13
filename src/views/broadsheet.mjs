@@ -261,7 +261,7 @@ async function load(root, classes, sel) {
            leaving them to float separately, so this now matches that same
            established pattern rather than inventing a new one. -->
       <div class="fin-report-actions">
-        <button class="btn secondary" id="bs-download">⬇️ Download Excel</button>
+        <button class="btn secondary xlsx-download-btn" id="bs-download">⬇️ Download</button>
         ${printOptionsHtml('bs', 'landscape', { lockOrientation: true })}
       </div>
     </div>
