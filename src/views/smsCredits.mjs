@@ -26,7 +26,7 @@
  * plain rule, then requests listed underneath as simple rows instead of a
  * table — one wallet, not two competing boxes.
  */
-import { esc, toast, loader, withBusy, modal, closeModal, fmtDate } from '../app.js';
+import { esc, toast, loader, modal, closeModal, fmtDate } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 
 const ADMIN_PAY_PHONE = '0180025789';

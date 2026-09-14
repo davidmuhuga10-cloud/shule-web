@@ -29,10 +29,10 @@
  * only the assignment row (which route a student is currently on) changes,
  * so charges already billed under the old route stay exactly as invoiced.
  */
-import { esc, options, toast, modal, closeModal, confirmAction, loader, printOptionsHtml, wirePrintOptions, withBusy } from '../app.js';
+import { esc, options, toast, modal, closeModal, confirmAction, loader, printOptionsHtml, wirePrintOptions } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { downloadXlsx } from '../lib/xlsxUtil.mjs';
-import { printHeaderHtml, reportTitleBarHtml, isContactInfoComplete, missingContactInfoHtml } from '../lib/printHeader.mjs';
+import { printHeaderHtml, reportTitleBarHtml } from '../lib/printHeader.mjs';
 
 const SUB_TABS = [
   { key: 'routes', label: 'Routes' },

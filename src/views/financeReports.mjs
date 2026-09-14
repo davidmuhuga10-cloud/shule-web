@@ -5,7 +5,7 @@
  * range) and Trial Balance (scenario #18) — each with a print + Excel
  * export, reusing the read-heavy cached RPCs in the API layer.
  */
-import { esc, options, toast, loader, printOptionsHtml, wirePrintOptions, state, go, modal, closeModal, withBusy } from '../app.js';
+import { esc, options, toast, loader, printOptionsHtml, wirePrintOptions, go, modal, closeModal, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { downloadXlsx, downloadXlsxAOA, readXlsxFile } from '../lib/xlsxUtil.mjs';
 import { buildBalancesAoa, buildVoteHeadCollectionsAoa, buildCashbookAoa, buildTrialBalanceAoa } from '../lib/finance/financeXlsx.mjs';

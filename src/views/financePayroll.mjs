@@ -28,7 +28,7 @@
  */
 import { esc, options, toast, modal, closeModal, confirmAction, loader, state } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
-import { printHeaderHtml, addressLines, isContactInfoComplete, missingContactInfoHtml } from '../lib/printHeader.mjs';
+import { addressLines, isContactInfoComplete, missingContactInfoHtml } from '../lib/printHeader.mjs';
 
 const SUB_TABS = [
   { key: 'profiles', label: 'Setup' },

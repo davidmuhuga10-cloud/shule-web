@@ -19,7 +19,7 @@
  */
 import { esc, modal, closeModal, toast, confirmAction, options, renderLoading, withBusy, state, renderPrereqOrConnectivity } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
-import { STANDARD_CLASS_LEVELS, classLevelsForCategory, levelBucketForClassName, PATHWAYS } from '../lib/api/academics.mjs';
+import { classLevelsForCategory, levelBucketForClassName, PATHWAYS } from '../lib/api/academics.mjs';
 import { plainNameError } from '../lib/validators.mjs';
 
 /** Next Sprint 3 §1.2: which class-level list this school's admin should be

@@ -20,7 +20,7 @@
  *                      result_submissions in schema.sql. Staff always see
  *                      everything in their own school regardless of status.
  */
-import { ok, err, byAdmissionNo, admissionNumberValue, indexById, createMemoCache, clearAllCaches, selectAllRows } from './_util.mjs';
+import { ok, err, byAdmissionNo, indexById, createMemoCache, clearAllCaches, selectAllRows } from './_util.mjs';
 import { getEffectiveClassSubjectIds, getEffectiveClassSubjectIdsBatch } from './assignments.mjs';
 
 // Same short-window in-memory memoization pattern as finance.mjs/students.mjs
