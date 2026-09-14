@@ -263,6 +263,45 @@ function isNativeApp() {
   try { return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); }
   catch (e) { return false; }
 }
+
+/** Live feedback: "on opening [the app] always rendering green empty screen
+ *  for a few seconds then white screen for a few seconds then now i see
+ *  setting up your dashboard... this happens only on the mobile app." Traced
+ *  to three back-to-back stages that only exist on the native app:
+ *   1. Green — Capacitor's native splash screen (capacitor.config.json's
+ *      SplashScreen.backgroundColor, a dark teal that reads as "green" on a
+ *      small phone screen), which used to auto-hide on a fixed 1200ms timer
+ *      (launchAutoHide/launchShowDuration) regardless of whether anything
+ *      was actually ready to show yet.
+ *   2. White — the real gap: `server.url` in capacitor.config.json points
+ *      the app at the LIVE site (deliberately — it's how every web fix in
+ *      this app reaches phones without a Play Store release), so a cold
+ *      start has to fetch index.html/CSS/JS over the network before
+ *      anything can render at all. #auth-screen and #app both start
+ *      class="hidden" (index.html), so that whole fetch — often several
+ *      seconds on the mobile data this app is built for — showed a stark
+ *      blank white WebView once the splash timer expired early.
+ *   3. "Setting up your dashboard" — the existing, intentional branded
+ *      loading card (renderBootingScreen() below) covering the final
+ *      Supabase round trip. Never the problem; just the first thing to
+ *      finally look "normal" after stages 1–2.
+ *  Fix: keep the native splash showing straight through stage 2 instead of
+ *  timing out early, only dismissing it once there's real content to reveal
+ *  — right as renderAuth() or renderBootingScreen() (the two actual
+ *  first-paint points) run. That needs capacitor.config.json's SplashScreen
+ *  set to launchAutoHide:false and this app rebuilt/resynced before it takes
+ *  effect on-device (a plain web push doesn't touch native config) — see
+ *  package.json/capacitor.config.json. */
+let _splashHidden = false;
+function hideNativeSplashOnce() {
+  if (_splashHidden) return;
+  _splashHidden = true;
+  try {
+    if (isNativeApp() && window.Capacitor.Plugins && window.Capacitor.Plugins.SplashScreen) {
+      window.Capacitor.Plugins.SplashScreen.hide();
+    }
+  } catch (e) { /* best-effort — never let this block real content from showing */ }
+}
 export function printWithOptions(orientation, paperSize, marginMm, fitEl) {
   const size = PRINT_PAPER_SIZES[paperSize] || 'A4';
   const orient = orientation === 'landscape' ? 'landscape' : 'portrait';
@@ -837,6 +876,7 @@ const ROLE_LABEL = { admin: 'Administrator', teacher: 'Teacher', parent: 'Parent
 // (brief: "Remove the Student Login tab — not needed at this stage") —
 // loginStudent() itself is untouched for whenever that's revisited.
 export function renderAuth(errorMsg) {
+  hideNativeSplashOnce();
   const name = (state.settings && state.settings.school_name) || (window.SHULE_CONFIG && window.SHULE_CONFIG.SCHOOL_BRAND_NAME) || 'ShuleTop';
   const features = [
     ['🎒', 'Students', 'Classes, streams & enrollment'],
@@ -1723,6 +1763,7 @@ window.App = {
  *  message for the whole boot sequence, then bootApp() itself swaps in the
  *  real dashboard the moment it's ready. */
 function renderBootingScreen() {
+  hideNativeSplashOnce();
   // BUG FIX: this used to reuse the login page's ".auth > .auth-card"
   // wrapper, but .auth-card is "display:contents" (it exists only so the
   // login page's two side-by-side panels — .promo/.formside — can each be
