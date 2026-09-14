@@ -1567,11 +1567,37 @@ function allowedRoutes(role) {
   return set;
 }
 
+// Live feedback: the Academics group's labels (Dashboard/Students Info/
+// Classes & Strm/Teachers & Staff) end at very different points, which
+// reads as messy. Nudging each one's letter-spacing brings their right
+// edges close together without needing them to land on an exact identical
+// column — capped so a short label like "Dashboard" doesn't get stretched
+// into obviously gappy text just to reach the longest label's width. Scoped
+// to data-section="Academics" only (the admin nav's Academics group) —
+// every other nav section, and the emoji icons, are left exactly as they
+// are.
+const NAV_LABEL_SPACING_CAP_PX = 1.6;
+function alignAcademicsNavLabels() {
+  const labels = Array.from($('#nav').querySelectorAll('a[data-section="Academics"] .nav-label'));
+  if (labels.length < 2) return;
+  let maxWidth = 0;
+  labels.forEach((el) => {
+    el.style.letterSpacing = '';
+    maxWidth = Math.max(maxWidth, el.getBoundingClientRect().width);
+  });
+  labels.forEach((el) => {
+    const gaps = Math.max(1, el.textContent.length - 1);
+    const extra = Math.min(NAV_LABEL_SPACING_CAP_PX, (maxWidth - el.getBoundingClientRect().width) / gaps);
+    if (extra > 0.05) el.style.letterSpacing = extra.toFixed(2) + 'px';
+  });
+}
+
 function buildNav() {
   // Finance Clerk: a completely different, much shorter nav list overrides
   // the role's normal one — see the NAV.financeOnly comment above.
   const items = state.profile.financeOnly ? NAV.financeOnly : (NAV[state.profile.role] || NAV.student);
   let html = '';
+  let currentSection = '';
   items.forEach((it) => {
     // e.g. { hideUnless: 'financeAccess' } — a per-USER gate (not per-role,
     // which is all NAV normally checks), for a module a teacher only sees
@@ -1583,6 +1609,7 @@ function buildNav() {
     // Control (state.profile.deniedModules, set at boot).
     if (it.route && state.profile.deniedModules && state.profile.deniedModules.has(routeDenyKey(it.route))) return;
     if (it.section) {
+      currentSection = it.section;
       html += `<div class="group">${esc(it.section)}</div>`;
     } else if (it.parent) {
       const kids = it.children.map((c) => `<a class="subitem" data-route="${c.route}" title="${esc(c.label)}"><span class="nav-label">${esc(c.label)}</span></a>`).join('');
@@ -1605,10 +1632,11 @@ function buildNav() {
       // <span class="nav-label"> (flex:1;min-width:0 in main.css) lets that
       // span truncate with an ellipsis while .ico stays full-size and fixed
       // — same fix applied to the parent-toggle/subitem labels above.
-      html += `<a data-route="${it.route}" title="${esc(it.label)}"${opensStandalone ? ' data-standalone="1"' : ''}><span class="ico">${it.ico}</span><span class="nav-label">${esc(it.label)}</span>${opensStandalone ? ' <span class="nav-ext-hint">↗</span>' : ''}</a>`;
+      html += `<a data-route="${it.route}" data-section="${esc(currentSection)}" title="${esc(it.label)}"${opensStandalone ? ' data-standalone="1"' : ''}><span class="ico">${it.ico}</span><span class="nav-label">${esc(it.label)}</span>${opensStandalone ? ' <span class="nav-ext-hint">↗</span>' : ''}</a>`;
     }
   });
   $('#nav').innerHTML = html;
+  alignAcademicsNavLabels();
   $('#nav').querySelectorAll('a[data-route]').forEach((a) => {
     const route = a.getAttribute('data-route');
     if (a.hasAttribute('data-standalone')) {
