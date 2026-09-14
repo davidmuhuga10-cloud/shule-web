@@ -87,15 +87,6 @@ export const CAPABILITIES = [
   ...DENIABLE_MODULES.map((m) => m.key),
   ...FINANCE_DENIABLE_TABS.map((m) => m.key)
 ];
-export const CAPABILITY_LABELS = {
-  publish_results: 'Publish exam results',
-  finance_record_collections: 'Finance: record collections & view statements',
-  finance_manage_fees: 'Finance: manage fees, invoices & credit/debit notes',
-  finance_clerk: 'Finance Clerk — sidebar shows ONLY Finance, nothing else',
-  ...Object.fromEntries(DENIABLE_MODULES.map((m) => [m.key, `Block access to ${m.label}`])),
-  ...Object.fromEntries(FINANCE_DENIABLE_TABS.map((m) => [m.key, `Block access to Finance's ${m.label} tab`]))
-};
-
 export function createCapabilitiesApi(supabase) {
   // Same short-window in-memory memoization pattern as the rest of the app
   // (see _util.mjs's createMemoCache header comment for the app-wide

@@ -688,18 +688,6 @@ export function fmtDate(d) {
   try { const dt = new Date(d); if (isNaN(dt)) return d; return dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
   catch (e) { return d; }
 }
-export function emptyState(opts) {
-  const cta = opts.cta ? `<button class="btn" id="empty-cta">${esc(opts.cta.label)}</button>` : '';
-  const html = `<div class="empty ${opts.warn ? 'warn' : ''}">
-    <div class="e-ico">${opts.icon || '📭'}</div>
-    <h3>${esc(opts.title)}</h3>
-    <p>${esc(opts.text)}</p>${cta}</div>`;
-  return { html, wire: (root) => { if (opts.cta) { const b = $('#empty-cta', root); if (b) b.onclick = opts.cta.onclick; } } };
-}
-/** A guard block shown when a prerequisite is missing (e.g. "add classes first"). */
-export function prereqHtml(title, text, route, label) {
-  return { title, text, route, label };
-}
 export function renderPrereq(root, title, text, route, label) {
   root.innerHTML = `<div class="card"><div class="card-b"><div class="empty warn">
     <div class="e-ico">⚠️</div><h3>${esc(title)}</h3><p>${esc(text)}</p>

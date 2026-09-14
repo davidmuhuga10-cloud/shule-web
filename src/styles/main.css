@@ -1511,8 +1511,6 @@ table.data td.num,table.data th.num{text-align:center}
    SVG, styled the same way the rest of Finance's cards are (.card
    side-accent), so these read as native to this screen rather than a
    bolted-on widget. */
-.fin-chart-row{display:grid;grid-template-columns:minmax(260px,340px) 1fr;gap:16px;margin-top:16px;align-items:stretch}
-@media screen and (max-width:860px){.fin-chart-row{grid-template-columns:1fr}}
 /* Live feedback ("alternate where we have income vs expense and class
    budget vs paid"): Budget vs Paid is now the featured full-width chart
    (it always has data — every school invoices something — so the top of
@@ -1895,7 +1893,6 @@ table.data td.num,table.data th.num{text-align:center}
 .fin-side-nav a.fin-nav-exit{margin-top:10px;padding-top:14px;border-top:1px solid rgba(255,255,255,.15);
   color:#8fb5b3;font-size:12.5px}
 .fin-side-nav a.fin-nav-exit:hover{color:#fff}
-.fin-side-nav .fin-rail-arrow{display:none}
 .fin-side-body{flex:1;min-width:0}
 /* The scrollable middle section (tab links + Messages) — only this part
    scrolls, so .fin-brand above and .fin-side-foot below never move.

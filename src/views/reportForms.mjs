@@ -171,7 +171,7 @@ function render(root, exams, classes, intent, settings) {
     const orientEl = root.querySelector('#rf-orient'), sizeEl = root.querySelector('#rf-size');
     const orient = orientEl ? orientEl.value : 'portrait';
     const size = sizeEl ? sizeEl.value : 'A4';
-    rfRestoreFit = autoFitReportsToOnePage(root.querySelector('#rf-card'), orient, size, 5);
+    rfRestoreFit = autoFitReportsToOnePage(root.querySelector('#rf-card'), orient, size, 3);
     // Same safety net as app.js's printWithOptions()'s own @page-override
     // cleanup: 'afterprint' doesn't fire in every browser/print-preview flow
     // (e.g. cancelling before the dialog fully engages), so this scale-down
@@ -389,7 +389,7 @@ function render(root, exams, classes, intent, settings) {
       // right top and bottom" — same tight-margin treatment now used
       // elsewhere (broadsheet.mjs's marginMm=5, examAnalysis.mjs's
       // marginMm=6) instead of the 10mm default.
-      wirePrintOptions(printBar, 'rf', `Report Forms — ${classes.find((c) => c.id === classId) ? classes.find((c) => c.id === classId).name : ''}`, 5);
+      wirePrintOptions(printBar, 'rf', `Report Forms — ${classes.find((c) => c.id === classId) ? classes.find((c) => c.id === classId).name : ''}`, 3);
       return;
     }
 
@@ -405,7 +405,7 @@ function render(root, exams, classes, intent, settings) {
     const cardBody = document.createElement('div');
     cardEl.appendChild(cardBody);
     renderReportCard(cardBody, res.data, { ...extra, feeBalance });
-    wirePrintOptions(printBar, 'rf', `Report Form — ${res.data.student ? res.data.student.full_name : ''}`, 5);
+    wirePrintOptions(printBar, 'rf', `Report Form — ${res.data.student ? res.data.student.full_name : ''}`, 3);
   };
 
   // Round 6 §6 (performance/perceived-freeze): the class/arm selects used

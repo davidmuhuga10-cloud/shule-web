@@ -17,15 +17,6 @@
 // "special characters", not "non-English".
 const PLAIN_NAME_RE = /^[\p{L}\p{N} ]+$/u;
 
-/** True for a non-empty string containing only letters/digits/spaces (after
- *  trimming). Used for stream names (brief §2) and anywhere else a short
- *  plain label, not free text, is expected. */
-export function isPlainName(value) {
-  const trimmed = String(value === undefined || value === null ? '' : value).trim();
-  if (!trimmed) return false;
-  return PLAIN_NAME_RE.test(trimmed);
-}
-
 /** Human-readable reason a plain-name check failed, for error messages —
  *  distinguishes "empty" from "has special characters" so the message
  *  actually helps the person fix it. */
