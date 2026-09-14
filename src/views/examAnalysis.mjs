@@ -206,39 +206,58 @@ function mostImprovedHtml(title, rows, devExamName) {
   </div>`;
 }
 
-/** Approved sketch, now live: ONE shared print/download toolbar with a tick
- *  box per report ("Class Analysis Report" / "Top Students Report") instead
- *  of two separate toolbars (which meant scrolling down to reach the second
- *  one). Both ticked (the default) prints/downloads them together as one
- *  combined document — Class Analysis pages, then Top Students pages, since
- *  they're just sibling elements on the same printable page flow; ticking
- *  only one hides the other's DOM for the duration of that one print/
- *  download, same 'afterprint'/'focus'/timeout safety-net restore pattern
- *  every other print helper in this app already uses. */
+/** ONE shared print/download toolbar with a tick box per report ("Class
+ *  Analysis Report" / "Top Students Report") instead of two separate
+ *  toolbars (which meant scrolling down to reach the second one). Both
+ *  ticked (the default) prints/downloads them together as one combined
+ *  document — Class Analysis pages, then Top Students pages, since they're
+ *  just sibling elements on the same printable page flow; ticking only one
+ *  hides the other's DOM for the duration of that one print/download, same
+ *  'afterprint'/'focus'/timeout safety-net restore pattern every other print
+ *  helper in this app already uses.
+ *
+ *  Live feedback clarified this stays — the only real bug was the shared
+ *  app-wide mobile behaviour that swaps every "🖨️ Print" button's label to
+ *  "⬇️ Download" on a phone (main.css's print-btn-label-mobile/-desktop):
+ *  on THIS screen specifically that swap wasn't actually working right, so
+ *  #ea-print-btn is exempted from it (see main.css) and always reads
+ *  "🖨️ Print" — desktop is untouched, and every other report's own print
+ *  button keeps the normal mobile "Download" label. */
+// Live feedback: "implement download as pdf everywhere any report needs
+// downloading or printing" surfaced a gap here specifically — the mobile
+// Download PDF button (#idPrefix-pdf-btn, wired generically by app.js's
+// wireDownloadPdf(), independent of this function) has no idea the two
+// reports here are individually tick-able, so without this it would always
+// capture BOTH regardless of the checkboxes. Wiring it exactly the same way
+// as the Print button below (wrap whatever's already there, hide/restore
+// around it) fixes that with no changes needed in app.js itself.
 function wireCombinedPrint(root, idPrefix, sections) {
-  const btn = root.querySelector(`#${idPrefix}-print-btn`);
-  if (!btn) return;
-  const inner = btn.onclick;
-  btn.onclick = (e) => {
-    const toHide = sections.filter((s) => s.checkbox && !s.checkbox.checked && s.el);
-    if (toHide.length === sections.length) {
-      toast('Tick at least one report to print or download.', 'err');
-      return;
-    }
-    toHide.forEach((s) => { s.el.style.display = 'none'; });
-    let restored = false;
-    const restore = () => {
-      if (restored) return;
-      restored = true;
-      toHide.forEach((s) => { s.el.style.display = ''; });
-      window.removeEventListener('afterprint', restore);
-      window.removeEventListener('focus', restore);
+  const wrap = (btn) => {
+    if (!btn) return;
+    const inner = btn.onclick;
+    btn.onclick = (e) => {
+      const toHide = sections.filter((s) => s.checkbox && !s.checkbox.checked && s.el);
+      if (toHide.length === sections.length) {
+        toast('Tick at least one report to print or download.', 'err');
+        return;
+      }
+      toHide.forEach((s) => { s.el.style.display = 'none'; });
+      let restored = false;
+      const restore = () => {
+        if (restored) return;
+        restored = true;
+        toHide.forEach((s) => { s.el.style.display = ''; });
+        window.removeEventListener('afterprint', restore);
+        window.removeEventListener('focus', restore);
+      };
+      window.addEventListener('afterprint', restore);
+      window.addEventListener('focus', restore);
+      inner(e);
+      setTimeout(restore, 120000);
     };
-    window.addEventListener('afterprint', restore);
-    window.addEventListener('focus', restore);
-    inner(e);
-    setTimeout(restore, 120000);
   };
+  wrap(root.querySelector(`#${idPrefix}-print-btn`));
+  wrap(root.querySelector(`#${idPrefix}-pdf-btn`));
 }
 
 async function load(root, classes, sel) {
@@ -351,9 +370,8 @@ async function load(root, classes, sel) {
   // Live feedback: "I must scroll down the analysis report to get top
   // students report — introduce two buttons [tick boxes] in the same line
   // where we have print... when both are ticked the report will come as one
-  // combined, if one is ticked that is what will print." Approved via sketch
-  // — one shared toolbar, tick boxes on the left, Download/Print controls on
-  // the right, instead of two separate per-report toolbars.
+  // combined, if one is ticked that is what will print." One shared toolbar,
+  // tick boxes on the left, Download/Print controls on the right.
   const combinedSuggestedName = `${examClassName} — Analysis Reports`.replace(/[\\/:*?"<>|]+/g, '');
   sheetEl.innerHTML = `
     <div class="report-toolbar no-print" style="justify-content:space-between">

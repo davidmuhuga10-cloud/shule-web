@@ -454,8 +454,21 @@ function applyPdfCaptureMode() {
   styleTag.id = 'pdf-capture-style';
   styleTag.textContent = `
     *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
+    .main{margin-left:0!important}
+    .content{padding:0!important;max-width:none!important}
     .report{border:none!important;box-shadow:none!important;max-width:none!important}
     .card{box-shadow:none!important;border:none!important}
+    /* Live feedback: Download PDF on Mark List "cuts" columns that Print
+       renders fine — root cause: .table-wrap scrolls horizontally on a
+       narrow phone screen (so a wide grid fits without breaking layout), and
+       html2canvas, unlike a real print, honors that live scroll clipping —
+       it only captured whatever sliver happened to be scrolled into view.
+       Real print already neutralizes this (main.css's @media print block:
+       .table-wrap{overflow:visible}); mirrored here for the same reason
+       everything else in this function is — html2canvas never sees print
+       media, so nothing print-only ever applies unless it's re-applied by
+       hand. */
+    .table-wrap{overflow:visible}
     table.data{font-size:10.5px}
     table.data th,table.data td{padding:5px 7px}
     .print-grid{font-size:10.5px}

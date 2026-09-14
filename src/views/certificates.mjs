@@ -1,4 +1,4 @@
-import { esc, options, renderPrereq, renderPrereqOrConnectivity, loader } from '../app.js';
+import { esc, options, renderPrereq, renderPrereqOrConnectivity, loader, printOptionsHtml, wirePrintOptions } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { LEAVING_REASON_LABELS } from '../lib/api/students.mjs';
 
@@ -101,7 +101,7 @@ async function loadForm(root, studentId) {
             </div>
           </div>
           <div class="spacer"></div>
-          <button class="btn secondary no-print" id="ct-print-btn">🖨️ Print</button>
+          <div class="no-print">${printOptionsHtml('ct', 'portrait', { simple: true })}</div>
         </div>
         <div class="card-b" style="max-width:640px;margin:0 auto;padding:32px 24px">
           <h2 style="text-align:center;letter-spacing:0.5px;margin-bottom:24px">CERTIFICATE OF LEAVING</h2>
@@ -121,13 +121,13 @@ async function loadForm(root, studentId) {
         </div>
       </div>
     `;
-    // Security hardening pass: was a literal onclick="window.print()" HTML
-    // attribute — inline event-handler attributes are exactly what a
-    // strict script-src Content-Security-Policy blocks, so this (like the
-    // other two print buttons in transcript.mjs/myResults.mjs) is now
-    // wired the same way every other click handler in this codebase
-    // already is.
-    document.getElementById('ct-print-btn').onclick = () => window.print();
+    // Live feedback: "look for anywhere else you may have forgotten to fix"
+    // — this used to be a bare `onclick = () => window.print()`, exactly
+    // the pattern that does nothing at all on the native Android app (see
+    // app.js's printWithOptions() for the full story) and never had a
+    // Download PDF option either. Same shared toolbar every other printable
+    // screen uses now covers this one too.
+    wirePrintOptions(document.getElementById('ct-certificate'), 'ct', `Leaving Certificate — ${student.full_name}`);
   };
 
   ['ct-reason', 'ct-date', 'ct-notes'].forEach((id) => {

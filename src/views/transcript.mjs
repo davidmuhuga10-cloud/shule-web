@@ -1,4 +1,4 @@
-import { esc, options, renderPrereq, renderPrereqOrConnectivity, loader } from '../app.js';
+import { esc, options, renderPrereq, renderPrereqOrConnectivity, loader, printOptionsHtml, wirePrintOptions } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 
 /** Transcript — one student's academic history across every exam they have
@@ -97,7 +97,7 @@ async function load(root, studentId) {
           <div style="font-weight:650;margin-top:4px">Academic Transcript</div>
         </div>
         <div class="spacer"></div>
-        <button class="btn secondary no-print" id="tr-print-btn">🖨️ Print</button>
+        <div class="no-print">${printOptionsHtml('tr', 'portrait', { simple: true })}</div>
       </div>
       <div class="card-b" style="border-bottom:1px solid var(--line)">
         <div class="r-meta">
@@ -122,8 +122,11 @@ async function load(root, studentId) {
       </div>
     </div>
   `;
-  // Security hardening pass: was a literal onclick="window.print()"
-  // attribute — inline event-handler attributes are what a strict
-  // script-src CSP blocks, so this is wired the normal way instead.
-  sheetEl.querySelector('#tr-print-btn').onclick = () => window.print();
+  // Live feedback: "look for anywhere else you may have forgotten to fix"
+  // — this used to be a bare `onclick = () => window.print()`, exactly the
+  // pattern that does nothing at all on the native Android app (see app.js's
+  // printWithOptions() for the full story) and never had a Download PDF
+  // option either. Same shared toolbar every other printable screen uses
+  // now covers this one too.
+  wirePrintOptions(sheetEl, 'tr', `Transcript — ${student.full_name}`);
 }

@@ -1,4 +1,4 @@
-import { esc, loader, state } from '../app.js';
+import { esc, loader, state, printOptionsHtml, wirePrintOptions } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { renderReportCard } from './_reportCard.mjs';
 
@@ -37,12 +37,15 @@ export async function viewMyResults(root) {
     renderReportCard(cardEl, cardRes.data, { settings: settingsRes.ok ? settingsRes.data : {}, bands: bands || [] });
     const printBtn = document.createElement('div');
     printBtn.className = 'no-print center'; printBtn.style.marginTop = '16px';
-    // Security hardening pass: was a literal onclick="window.print()"
-    // attribute — inline event-handler attributes are what a strict
-    // script-src CSP blocks, so this is wired the normal way instead.
-    printBtn.innerHTML = '<button class="btn secondary" id="mr-print-btn">🖨️ Print</button>';
-    printBtn.querySelector('#mr-print-btn').onclick = () => window.print();
+    // Live feedback: "look for anywhere else you may have forgotten to fix"
+    // — this used to be a bare `onclick = () => window.print()`, exactly
+    // the pattern that does nothing at all on the native Android app (see
+    // app.js's printWithOptions() for the full story) and never had a
+    // Download PDF option either. Same shared toolbar every other printable
+    // screen uses now covers this one too.
+    printBtn.innerHTML = printOptionsHtml('mr', 'portrait', { simple: true });
     cardEl.appendChild(printBtn);
+    wirePrintOptions(cardEl, 'mr', `Report Form — ${cardRes.data.student ? cardRes.data.student.full_name : ''}`);
   };
 
   // Auto-select the most recent exam.
