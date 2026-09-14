@@ -754,27 +754,23 @@ table.data td.num,table.data th.num{text-align:center}
    report card (not mixed into the print header itself) so the card below
    it is a true preview of exactly what prints. */
 .report-toolbar{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
-/* Live feedback: "remove download excel on phone, also print — let's just
-   have download only, do this in all places (report forms, mark list,
-   etc)" — every one of these report/print toolbars (app.js's
-   printOptionsHtml/wirePrintOptions, used by Mark List, Class List, Exam
-   Analysis, Score Sheet, Report Forms, every Timetable print, and the
-   Finance reports' own Excel+Print pairs) collapses to ONE button on a
-   phone: the orientation/paper-size pickers disappear, each screen's own
-   separate Excel/Download button (tagged .xlsx-download-btn — added at
-   each call site) disappears, and the surviving Print button's label swaps
-   from "🖨️ Print" to "⬇️ Download" (same button, same click handler —
-   tapping it still opens the OS print sheet, which on a phone almost
-   always means Save as PDF, i.e. exactly the "download" being asked for).
-   "screen and" matters here, same reasoning as this file's other 960px
-   breakpoints — without it this would also match at PRINT time, which
-   would be exactly backwards (hiding the size picker is fine since .no-
-   print already drops the whole toolbar from print output regardless, but
-   it's kept explicit for clarity). Desktop is completely unchanged. */
+/* Live feedback (reverted): this toolbar used to also swap the surviving
+   button's label from "🖨️ Print" to "⬇️ Download" on a phone (main.css
+   history: "remove download excel on phone, also print — let's just have
+   download only"). Live feedback since then: "print isn't working on
+   mobile... revert it back to print as it was before, everywhere across the
+   app" — the label swap is removed entirely; every print button now always
+   reads "🖨️ Print" on every screen size, same as desktop. The rest of the
+   phone collapse stays: the orientation/paper-size pickers and each
+   screen's own separate Excel/Download button (.xlsx-download-btn) still
+   disappear on a phone, leaving just the one Print button — only its LABEL
+   no longer changes. "screen and" matters here, same reasoning as this
+   file's other 960px breakpoints — without it this would also match at
+   PRINT time, which would be exactly backwards (hiding the size picker is
+   fine since .no-print already drops the whole toolbar from print output
+   regardless, but it's kept explicit for clarity). */
 .print-btn-label-mobile{display:none}
 @media screen and (max-width:960px){
-  .print-btn-label-desktop{display:none}
-  .print-btn-label-mobile{display:inline}
   .print-opts select{display:none}
   .xlsx-download-btn{display:none}
 }
@@ -2194,11 +2190,14 @@ table.data td.num,table.data th.num{text-align:center}
 .ea-mi-delta{font-weight:800;color:var(--ok);margin-top:6px;font-size:13px}
 .ea-mi-scores{font-size:11px;color:#000;margin-top:2px}
 .ea-mi-note{font-size:11px;color:#000;margin-top:8px;font-style:italic}
-/* Combined print toolbar tick boxes (approved sketch): "Class Analysis
-   Report" / "Top Students Report", sat to the far left of the same toolbar
-   row the Download/Print controls already live in. */
+/* Combined print toolbar tick boxes: "Class Analysis Report" / "Top
+   Students Report", sat to the far left of the same toolbar row the
+   Download/Print controls already live in. */
 .ea-report-checks{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .ea-report-checks label{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:650;color:var(--ink);margin:0;cursor:pointer}
 .ea-report-checks input[type=checkbox]{width:16px;height:16px}
+/* The "Print" -> "Download" mobile label swap is now removed app-wide (see
+   .print-btn-label-mobile/-desktop further up) — this screen's print button
+   no longer needs its own separate override. */
 @media print{.ea-podium,.ea-mi-grid{grid-template-columns:1fr 1fr 1fr}.ea-mi-grid{grid-template-columns:1fr 1fr}}
 
