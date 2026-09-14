@@ -482,6 +482,18 @@ function loadHtml2Canvas() {
   return _html2canvasModulePromise;
 }
 const PDF_JSPDF_FORMAT = { A4: 'a4', A5: 'a5', Letter: 'letter' };
+// Live feedback: Download PDF on a phone (web or app) came out noticeably
+// worse than Print — a squeezed header, wrapped school name/address, fewer
+// table columns. Root cause: html2canvas screenshots the page at whatever
+// width the phone's real screen actually is, so main.css's phone-only
+// breakpoint (@media screen and (max-width:960px)) is still active during
+// capture and reflows the page for a small screen — exactly what real
+// print never does (a real print render always lays out at full page
+// width, ignoring how narrow the phone screen is). Telling html2canvas to
+// render as if the window were this wide skips that breakpoint entirely, so
+// the captured layout matches the same wide/print layout on every device
+// regardless of the phone's actual screen size.
+const PDF_CAPTURE_WINDOW_WIDTH = 1100;
 
 function applyPdfCaptureMode() {
   const restore = [];
@@ -493,6 +505,7 @@ function applyPdfCaptureMode() {
   styleTag.id = 'pdf-capture-style';
   styleTag.textContent = `
     *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
+    body{background:#fff!important}
     .main{margin-left:0!important}
     .content{padding:0!important;max-width:none!important}
     .report{border:none!important;box-shadow:none!important;max-width:none!important}
@@ -658,7 +671,7 @@ function wireDownloadPdf(root, idPrefix, suggestedFilename, marginMm, fitSelecto
       for (let i = 0; i < targets.length; i += 1) {
         const el = targets[i];
         if (!el) continue;
-        const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
+        const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true, windowWidth: PDF_CAPTURE_WINDOW_WIDTH });
         addCanvasAsPages(doc, canvas, { printableWidthMm, printableHeightMm, marginMm: margin, isFirstEl: i === 0 });
       }
       restoreCapture();
