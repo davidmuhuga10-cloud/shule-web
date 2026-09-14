@@ -243,6 +243,26 @@ function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm) {
  *  Form, Finance statements, etc.). `fitEl` (optional, DOM element) is the
  *  wide printable table, if any, to run through autoFitPrintWidth() above —
  *  only the Mark List passes one today. */
+/** Live feedback: "when i click those print on mobile no matter the place
+ *  nothing happens" — traced to the ShuleTop Android app (Capacitor-wrapped
+ *  WebView, shared via WhatsApp, not yet on the Play Store). window.print()
+ *  is a standard browser API that plain isn't implemented by Android's
+ *  native WebView component — it's not an error, it's a no-op, which is
+ *  exactly "nothing happens" and why it happens on EVERY screen alike (they
+ *  all share this one function). This is invisible in a normal mobile
+ *  browser (Chrome/Safari), where window.print() already works fine and
+ *  keeps being used below unchanged.
+ *  Fix: when running inside the native app, hand off to the
+ *  @capgo/capacitor-printer plugin's printWebView() instead, which uses
+ *  Android's real PrintManager (same "Save as PDF"/pick-a-printer sheet a
+ *  browser would show) to print the exact page as it stands, margins/
+ *  orientation-override style tag and all. Requires the native Android
+ *  project to be synced (`npx cap sync android`) and rebuilt with this
+ *  plugin's dependency before it takes effect on-device — see package.json. */
+function isNativeApp() {
+  try { return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); }
+  catch (e) { return false; }
+}
 export function printWithOptions(orientation, paperSize, marginMm, fitEl) {
   const size = PRINT_PAPER_SIZES[paperSize] || 'A4';
   const orient = orientation === 'landscape' ? 'landscape' : 'portrait';
@@ -254,11 +274,24 @@ export function printWithOptions(orientation, paperSize, marginMm, fitEl) {
   const unfit = autoFitPrintWidth(fitEl, orient, size, margin);
   const cleanup = () => { style.remove(); unfit(); window.removeEventListener('afterprint', cleanup); };
   window.addEventListener('afterprint', cleanup);
-  window.print();
-  // Safety net: afterprint doesn't fire in every browser/print-preview flow
-  // (e.g. cancelling before the dialog fully engages) — make sure the
-  // override never lingers and affects the next, unrelated print.
-  setTimeout(cleanup, 5000);
+  const nativePrinter = isNativeApp() && window.Capacitor.Plugins && window.Capacitor.Plugins.Printer;
+  if (nativePrinter) {
+    // No 'afterprint' event fires for the native print sheet, so clean up
+    // as soon as the plugin's own promise settles (it resolves/rejects once
+    // that sheet is dismissed either way). Longer safety net than the
+    // browser path below — Android's own print preview can stay open for a
+    // while as someone picks "Save as PDF" vs. a real printer.
+    Promise.resolve(nativePrinter.printWebView({ name: document.title || 'ShuleTop' }))
+      .catch(() => {})
+      .then(cleanup);
+    setTimeout(cleanup, 120000);
+  } else {
+    window.print();
+    // Safety net: afterprint doesn't fire in every browser/print-preview
+    // flow (e.g. cancelling before the dialog fully engages) — make sure
+    // the override never lingers and affects the next, unrelated print.
+    setTimeout(cleanup, 5000);
+  }
 }
 /** Shared "🖨️ Print" + paper-size/orientation controls, for every report
  *  view that lets the admin choose portrait/landscape and A4/A5/Letter
@@ -274,23 +307,19 @@ export function printWithOptions(orientation, paperSize, marginMm, fitEl) {
  *  The orientation/size are still rendered as hidden inputs with the same
  *  ids wirePrintOptions() reads, so nothing else about how printing is
  *  wired needs to change. */
-// Live feedback: "remove download excel on phone, also print — let's just
-// have download only, do this in all places" — on a phone, a separate
-// Excel button (each view's own, tagged .xlsx-download-btn — see main.css)
-// PLUS an orientation/paper-size picker PLUS a Print button is a lot of
-// competing controls for a small toolbar, and "print" itself is a confusing
-// verb on a phone with no printer attached (what actually happens is the
-// OS's Save-as-PDF sheet — that IS a download). So on phones, every one of
-// these screens collapses down to a single button. It's still the exact
-// same #idPrefix-print-btn element wirePrintOptions() already wires up
-// (this never touches that mechanism, just how it's labelled/what's next to
-// it) — only its own text swaps via the two spans below + main.css's
-// max-width:960px rule, and the orientation/size pickers + the sibling
-// Excel button hide alongside it. A screen with no separate Excel button at
-// all (Report Forms, Score Sheet's own print, every Timetable print) still
-// gets the same swap, since "Print" -> "Download" reads right there too —
-// tapping it still opens the OS print sheet either way.
+// The mobile label-swap this comment used to describe ("Print" -> "Download"
+// on the SAME button) was reverted — see printWithOptions()'s history above:
+// it turned out to just be a confusing relabel of a button that, on the
+// Android app, did nothing at all. Live feedback: "can we have both print
+// and download as pdf on phone — clicking print just works as expected then
+// download when clicked downloads the intended document in pdf... with our
+// rules enforced (one page, minimal borders)". So now, on phone widths only
+// (see main.css's max-width:960px rules), a SECOND, separate button appears
+// next to Print — #idPrefix-pdf-btn, wired below by wireDownloadPdf(). Print
+// is untouched. Desktop only ever sees Print (+ the pickers/Excel button
+// where applicable) — unchanged, per repeated "don't touch desktop".
 const PRINT_BTN_LABEL_HTML = `<span class="print-btn-label-desktop">🖨️ Print</span><span class="print-btn-label-mobile">⬇️ Download</span>`;
+const DOWNLOAD_PDF_BTN_HTML = (idPrefix) => `<button class="btn secondary print-download-mobile-btn" id="${idPrefix}-pdf-btn">⬇️ Download PDF</button>`;
 export function printOptionsHtml(idPrefix, defaultOrientation, opts) {
   const landscapeDefault = defaultOrientation === 'landscape';
   if (opts && opts.simple) {
@@ -298,6 +327,7 @@ export function printOptionsHtml(idPrefix, defaultOrientation, opts) {
       <input type="hidden" id="${idPrefix}-orient" value="${landscapeDefault ? 'landscape' : 'portrait'}">
       <input type="hidden" id="${idPrefix}-size" value="A4">
       <button class="btn secondary" id="${idPrefix}-print-btn">${PRINT_BTN_LABEL_HTML}</button>
+      ${DOWNLOAD_PDF_BTN_HTML(idPrefix)}
     </div>`;
   }
   // Live feedback (Mark List): "this should always print as landscape" — a
@@ -321,6 +351,7 @@ export function printOptionsHtml(idPrefix, defaultOrientation, opts) {
       <option value="Letter">Letter</option>
     </select>
     <button class="btn secondary" id="${idPrefix}-print-btn">${PRINT_BTN_LABEL_HTML}</button>
+    ${DOWNLOAD_PDF_BTN_HTML(idPrefix)}
   </div>`;
 }
 /** suggestedFilename (optional, feature brief §2: "suggest a clear file name
@@ -373,7 +404,230 @@ export function wirePrintOptions(root, idPrefix, suggestedFilename, marginMm, fi
     }
     printWithOptions(orient, size, marginMm, fitEl);
   };
+  wireDownloadPdf(root, idPrefix, suggestedFilename, marginMm, fitSelector);
 }
+
+/* ---------------------------------------------------------------------
+ * Download as PDF (mobile) — "clicking print just works as expected, then
+ * download when clicked downloads the intended document in pdf... with our
+ * rules enforced (one page, minimal borders)."
+ *
+ * Print (above) hands off to whatever the platform's own print pipeline is
+ * — window.print() in a browser, the native Android print sheet in the app
+ * — and either one lets someone choose "Save as PDF" themselves. Download
+ * is different: one tap, no picker, straight to a PDF file. There is no
+ * browser or WebView API that silently produces a PDF of a live page — so
+ * this builds the PDF ourselves: html2canvas rasterizes the printable
+ * content (already sized/scaled by the exact same fit logic Print uses —
+ * autoFitPrintWidth()'s fitEl, plus a real 'beforeprint'/'afterprint' event
+ * dispatch so screens like Report Forms that hook their own one-page fit to
+ * those native events run it too, with no per-screen wiring needed here),
+ * then jsPDF lays the result onto real, correctly-sized pages.
+ *
+ * applyPdfCaptureMode() below deliberately mirrors main.css's single
+ * `@media print{...}` block (search that file) — a plain html2canvas() of
+ * the on-screen DOM would NOT pick up print-only CSS (browsers only switch
+ * to print media during an actual print), so the handful of things that
+ * block genuinely matters for print (background colors, hiding nav/tabs,
+ * dropping shadows/borders, shrinking table text) are re-applied here by
+ * hand. Keep the two in sync if that block ever changes.
+ * --------------------------------------------------------------------- */
+let _jsPdfModulePromise = null;
+function loadJsPdf() {
+  if (!_jsPdfModulePromise) _jsPdfModulePromise = import('./vendor/jspdf.esm.js');
+  return _jsPdfModulePromise;
+}
+let _html2canvasModulePromise = null;
+function loadHtml2Canvas() {
+  if (!_html2canvasModulePromise) _html2canvasModulePromise = import('./vendor/html2canvas.esm.js').then((m) => m.default);
+  return _html2canvasModulePromise;
+}
+const PDF_JSPDF_FORMAT = { A4: 'a4', A5: 'a5', Letter: 'letter' };
+
+function applyPdfCaptureMode() {
+  const restore = [];
+  document.querySelectorAll('.sidebar,.topbar,.no-print,.fin-tabs,.tabs').forEach((el) => {
+    restore.push([el, el.style.display]);
+    el.style.display = 'none';
+  });
+  const styleTag = document.createElement('style');
+  styleTag.id = 'pdf-capture-style';
+  styleTag.textContent = `
+    *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
+    .report{border:none!important;box-shadow:none!important;max-width:none!important}
+    .card{box-shadow:none!important;border:none!important}
+    table.data{font-size:10.5px}
+    table.data th,table.data td{padding:5px 7px}
+    .print-grid{font-size:10.5px}
+    .print-grid th,.print-grid td{padding:5px 7px}
+  `;
+  document.head.appendChild(styleTag);
+  return () => {
+    restore.forEach(([el, display]) => { el.style.display = display; });
+    styleTag.remove();
+  };
+}
+
+// Slices one tall canvas across as many PDF pages as it needs (a report that
+// overflows one page still needs every part of it in the file, same as a
+// real multi-page print run would produce) — width is always scaled to fill
+// the printable area edge to edge ("no spaces on any side"), height slices
+// at exactly one page's worth of pixels at a time.
+function addCanvasAsPages(doc, canvas, { printableWidthMm, printableHeightMm, marginMm, isFirstEl }) {
+  const pxPerMm = canvas.width / printableWidthMm;
+  const pageHeightPx = Math.max(1, Math.round(printableHeightMm * pxPerMm));
+  let renderedPx = 0;
+  let firstSlice = true;
+  while (renderedPx < canvas.height) {
+    if (!(isFirstEl && firstSlice)) doc.addPage();
+    const sliceHeightPx = Math.min(pageHeightPx, canvas.height - renderedPx);
+    const sliceCanvas = document.createElement('canvas');
+    sliceCanvas.width = canvas.width;
+    sliceCanvas.height = sliceHeightPx;
+    sliceCanvas.getContext('2d').drawImage(canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
+    const imgData = sliceCanvas.toDataURL('image/jpeg', 0.94);
+    const imgHeightMm = sliceHeightPx / pxPerMm;
+    doc.addImage(imgData, 'JPEG', marginMm, marginMm, printableWidthMm, imgHeightMm);
+    renderedPx += sliceHeightPx;
+    firstSlice = false;
+  }
+}
+
+// Most screens render their print toolbar and the actual printable content
+// into the SAME container (Mark List/Class List/Score Sheet/Exam Analysis
+// all set one element's innerHTML to both at once) — root itself is exactly
+// what to rasterize there. A couple of screens (Report Forms' printBar,
+// Timetable's #tt-picker) render the toolbar into its own small standalone
+// node with the real content living as a SIBLING elsewhere on the page —
+// for those, walk out to the shared parent and look there instead. Either
+// way, whatever gets returned still has the toolbar itself (already
+// .no-print) hidden by applyPdfCaptureMode() before it's captured.
+//
+// Deliberately ignores fitEl (the narrow wide-table element autoFitPrintWidth
+// scales) — that element is only ever PART of a screen's real printed output
+// (Mark List's own header + the grid + its Class/Gender Grade Summary
+// sections all sit alongside it), never the whole thing. fitEl is scaled in
+// place before this runs, so capturing the broader container here already
+// includes it, correctly shrunk, along with everything around it.
+function resolvePdfTarget(root) {
+  const CONTENT_SEL = 'table, .report, .print-grid';
+  if ((root.matches && root.matches(CONTENT_SEL)) || root.querySelector(CONTENT_SEL)) return root;
+  if (root.parentElement && root.parentElement.querySelector(CONTENT_SEL)) return root.parentElement;
+  return document.querySelector('.content') || document.body;
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function deliverPdfBlob(blob, filename) {
+  const name = `${String(filename || 'ShuleTop Report').replace(/[\\/:*?"<>|]+/g, '').trim() || 'ShuleTop Report'}.pdf`;
+  const plugins = isNativeApp() && window.Capacitor.Plugins;
+  if (plugins && plugins.Filesystem) {
+    // Directory.Cache (app-private) rather than Directory.Documents (the
+    // shared public folder) — the latter needs a runtime storage permission
+    // on Android that this app doesn't currently request, which would make
+    // the save silently fail on plenty of devices. Cache needs no permission
+    // at all, and the Share sheet below (via Android's own FileProvider)
+    // lets the file go wherever the person actually wants it — "Save to
+    // device", WhatsApp, Drive, etc. — regardless of which private folder it
+    // physically sat in first.
+    const base64 = await blobToBase64(blob);
+    const written = await plugins.Filesystem.writeFile({ path: name, data: base64, directory: 'CACHE' });
+    if (plugins.Share) {
+      // The share sheet doubles as how the PDF actually reaches someone —
+      // this app is shared/used over WhatsApp today, not the Play Store, so
+      // "downloaded, now send it" is one tap away instead of a separate step.
+      await plugins.Share.share({ title: name, url: written.uri, dialogTitle: 'Save or share PDF' }).catch(() => {});
+    }
+    return { savedTo: name };
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  return { savedTo: name };
+}
+
+/** Wires #idPrefix-pdf-btn (rendered by printOptionsHtml() above, mobile-only
+ *  via CSS) to build and save/share a real PDF of whatever's on screen,
+ *  honoring the same orientation/paper-size/margin choices and the same
+ *  wide-table fit (fitSelector) Print uses. Screens that batch multiple
+ *  printable blocks (Report Forms' batch run, one `.report` per student) are
+ *  captured one block at a time so each student lands on their own PDF
+ *  page(s), same as `.batch-page{page-break-after:always}` does for real
+ *  print; everything else is captured as a whole via resolvePdfTarget(). */
+function wireDownloadPdf(root, idPrefix, suggestedFilename, marginMm, fitSelector) {
+  const btn = root.querySelector(`#${idPrefix}-pdf-btn`);
+  if (!btn) return;
+  btn.onclick = async () => {
+    const orientEl = root.querySelector(`#${idPrefix}-orient`);
+    const sizeEl = root.querySelector(`#${idPrefix}-size`);
+    const orient = orientEl ? orientEl.value : 'portrait';
+    const size = sizeEl ? sizeEl.value : 'A4';
+    const margin = Number.isFinite(marginMm) && marginMm > 0 ? marginMm : 10;
+    const fitEl = fitSelector ? root.querySelector(fitSelector) : null;
+    if (btn.disabled) return;
+    const prevHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Preparing…';
+    let unfit = () => {};
+    let restoreCapture = () => {};
+    try {
+      const [{ jsPDF }, html2canvas] = await Promise.all([loadJsPdf(), loadHtml2Canvas()]);
+      window.dispatchEvent(new Event('beforeprint'));
+      unfit = autoFitPrintWidth(fitEl, orient, size, margin);
+      restoreCapture = applyPdfCaptureMode();
+      // Let the fit/capture-mode style changes actually reflow before the
+      // screenshot — a synchronous read right after setting styles can catch
+      // the browser mid-layout on some engines.
+      await new Promise((r) => setTimeout(r, 50));
+      // Report Forms' batch run (one .report per student) lives as a sibling
+      // of the toolbar (both children of #rf-card), not inside it — same
+      // "toolbar-only root" case resolvePdfTarget() below accounts for.
+      let batchEls = Array.from(root.querySelectorAll('.batch-page'));
+      if (!batchEls.length && root.parentElement) batchEls = Array.from(root.parentElement.querySelectorAll('.batch-page'));
+      const targets = batchEls.length ? batchEls : [resolvePdfTarget(root)];
+      const [shortMm, longMm] = { A4: [210, 297], A5: [148, 210], Letter: [215.9, 279.4] }[size] || [210, 297];
+      const pageWidthMm = orient === 'landscape' ? longMm : shortMm;
+      const pageHeightMm = orient === 'landscape' ? shortMm : longMm;
+      const printableWidthMm = pageWidthMm - 2 * margin;
+      const printableHeightMm = pageHeightMm - 2 * margin;
+      const doc = new jsPDF({ orientation: orient, unit: 'mm', format: PDF_JSPDF_FORMAT[size] || 'a4' });
+      for (let i = 0; i < targets.length; i += 1) {
+        const el = targets[i];
+        if (!el) continue;
+        const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
+        addCanvasAsPages(doc, canvas, { printableWidthMm, printableHeightMm, marginMm: margin, isFirstEl: i === 0 });
+      }
+      restoreCapture();
+      unfit();
+      window.dispatchEvent(new Event('afterprint'));
+      const blob = doc.output('blob');
+      await deliverPdfBlob(blob, suggestedFilename);
+      toast('PDF ready.', 'ok');
+    } catch (e) {
+      restoreCapture();
+      unfit();
+      window.dispatchEvent(new Event('afterprint'));
+      console.error('Download PDF failed:', e);
+      toast('Could not create the PDF — please try Print instead.', 'err');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = prevHtml;
+    }
+  };
+}
+
 export function initials(name) {
   return String(name || '?').trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 }
