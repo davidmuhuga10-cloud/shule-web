@@ -89,15 +89,20 @@ function render(root, exams, classes, sel) {
 // here reading from `settings`).
 function cell(score, gr, showLevels, tintClass) {
   if (score === null || score === undefined) return `<td class="num${tintClass}">—</td>`;
-  // Live feedback, ROUND 2 (supersedes the note this replaced): an earlier
-  // round asked to keep the header row, TOTAL/AVERAGE rows, and the
-  // per-student TT MKS/PL/OVR POS cells bold as the sheet's only emphasis.
-  // Later feedback found that still hadn't actually improved legibility —
-  // "make everything not bold apart from the headers row alone" — so ALL
-  // of that extra bold (TOTAL/AVERAGE row values and label, TT MKS, PL
-  // badge, OVR POS, and the .bs-agg-row/.mark-grade CSS weight bumps) has
-  // now been removed too. The header row (.mark-list-grid th) is the only
-  // bold left on this sheet.
+  // Live feedback: "trying to avoid marks being in bold can help us a
+  // little — let's just have the headers and total and average at the
+  // bottom as the only bold. PL, total marks, ovr position should also be
+  // in bold" — this used to wrap every individual subject mark in <b>,
+  // which is the bulk of the ink on the page fighting the header/summary
+  // rows for attention. Plain weight now; the header row (.mark-list-grid
+  // th), the TOTAL/AVERAGE rows (.bs-agg-row), and the per-student TT
+  // MKS/PL/OVR POS cells below keep their bold.
+  //
+  // ROUND 2 (reverted): a later round tried removing ALL of that extra
+  // bold too, plus tighter padding/bigger font and DEV rounded to 1dp —
+  // live feedback called the result "awkward" and asked to revert
+  // completely back to normal font size and bold. Back to the state
+  // above; DEV is back to 2dp too (see subjectRowCellsHtml below).
   return `<td class="num mark-cell${tintClass}">${score}${showLevels && gr && gr.grade_label ? ` <span class="mark-grade">${esc(gr.grade_label)}</span>` : ''}</td>`;
 }
 
@@ -173,11 +178,11 @@ function subjectAggCellsHtml(sub, students, mode, examOutOf) {
     // "possible" of its own — shows the earned/possible total-of-total
     // (e.g. "870/1200": 870 marks earned across the students who sat this
     // subject, out of nums.length students times the exam's out_of).
-    if (mode === 'sum') return `<td class="num">${Math.round(val)}/${nums.length * examOutOf}</td>`;
+    if (mode === 'sum') return `<td class="num"><b>${Math.round(val)}/${nums.length * examOutOf}</b></td>`;
     // Sprint Review correction: the AVERAGE row is this sheet's "Mean
     // Marks" figure — an explicit exception to the "round everything to a
     // whole number" rule, so it keeps 2 decimal places instead.
-    return `<td class="num">${val.toFixed(2)}</td>`;
+    return `<td class="num"><b>${val.toFixed(2)}</b></td>`;
   }
   const paperCells = sub.papers.map((p) => {
     const nums = students.map((s) => (s.paperScores && s.paperScores[sub.id] ? s.paperScores[sub.id][p.id] : undefined)).filter((v) => v !== null && v !== undefined && !isNaN(v));
@@ -190,12 +195,12 @@ function subjectAggCellsHtml(sub, students, mode, examOutOf) {
   const pctVal = aggregate(pctNums, mode);
   let pctCell;
   if (pctVal === null) pctCell = '<td class="num">—</td>';
-  else if (mode === 'sum') pctCell = `<td class="num">${Math.round(pctVal)}/${pctNums.length * 100}</td>`; // subjectPct is already 0-100
-  else pctCell = `<td class="num">${pctVal.toFixed(2)}</td>`;
+  else if (mode === 'sum') pctCell = `<td class="num"><b>${Math.round(pctVal)}/${pctNums.length * 100}</b></td>`; // subjectPct is already 0-100
+  else pctCell = `<td class="num"><b>${pctVal.toFixed(2)}</b></td>`;
   return `${paperCells}${pctCell}`;
 }
 function aggRowHtml(label, subjects, students, mode, examOutOf) {
-  return `<tr class="bs-agg-row"><td class="id-col"></td><td class="name-col">${esc(label)}</td><td class="str-col"></td>
+  return `<tr class="bs-agg-row"><td class="id-col"></td><td class="name-col"><b>${esc(label)}</b></td><td class="str-col"></td>
     ${subjects.map((sub) => subjectAggCellsHtml(sub, students, mode, examOutOf)).join('')}
     <td class="num sum-col" colspan="9"></td>
   </tr>`;
@@ -306,11 +311,11 @@ async function load(root, classes, sel) {
           <td class="id-col">${esc(s.admission_no)}</td><td class="name-col">${esc(s.full_name)}</td><td class="str-col">${esc(s.stream_name || '—')}</td>
           ${res.subjects.map((sub, i) => subjectRowCellsHtml(sub, s, showLevels, i)).join('')}
           <td class="num sum-col">${s.subject_count}</td>
-          <td class="num sum-col">${Math.round(s.total)}</td><td class="num sum-col">${s.average.toFixed(2)}</td>
-          <td class="num sum-col">${showLevels ? `<span class="badge grade">${esc(s.overall_grade || '—')}</span>` : '—'}</td>
+          <td class="num sum-col"><b>${Math.round(s.total)}</b></td><td class="num sum-col">${s.average.toFixed(2)}</td>
+          <td class="num sum-col">${showLevels ? `<span class="badge grade"><b>${esc(s.overall_grade || '—')}</b></span>` : '—'}</td>
           <td class="num sum-col">${s.total_points === null ? '—' : s.total_points.toFixed(2)}</td><td class="num sum-col">${s.mean_points === null ? '—' : s.mean_points.toFixed(2)}</td>
-          <td class="num sum-col dev-col">${s.deviation > 0 ? '+' : ''}${s.deviation.toFixed(1)}</td>
-          <td class="num sum-col">${s.stream_position || '—'}</td><td class="num sum-col">${s.position || '—'}</td>
+          <td class="num sum-col dev-col">${s.deviation > 0 ? '+' : ''}${s.deviation.toFixed(2)}</td>
+          <td class="num sum-col">${s.stream_position || '—'}</td><td class="num sum-col"><b>${s.position || '—'}</b></td>
         </tr>`).join('')}${aggRowHtml('TOTAL', res.subjects, res.students, 'sum', examOutOf)}${aggRowHtml('AVERAGE', res.subjects, res.students, 'avg', examOutOf)}</tbody>
       </table></div>
       ${showLevels ? summaryTablesHtml(res.students, res.subjects, bands) : ''}
