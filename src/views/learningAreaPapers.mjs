@@ -76,11 +76,32 @@ async function load(root, exam) {
   });
   Object.values(papersBySubjectClass).forEach((list) => list.sort((a, b) => a.paper_no - b.paper_no));
 
+  // Live feedback: a school with many classes was seeing the same subject
+  // NAME listed once per underlying record (e.g. Grade 6's own
+  // "Mathematics" and Grade 7's own "Mathematics" are separate records —
+  // see cbcDefaults.mjs's per-level CBC_SUBJECTS list) — unreadable once a
+  // school has a dozen classes. Grouped here by subject NAME instead: one
+  // visual block per name, every class it actually applies to nested under
+  // it, each keeping its own real subject record/papers/Edit button.
+  const classById = {}; classes.forEach((c) => { classById[c.id] = c; });
+  const groups = [];
+  const groupByName = {};
+  subjects.forEach((s) => {
+    (s.classIds || []).forEach((classId) => {
+      const cls = classById[classId];
+      if (!cls) return;
+      let group = groupByName[s.name];
+      if (!group) { group = { name: s.name, rows: [] }; groupByName[s.name] = group; groups.push(group); }
+      group.rows.push({ subject: s, cls, papers: papersBySubjectClass[`${s.id}|${classId}`] || [] });
+    });
+  });
+  groups.forEach((g) => g.rows.sort((a, b) => classes.indexOf(a.cls) - classes.indexOf(b.cls)));
+
   body.innerHTML = `
     <div class="card">
       <div class="card-b table-wrap"><table class="data">
         <thead><tr><th style="width:36px">#</th><th>Subject</th><th>Class</th><th>Papers</th><th style="width:110px"></th></tr></thead>
-        <tbody>${subjects.map((s, i) => classes.filter((c) => (s.classIds || []).includes(c.id)).map((c, ci) => subjectClassRowHtml(s, c, i, ci, papersBySubjectClass[`${s.id}|${c.id}`] || [])).join('')).join('')}</tbody>
+        <tbody>${groups.map((g, i) => g.rows.map((r, ri) => subjectGroupRowHtml(g, r, i, ri)).join('')).join('')}</tbody>
       </table></div>
     </div>
   `;
@@ -91,16 +112,16 @@ async function load(root, exam) {
   });
 }
 
-function subjectClassRowHtml(subject, cls, subjectIndex, classIndex, papers) {
+function subjectGroupRowHtml(group, row, groupIndex, rowIndexInGroup) {
+  const { subject, cls, papers } = row;
   const summary = papers.length
     ? papers.map((p) => `${esc(p.name)} (out of ${p.out_of}, ${Math.round(Number(p.weight) * 100)}%)`).join(' + ')
     : `<span class="badge grey">Single mark</span>`;
-  // Only print the subject name/# on that subject's first class row — the
-  // rest of its class rows read as a continuation of the same subject
-  // block, same "don't repeat the group label every row" convention as
-  // other grouped tables in this app.
-  return `<tr${classIndex === 0 ? ' style="border-top:2px solid var(--line)"' : ''}>
-    ${classIndex === 0 ? `<td>${subjectIndex + 1}</td><td>${esc(subject.name)}</td>` : `<td></td><td></td>`}
+  // Only print the subject name/# on the group's first row — the rest read
+  // as a continuation of the same subject block, with no line between them;
+  // a solid black line marks the start of the NEXT subject's group.
+  return `<tr${rowIndexInGroup === 0 ? ' style="border-top:1px solid #000"' : ''}>
+    ${rowIndexInGroup === 0 ? `<td>${groupIndex + 1}</td><td>${esc(group.name)}</td>` : `<td></td><td></td>`}
     <td>${esc(cls.name)}</td>
     <td>${summary}</td>
     <td><button class="btn ghost sm" data-edit-subject="${subject.id}" data-edit-class="${cls.id}">${papers.length ? 'Edit' : 'Configure'}</button></td>
