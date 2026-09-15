@@ -1372,15 +1372,30 @@ table.data td.num,table.data th.num{text-align:center}
   /* Round 3 §11 originally forced the Mark List's Class Grade Summary (+
      Gender Grade Summary / Grade Breakdown by Subject, .bs-summary) onto
      its OWN fresh page every time. A later fix softened that to
-     break-inside:avoid (let it flow onto the grid's last page whenever it
-     fits, only pushing to a fresh page if it doesn't). Live feedback after
-     that fix: the wasted-space complaint persisted regardless — so
-     whatever is left of the page budget below the student grid is not
-     actually coming from this rule. Per direct instruction ("undo the
-     rule of new page completely... just do away with it"), no special
-     page-break handling is applied to .bs-summary at all any more — it is
-     plain, ordinary content now and paginates however the browser's
-     default table/box flow decides, same as everything else on the page. */
+     break-inside:avoid, then — when live feedback said the whitespace was
+     still there — it was removed outright.
+     A controlled reproduction (real headless-Chrome print, same CSS, a
+     synthetic 32-student table) proved removing it was a step backward:
+     with NO break rule at all, the browser split .bs-summary itself right
+     down the middle — "Class Grade Summary"/"Gender Grade Summary" printed
+     as stranded headings at the very bottom of one page with their actual
+     tables pushed to the next page underneath nothing. That's a worse,
+     uglier defect than any blank space, and it's exactly the bug Round 3
+     §11 was written to prevent in the first place.
+     The same reproduction also showed the actual, unavoidable source of
+     "wasted space": whichever page ends up LAST in the printout always has
+     some blank paper below its final line, for the same reason the last
+     page of any printed Word/Google document usually isn't perfectly
+     full — a fixed-size sheet essentially never divides evenly by however
+     tall the remaining content happens to be, and the summary section
+     (a handful of short tables) is much shorter than a full page. No CSS
+     rule can stretch real content to fill out a page's remaining space;
+     that part is not a bug to "fix" so much as normal pagination.
+     break-inside:avoid is restored as the right middle ground: it does NOT
+     force an early, unnecessary page break (so the summary still prints
+     right under the grid whenever there's room), but it DOES stop the
+     summary from being torn apart the ugly way this test just caught. */
+  .bs-summary{break-inside:avoid;page-break-inside:avoid}
 }
 
 /* ---------- Loader ---------- */
