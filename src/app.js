@@ -311,8 +311,36 @@ export function printWithOptions(orientation, paperSize, marginMm, fitEl) {
   style.textContent = `@page{size:${size} ${orient};margin:${margin}mm}`;
   document.head.appendChild(style);
   const unfit = autoFitPrintWidth(fitEl, orient, size, margin);
-  const cleanup = () => { style.remove(); unfit(); window.removeEventListener('afterprint', cleanup); };
+  // BUG FIX (root cause of the Mark List printing portrait/unscaled no
+  // matter what — confirmed on desktop Chrome AND Android Chrome, with
+  // the deployed code verified correct both times, so this was never a
+  // deploy or CSS problem): cleanup() is what REMOVES this very
+  // @page-landscape override and reverts the table's auto-fit scale back
+  // to normal — it's meant to run only once the print dialog is truly
+  // done with. This used to have the exact same 5-SECOND blind timeout
+  // that wirePrintOptions() above already had to fix for the SAME reason
+  // on the document.title restore (see its own comment: "browsers' own
+  // print/'Save as PDF' dialog routinely stays open longer than 5
+  // seconds while someone picks a printer or destination"). That fix was
+  // never carried over to this cleanup — so every time someone spent
+  // more than 5 seconds in the print dialog (choosing "Save as PDF",
+  // opening "More settings", comparing paper sizes, anything short of
+  // clicking Print/Save within 5 seconds), this timeout fired WHILE the
+  // dialog was still open, silently stripping the landscape @page rule
+  // and un-scaling the table out from under the still-open preview —
+  // producing exactly the portrait, oddly-scaled output reported, with
+  // no error anywhere since nothing "failed," it just got cleaned up too
+  // early. Matched to the same 'afterprint' + 'focus' + long-timeout
+  // pattern as that sibling fix ('focus' fires on every browser's
+  // print/save dialog closing, even where 'afterprint' doesn't). */
+  const cleanup = () => {
+    style.remove();
+    unfit();
+    window.removeEventListener('afterprint', cleanup);
+    window.removeEventListener('focus', cleanup);
+  };
   window.addEventListener('afterprint', cleanup);
+  window.addEventListener('focus', cleanup);
   const nativePrinter = isNativeApp() && window.Capacitor.Plugins && window.Capacitor.Plugins.Printer;
   if (nativePrinter) {
     // No 'afterprint' event fires for the native print sheet, so clean up
@@ -326,10 +354,11 @@ export function printWithOptions(orientation, paperSize, marginMm, fitEl) {
     setTimeout(cleanup, 120000);
   } else {
     window.print();
-    // Safety net: afterprint doesn't fire in every browser/print-preview
-    // flow (e.g. cancelling before the dialog fully engages) — make sure
-    // the override never lingers and affects the next, unrelated print.
-    setTimeout(cleanup, 5000);
+    // Safety net only — 'afterprint'/'focus' above handle the normal
+    // case. 2 minutes, long enough it can never fire while a real print
+    // dialog is still genuinely open (same reasoning/value as
+    // wirePrintOptions()'s title-restore timeout above).
+    setTimeout(cleanup, 120000);
   }
 }
 /** Shared "🖨️ Print" + paper-size/orientation controls, for every report
