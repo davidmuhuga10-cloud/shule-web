@@ -1355,15 +1355,33 @@ table.data td.num,table.data th.num{text-align:center}
   .print-header{break-inside:avoid;page-break-inside:avoid}
   .print-grid{font-size:10.5px}
   .print-grid th,.print-grid td{padding:5px 7px}
-  /* Round 3 §11: the Mark List's Class Grade Summary (+ Gender Grade
+  /* Live feedback (printed Mark List): "I still feel like for the marks
+     they are leaving too much space within their boxes... increase the
+     font by small bit". The marks themselves (.mark-list-grid td) print at
+     the same 13.5px they use on screen — a touch small for how much room
+     each fixed-width column/row actually has once printed. Nudging the
+     data cells up one notch (never the header row, which is already
+     bold/uppercase and reads fine) fills that space better without
+     touching a single column width or row-height rule (those stay exactly
+     the fixed px values set elsewhere) — this only makes the text drawn
+     inside each existing box a little bigger. */
+  .mark-list-grid td{font-size:14.5px}
+  /* Round 3 §11 forced the Mark List's Class Grade Summary (+ Gender Grade
      Summary / Grade Breakdown by Subject, part of the same .bs-summary
-     block) must always start on its own fresh page on print, even when the
-     student grid above it technically leaves enough room on the same page
-     — mixing "some of the summary" onto the tail end of the grid's last
-     page reads as a cut-off, unfinished-looking printout. break-before is
-     the modern property; page-break-before is the same rule for older
-     print engines that don't understand break-before yet. */
-  .bs-summary{break-before:page;page-break-before:always}
+     block) onto its OWN fresh page every time, even when the student grid
+     above it left plenty of room on the same page — to stop the summary
+     splitting mid-table across a page boundary. Live feedback: "leaving a
+     lot of spaces below... wasting a lot of papers" — that forced break is
+     exactly the cause: whatever blank space was left at the bottom of the
+     grid's last page (often most of the page) was simply thrown away every
+     single time, no matter how small the summary was or how well it would
+     have fit right there. break-inside:avoid gets the ORIGINAL goal (never
+     split the summary itself across two pages) without the waste: the
+     summary now prints directly under the grid whenever it fits in the
+     space that's already left, and only spills onto a fresh page — still
+     as one unbroken block — on the rare exam where it genuinely doesn't
+     fit. break-before/page-break-before (the forced version) removed. */
+  .bs-summary{break-inside:avoid;page-break-inside:avoid}
 }
 
 /* ---------- Loader ---------- */
