@@ -520,7 +520,13 @@ function applyPdfCaptureMode() {
        everything else in this function is — html2canvas never sees print
        media, so nothing print-only ever applies unless it's re-applied by
        hand. */
-    .table-wrap{overflow:visible}
+    /* Live feedback: the last row's bottom border (and the table's own
+       right edge) sometimes came out missing/cut in a downloaded PDF —
+       html2canvas measures this wrap's own box to decide what to capture,
+       and a border sitting exactly on that box's edge can fall a hair
+       outside what gets rasterized. A few pixels of buffer past the
+       table's own edges gives it room to be captured in full. */
+    .table-wrap{overflow:visible;padding:0 3px 3px 0}
     table.data{font-size:10.5px}
     table.data th,table.data td{padding:5px 7px}
     .print-grid{font-size:10.5px}
@@ -550,9 +556,16 @@ function addCanvasAsPages(doc, canvas, { printableWidthMm, printableHeightMm, ma
     sliceCanvas.width = canvas.width;
     sliceCanvas.height = sliceHeightPx;
     sliceCanvas.getContext('2d').drawImage(canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
-    const imgData = sliceCanvas.toDataURL('image/jpeg', 0.94);
+    // Live feedback: numbers in a downloaded PDF looked "blurred"/"shadowed"
+    // — JPEG is a lossy, photo-oriented format, and its compression puts a
+    // faint ringing/halo around exactly the kind of content a report table
+    // is (small black text and grid lines on flat white) — that halo IS the
+    // blur/shadow being seen. PNG is lossless, so text and lines come out
+    // pixel-crisp; a mostly-white report page still compresses to a
+    // reasonable file size as PNG.
+    const imgData = sliceCanvas.toDataURL('image/png');
     const imgHeightMm = sliceHeightPx / pxPerMm;
-    doc.addImage(imgData, 'JPEG', marginMm, marginMm, printableWidthMm, imgHeightMm);
+    doc.addImage(imgData, 'PNG', marginMm, marginMm, printableWidthMm, imgHeightMm);
     renderedPx += sliceHeightPx;
     firstSlice = false;
   }

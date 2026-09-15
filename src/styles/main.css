@@ -731,6 +731,17 @@ table.data td.num,table.data th.num{text-align:center}
 .print-grid th,.print-grid td{border:1.3px solid var(--grid-ink);padding:8px 10px}
 .print-grid th{background:#f7f9fb;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--grid-text);text-align:left;white-space:normal;word-break:break-all}
 .print-grid td.num,.print-grid th.num{text-align:center}
+/* Live feedback: on a printed Class List, the "extra blank columns" (for
+   writing in information by hand) came out too narrow to actually write
+   in — an empty header/cell has no text to size a column by, so the
+   browser gave nearly all the width to columns that DO have content
+   (mainly Name). Giving the short, fixed-length columns a narrow width and
+   the blank columns a guaranteed minimum leaves the blank ones genuinely
+   usable; Name still gets whatever space is left over. */
+.print-grid th.col-admission_no,.print-grid td.col-admission_no{width:70px}
+.print-grid th.col-gender,.print-grid td.col-gender{width:60px}
+.print-grid th.col-stream_name,.print-grid td.col-stream_name{width:70px}
+.print-grid th.cl-blank-col,.print-grid td.cl-blank-col{min-width:100px}
 .grid-title-band{text-align:center;font-weight:800;font-size:12px;background:#f0f2f5;color:var(--grid-text);border:1.3px solid var(--grid-ink);border-bottom:none;padding:8px;letter-spacing:.3px}
 /* Design standard brief item 6: group Excel + Print + paper size +
    orientation into one visually distinct cluster (a light pill), instead of
