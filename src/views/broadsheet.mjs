@@ -267,7 +267,24 @@ async function load(root, classes, sel) {
              ever shows on desktop; spelling it out doesn't touch mobile at
              all. -->
         <button class="btn secondary xlsx-download-btn" id="bs-download">⬇️ Download as Excel</button>
-        ${printOptionsHtml('bs', 'landscape', { lockOrientation: true })}
+        <!-- Live feedback: repeated, unresolved reports of the Mark List
+             printing in portrait no matter what — on desktop AND phone,
+             across different print destinations, with the deployed code
+             independently verified correct and live every time. Direct
+             instruction: "can we rule out that landscape option
+             completely... why is it that no any other report behaves this
+             way eg classlist is already okay" — a completely fair
+             question: Class List (classList.mjs) is a NORMAL, unlocked
+             printOptionsHtml('cl','portrait') call, same as every other
+             report in this app, and only the Mark List ever had
+             lockOrientation:true (a hidden input standing in for the
+             orientation picker, with no visible/interactive control at
+             all). Dropping lockOrientation makes this identical to every
+             report that's never had this complaint — a plain, visible
+             Orientation dropdown, still defaulting to Landscape selected,
+             but a real <select> the browser's print dialog can read from
+             normally, exactly like Class List already does successfully. -->
+        ${printOptionsHtml('bs', 'landscape')}
       </div>
     </div>
     <div class="card">
