@@ -268,23 +268,21 @@ async function load(root, classes, sel) {
              all. -->
         <button class="btn secondary xlsx-download-btn" id="bs-download">⬇️ Download as Excel</button>
         <!-- Live feedback: repeated, unresolved reports of the Mark List
-             printing in portrait no matter what — on desktop AND phone,
-             across different print destinations, with the deployed code
-             independently verified correct and live every time. Direct
-             instruction: "can we rule out that landscape option
-             completely... why is it that no any other report behaves this
-             way eg classlist is already okay" — a completely fair
-             question: Class List (classList.mjs) is a NORMAL, unlocked
-             printOptionsHtml('cl','portrait') call, same as every other
-             report in this app, and only the Mark List ever had
-             lockOrientation:true (a hidden input standing in for the
-             orientation picker, with no visible/interactive control at
-             all). Dropping lockOrientation makes this identical to every
-             report that's never had this complaint — a plain, visible
-             Orientation dropdown, still defaulting to Landscape selected,
-             but a real <select> the browser's print dialog can read from
-             normally, exactly like Class List already does successfully. -->
-        ${printOptionsHtml('bs', 'landscape')}
+             printing in portrait no matter what, with wildly inconsistent
+             blank gaps down the page — briefly blamed on lockOrientation
+             (dropped for a round, matching Class List's plain, unlocked
+             dropdown) while investigating, but the ACTUAL cause turned out
+             to be unrelated: autoFitPrintWidth() below was shrinking this
+             table with a CSS transform, which repaints an element smaller
+             without changing the page-flow size the browser's own print
+             pagination measures — proven with a real before/after test
+             (see autoFitPrintWidth's own comment). Fixed there, using
+             CSS zoom instead. With the real bug gone, lockOrientation is
+             restored — the Mark List's many columns never make sense in
+             portrait, exactly why this was locked to landscape in the
+             first place; Class List has no such restriction because it
+             never needed one. -->
+        ${printOptionsHtml('bs', 'landscape', { lockOrientation: true })}
       </div>
     </div>
     <div class="card">
