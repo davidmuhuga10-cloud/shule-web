@@ -1355,33 +1355,34 @@ table.data td.num,table.data th.num{text-align:center}
   .print-header{break-inside:avoid;page-break-inside:avoid}
   .print-grid{font-size:10.5px}
   .print-grid th,.print-grid td{padding:5px 7px}
-  /* Live feedback (printed Mark List): "I still feel like for the marks
-     they are leaving too much space within their boxes... increase the
-     font by small bit". The marks themselves (.mark-list-grid td) print at
-     the same 13.5px they use on screen — a touch small for how much room
-     each fixed-width column/row actually has once printed. Nudging the
-     data cells up one notch (never the header row, which is already
-     bold/uppercase and reads fine) fills that space better without
-     touching a single column width or row-height rule (those stay exactly
-     the fixed px values set elsewhere) — this only makes the text drawn
-     inside each existing box a little bigger. */
-  .mark-list-grid td{font-size:14.5px}
-  /* Round 3 §11 forced the Mark List's Class Grade Summary (+ Gender Grade
-     Summary / Grade Breakdown by Subject, part of the same .bs-summary
-     block) onto its OWN fresh page every time, even when the student grid
-     above it left plenty of room on the same page — to stop the summary
-     splitting mid-table across a page boundary. Live feedback: "leaving a
-     lot of spaces below... wasting a lot of papers" — that forced break is
-     exactly the cause: whatever blank space was left at the bottom of the
-     grid's last page (often most of the page) was simply thrown away every
-     single time, no matter how small the summary was or how well it would
-     have fit right there. break-inside:avoid gets the ORIGINAL goal (never
-     split the summary itself across two pages) without the waste: the
-     summary now prints directly under the grid whenever it fits in the
-     space that's already left, and only spills onto a fresh page — still
-     as one unbroken block — on the rare exam where it genuinely doesn't
-     fit. break-before/page-break-before (the forced version) removed. */
-  .bs-summary{break-inside:avoid;page-break-inside:avoid}
+  /* Live feedback (printed Mark List), two rounds: first "increase the
+     font by small bit" (13.5px -> 14.5px), then "we need to make font of
+     numbers a little bit bigger" again — one more small notch, 14.5px ->
+     15.5px. Still never touches the header row or any column width/row
+     height. The same feedback also flagged DEV sitting "too close to the
+     numbers to the right" (STREAM POS) — DEV can read "+9.83"/"-12.35",
+     and at this bigger font that string was crowding right up against the
+     54px-wide sum-col's border, reading as no gap at all before the next
+     column starts. Widened every sum-col (DEV, TT PTS, MN PTS, STREAM POS,
+     OVR POS all share this class) by 6px so the longest DEV value keeps
+     real breathing room on both sides — the whole table still auto-scales
+     to fit the printable page width (autoFitPrintWidth in app.js), so this
+     is absorbed into that existing fit rather than pushing anything off
+     the page. */
+  .mark-list-grid td{font-size:15.5px}
+  .mark-list-grid th.sum-col,.mark-list-grid td.sum-col{width:60px}
+  /* Round 3 §11 originally forced the Mark List's Class Grade Summary (+
+     Gender Grade Summary / Grade Breakdown by Subject, .bs-summary) onto
+     its OWN fresh page every time. A later fix softened that to
+     break-inside:avoid (let it flow onto the grid's last page whenever it
+     fits, only pushing to a fresh page if it doesn't). Live feedback after
+     that fix: the wasted-space complaint persisted regardless — so
+     whatever is left of the page budget below the student grid is not
+     actually coming from this rule. Per direct instruction ("undo the
+     rule of new page completely... just do away with it"), no special
+     page-break handling is applied to .bs-summary at all any more — it is
+     plain, ordinary content now and paginates however the browser's
+     default table/box flow decides, same as everything else on the page. */
 }
 
 /* ---------- Loader ---------- */
