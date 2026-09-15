@@ -234,90 +234,16 @@ function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm) {
   // trailing blank PAGE at the very end) made it worse in a second way:
   // a box with clipped overflow is fragmentation-monolithic per the print
   // spec, so its rows couldn't reliably keep paginating normally at all.
-  //
-  // ROUND 2: switched to `zoom`, which DOES fix the pagination mismatch
-  // (proved with a real before/after test) — but live feedback then
-  // reported the printed numbers went blurry again, sharp only in the
-  // live on-screen preview. Checked the actual PDF's own embedded fonts
-  // (`pdffonts`) to confirm rather than guess again: every glyph in it
-  // was "Type 3" — a bitmap stamp, not real vector text. That's a real,
-  // known Chromium quirk: `zoom` is a legacy, non-standard property, and
-  // its print/PDF pipeline falls back to rasterizing text into Type 3
-  // bitmap glyphs rather than embedding it as a normal scalable font —
-  // sharp at whatever DPI the screen preview happened to render at,
-  // visibly blurry once committed to the page/PDF at a different one.
-  //
-  // ROUND 3 (this one): stop using ANY visual shrink trick at all —
-  // `transform` broke pagination, `zoom` broke font quality. Instead,
-  // shrink the table for real: a smaller actual font-size and smaller
-  // actual column widths, set directly. This is genuine layout, the
-  // exact same kind of sizing every other, always-fine report already
-  // uses — so there is no separate "shrink pass" left to disagree with
-  // the browser's own pagination, and text stays real, scalable, crisp
-  // vector text at every DPI, never rasterized. table-layout:fixed reads
-  // its column widths from the FIRST row's cells (thead th here), so
-  // resizing just those is enough to resize every column consistently. */
-  const cs = getComputedStyle(tableEl);
-  const baseFontSize = parseFloat(cs.fontSize) || 13.5;
-  const sampleCell = tableEl.querySelector('td, th');
-  const cellCs = sampleCell ? getComputedStyle(sampleCell) : null;
-  const padTop = cellCs ? (parseFloat(cellCs.paddingTop) || 0) : 6;
-  const padRight = cellCs ? (parseFloat(cellCs.paddingRight) || 0) : 7;
-  if (!tableEl.dataset.pfId) tableEl.dataset.pfId = 'pf' + Math.random().toString(36).slice(2);
-  const pfId = tableEl.dataset.pfId;
-  const headerCells = Array.from(tableEl.querySelectorAll('thead th'));
-  const colRules = headerCells.map((th, i) => {
-    const w = th.getBoundingClientRect().width;
-    const scaledW = w * scale;
-    th.dataset.pfCol = 'c' + i;
-    return `table[data-pf-id="${pfId}"] th[data-pf-col="c${i}"]{width:${scaledW.toFixed(2)}px!important}`;
-  }).join('');
-  // BUG FIX: shrinking each column's own width isn't enough on its own.
-  // .mark-list-grid sets the TABLE itself to width:100%, and per the CSS
-  // table-layout:fixed spec, if a table's explicit columns don't add up to
-  // its own rendered width, a browser proportionally stretches every
-  // column to fill the leftover space anyway — silently undoing exactly
-  // the per-column shrink above. Confirmed directly: a controlled test
-  // page with 5 columns given an explicit 154px width each (770px total)
-  // inside a wider 100%-width table still measured 237.594px per column
-  // once rendered — the browser redistributed the "missing" width across
-  // every column, both on a fresh page load and after every kind of
-  // dynamic re-application tried (a new stylesheet rule, mutating the
-  // CSSOM rule directly, inline `!important` styles, forcing a reflow,
-  // toggling table-layout fixed/auto, even fully detaching and
-  // reattaching the table). None of that is a caching bug — it's the
-  // browser correctly doing what table-layout:fixed says to do when a
-  // table's own width doesn't match the sum of its columns' widths. The
-  // real, missing fix: also pin the TABLE's own width so there is no
-  // leftover space left for the browser to redistribute.
-  //
-  // The obvious way to do that — add up the (now smaller) column widths —
-  // turned out to be its own trap: per the same spec, a table's rendered
-  // width is the GREATER of its own specified width and the SUM of its
-  // columns' rendered widths — and, confirmed with a second controlled
-  // test, that per-column sum is measured in BORDER-BOX terms (content +
-  // padding + border), not the plain CSS `width` value. `colRules` above
-  // computes each column's target size from `getBoundingClientRect()`,
-  // which is already border-box — but then writes that number into the
-  // `width` CSS property, which by default means CONTENT-box. So every
-  // column actually ends up rendering at (target) + its own padding/
-  // border ON TOP, and the table follows that larger real sum, undoing
-  // most of the intended shrink (confirmed: table still rendered ~180px
-  // wider than the requested target in a 20-column test). Putting
-  // `box-sizing:border-box` on the cells themselves as well makes their
-  // `width` property mean exactly what `getBoundingClientRect()` measured
-  // it as, so the target border-box size is what actually gets rendered,
-  // and the table's own sum-of-columns comes out matching printableWidthPx
-  // as designed (also confirmed with the same test).
-  const style = document.createElement('style');
-  style.id = 'print-autofit-override';
-  style.textContent = `
-    table[data-pf-id="${pfId}"]{font-size:${(baseFontSize * scale).toFixed(2)}px!important;width:${printableWidthPx.toFixed(2)}px!important}
-    table[data-pf-id="${pfId}"] th,table[data-pf-id="${pfId}"] td{box-sizing:border-box!important;padding:${(padTop * scale).toFixed(2)}px ${(padRight * scale).toFixed(2)}px!important}
-    ${colRules}
-  `;
-  document.head.appendChild(style);
-  return () => { style.remove(); };
+  // `zoom` fixes both at once — unlike `transform`, it rescales the
+  // element's actual LAYOUT box together with its paint, so the browser's
+  // own page-break math and what gets drawn always agree, and rows
+  // fragment across pages normally with no separate height/overflow
+  // trick needed. (zoom is non-standard but has solid, long-standing
+  // support in every browser this app is actually used from — Chrome
+  // desktop and Android Chrome, confirmed via this exact bug's reports.) */
+  const prevZoom = tableEl.style.zoom;
+  tableEl.style.zoom = String(scale);
+  return () => { tableEl.style.zoom = prevZoom; };
 }
 
 /** marginMm (optional) lets one specific screen ask for tighter page
