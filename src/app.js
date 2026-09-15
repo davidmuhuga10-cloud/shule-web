@@ -1576,18 +1576,36 @@ function allowedRoutes(role) {
 // to data-section="Academics" only (the admin nav's Academics group) —
 // every other nav section, and the emoji icons, are left exactly as they
 // are.
-const NAV_LABEL_SPACING_CAP_PX = 1.6;
+//
+// .nav-label is flex:1 (main.css), so every label's own layout box already
+// stretches to fill the row — getBoundingClientRect() on it reports that
+// stretched box width, not how wide the text itself actually is, which made
+// an earlier version of this a no-op (every label already measured as
+// "the same width"). Measuring with a canvas' measureText() instead reads
+// the text's true natural width from its own font, independent of the flex
+// layout around it.
+const NAV_LABEL_SPACING_CAP_PX = 2.4;
+let _navLabelMeasureCtx = null;
+function measureTextWidth(text, font) {
+  if (!_navLabelMeasureCtx) _navLabelMeasureCtx = document.createElement('canvas').getContext('2d');
+  _navLabelMeasureCtx.font = font;
+  return _navLabelMeasureCtx.measureText(text).width;
+}
 function alignAcademicsNavLabels() {
   const labels = Array.from($('#nav').querySelectorAll('a[data-section="Academics"] .nav-label'));
   if (labels.length < 2) return;
-  let maxWidth = 0;
-  labels.forEach((el) => {
-    el.style.letterSpacing = '';
-    maxWidth = Math.max(maxWidth, el.getBoundingClientRect().width);
+  labels.forEach((el) => { el.style.letterSpacing = ''; });
+  const widths = labels.map((el) => {
+    const cs = getComputedStyle(el);
+    // Build the font string by hand rather than reading the `font`
+    // shorthand — some browsers report that as '' when it wasn't set as a
+    // single shorthand property to begin with.
+    return measureTextWidth(el.textContent, `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`);
   });
-  labels.forEach((el) => {
+  const maxWidth = Math.max(...widths);
+  labels.forEach((el, i) => {
     const gaps = Math.max(1, el.textContent.length - 1);
-    const extra = Math.min(NAV_LABEL_SPACING_CAP_PX, (maxWidth - el.getBoundingClientRect().width) / gaps);
+    const extra = Math.min(NAV_LABEL_SPACING_CAP_PX, (maxWidth - widths[i]) / gaps);
     if (extra > 0.05) el.style.letterSpacing = extra.toFixed(2) + 'px';
   });
 }
