@@ -1359,18 +1359,16 @@ table.data td.num,table.data th.num{text-align:center}
      font by small bit" (13.5px -> 14.5px), then "we need to make font of
      numbers a little bit bigger" again — one more small notch, 14.5px ->
      15.5px. Still never touches the header row or any column width/row
-     height. The same feedback also flagged DEV sitting "too close to the
-     numbers to the right" (STREAM POS) — DEV can read "+9.83"/"-12.35",
-     and at this bigger font that string was crowding right up against the
-     54px-wide sum-col's border, reading as no gap at all before the next
-     column starts. Widened every sum-col (DEV, TT PTS, MN PTS, STREAM POS,
-     OVR POS all share this class) by 6px so the longest DEV value keeps
-     real breathing room on both sides — the whole table still auto-scales
-     to fit the printable page width (autoFitPrintWidth in app.js), so this
-     is absorbed into that existing fit rather than pushing anything off
-     the page. */
+     height. The same feedback also flagged DEV specifically ("only DEV
+     had that issue, not every column") sitting too close to STREAM POS
+     right next to it — DEV can read "+9.83"/"-12.35", and at this bigger
+     font that string was crowding right up against the 54px-wide column's
+     border. Every other sum-col (TT PTS/MN PTS/STREAM POS/OVR POS) is left
+     at its original 54px — .dev-col (broadsheet.mjs) is the one extra
+     class added so DEV alone can be widened without touching its
+     siblings. */
   .mark-list-grid td{font-size:15.5px}
-  .mark-list-grid th.sum-col,.mark-list-grid td.sum-col{width:60px}
+  .mark-list-grid th.dev-col,.mark-list-grid td.dev-col{width:60px}
   /* Round 3 §11 originally forced the Mark List's Class Grade Summary (+
      Gender Grade Summary / Grade Breakdown by Subject, .bs-summary) onto
      its OWN fresh page every time. A later fix softened that to

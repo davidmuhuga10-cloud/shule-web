@@ -285,7 +285,7 @@ async function load(root, classes, sel) {
         <thead><tr><th class="id-col">Adm. No.</th><th class="name-col">Name</th><th class="str-col">Stream</th>
           ${res.subjects.map((s, i) => subjectHeaderHtml(s, i)).join('')}
           <th class="num sum-col">SBJ</th><th class="num sum-col">TT MKS</th><th class="num sum-col">MN MKS</th><th class="num sum-col">PL</th>
-          <th class="num sum-col">TT PTS</th><th class="num sum-col">MN PTS</th><th class="num sum-col">DEV</th><th class="num sum-col">STREAM POS</th><th class="num sum-col">OVR POS</th></tr></thead>
+          <th class="num sum-col">TT PTS</th><th class="num sum-col">MN PTS</th><th class="num sum-col dev-col">DEV</th><th class="num sum-col">STREAM POS</th><th class="num sum-col">OVR POS</th></tr></thead>
         <tbody>${res.students.map((s) => `<tr>
           <td class="id-col">${esc(s.admission_no)}</td><td class="name-col">${esc(s.full_name)}</td><td class="str-col">${esc(s.stream_name || '—')}</td>
           ${res.subjects.map((sub, i) => subjectRowCellsHtml(sub, s, showLevels, i)).join('')}
@@ -293,7 +293,7 @@ async function load(root, classes, sel) {
           <td class="num sum-col"><b>${Math.round(s.total)}</b></td><td class="num sum-col">${s.average.toFixed(2)}</td>
           <td class="num sum-col">${showLevels ? `<span class="badge grade"><b>${esc(s.overall_grade || '—')}</b></span>` : '—'}</td>
           <td class="num sum-col">${s.total_points === null ? '—' : s.total_points.toFixed(2)}</td><td class="num sum-col">${s.mean_points === null ? '—' : s.mean_points.toFixed(2)}</td>
-          <td class="num sum-col">${s.deviation > 0 ? '+' : ''}${s.deviation.toFixed(2)}</td>
+          <td class="num sum-col dev-col">${s.deviation > 0 ? '+' : ''}${s.deviation.toFixed(2)}</td>
           <td class="num sum-col">${s.stream_position || '—'}</td><td class="num sum-col"><b>${s.position || '—'}</b></td>
         </tr>`).join('')}${aggRowHtml('TOTAL', res.subjects, res.students, 'sum', examOutOf)}${aggRowHtml('AVERAGE', res.subjects, res.students, 'avg', examOutOf)}</tbody>
       </table></div>
