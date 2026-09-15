@@ -214,25 +214,36 @@ function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm) {
   const naturalWidth = tableEl.scrollWidth;
   const scale = naturalWidth > printableWidthPx ? printableWidthPx / naturalWidth : 1;
   if (scale >= 1) return () => {};
-  const wrap = tableEl.parentElement;
-  const prevTransform = tableEl.style.transform;
-  const prevOrigin = tableEl.style.transformOrigin;
-  const prevWrapHeight = wrap ? wrap.style.height : '';
-  const prevWrapOverflow = wrap ? wrap.style.overflow : '';
-  tableEl.style.transformOrigin = 'top left';
-  tableEl.style.transform = `scale(${scale})`;
-  // The transform shrinks the table VISUALLY but its layout box (what the
-  // page reserves room for) stays full size — without this, the page would
-  // reserve the old, un-scaled height and print a trailing near-blank page.
-  if (wrap) {
-    wrap.style.height = (tableEl.offsetHeight * scale) + 'px';
-    wrap.style.overflow = 'hidden';
-  }
-  return () => {
-    tableEl.style.transform = prevTransform;
-    tableEl.style.transformOrigin = prevOrigin;
-    if (wrap) { wrap.style.height = prevWrapHeight; wrap.style.overflow = prevWrapOverflow; }
-  };
+  // BUG FIX (the real root cause of the Mark List's huge, inconsistent
+  // blank gaps partway down page after page — confirmed by the pattern
+  // itself: one printed page held 14 student rows before a big gap,
+  // the very next page held 18 before a smaller one, which only makes
+  // sense if the browser's page-break decisions and what actually gets
+  // DRAWN on the page disagree with each other).
+  // This used to shrink the table with `transform:scale()`, plus a hack
+  // to compress the wrapping div's own reserved height/overflow to match.
+  // The problem: `transform` is PAINT ONLY — it repaints an element
+  // smaller but never changes its LAYOUT size, and a browser's print
+  // pagination decides where each page break falls using LAYOUT size,
+  // never the painted (transformed) one. So the browser kept reserving a
+  // full page's worth of room per break based on the table's TRUE,
+  // un-shrunk row heights, then painted those same rows shrunk down small
+  // — leaving most of that page blank underneath whatever fraction of it
+  // the shrunk rows actually filled. The `overflow:hidden` on the
+  // wrapping div (needed to stop the un-shrunk box from reserving a
+  // trailing blank PAGE at the very end) made it worse in a second way:
+  // a box with clipped overflow is fragmentation-monolithic per the print
+  // spec, so its rows couldn't reliably keep paginating normally at all.
+  // `zoom` fixes both at once — unlike `transform`, it rescales the
+  // element's actual LAYOUT box together with its paint, so the browser's
+  // own page-break math and what gets drawn always agree, and rows
+  // fragment across pages normally with no separate height/overflow
+  // trick needed. (zoom is non-standard but has solid, long-standing
+  // support in every browser this app is actually used from — Chrome
+  // desktop and Android Chrome, confirmed via this exact bug's reports.) */
+  const prevZoom = tableEl.style.zoom;
+  tableEl.style.zoom = String(scale);
+  return () => { tableEl.style.zoom = prevZoom; };
 }
 
 /** marginMm (optional) lets one specific screen ask for tighter page
