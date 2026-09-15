@@ -608,8 +608,18 @@ table.data td.num,table.data th.num{text-align:center}
    earlier review screenshot came from that screenshot's own mockup markup
    using a generic muted-grey style for its address line, not from this
    component. */
-.mark-list-grid{border-collapse:collapse;font-size:13.5px;table-layout:fixed;width:100%;color:var(--grid-text)}
-.mark-list-grid th,.mark-list-grid td{border:1px solid var(--grid-ink);padding:6px 7px}
+.mark-list-grid{border-collapse:collapse;font-size:14.5px;table-layout:fixed;width:100%;color:var(--grid-text)}
+/* Live feedback: "too much space left within a cell, we can increase the
+   font again" — the original 6px/7px padding was generous relative to
+   this table's small font, leaving visibly empty margins around each
+   number. Tightened to 4px/6px and the base font bumped 13.5px -> 14.5px
+   (see .mark-list-grid above and the print bump further down) — the
+   saved padding is exactly what makes room for the bigger, easier-to-read
+   text without any column needing to widen. vertical-align:middle is
+   explicit (not just relying on the table-cell default) so a cell's
+   content — plain number or number+grade-badge pairing — stays centered
+   both ways within the now-tighter box. */
+.mark-list-grid th,.mark-list-grid td{border:1px solid var(--grid-ink);padding:4px 6px;vertical-align:middle}
 .mark-list-grid{border:1.5px solid var(--grid-ink)}
 .mark-list-grid thead tr{border-bottom:1.5px solid var(--grid-ink)}
 /* Alternating pale tint per subject (Zeraki's own visual trick) — the
@@ -672,11 +682,16 @@ table.data td.num,table.data th.num{text-align:center}
    room for that format; verified visually, see EX7/EX8 CSS verification
    notes below). */
 .mark-list-grid tr:last-child td{border-bottom:1.5px solid var(--grid-ink)}
-.mark-cell .mark-grade{color:var(--grid-text);font-weight:600;font-size:10.5px}
+.mark-cell .mark-grade{color:var(--grid-text);font-weight:400;font-size:10.5px}
 /* Round 5 §2: the TOTAL/AVERAGE rows at the very bottom of the Merit List —
    shaded like the header row so they read as a summary, not just two more
    student rows. */
-.mark-list-grid .bs-agg-row td{background:#f7f9fb;font-weight:700}
+/* Live feedback, round 2: "make everything not bold apart from the
+   headers row alone" — the TOTAL/AVERAGE rows keep their shaded
+   background (so they still read as a summary, not just two more student
+   rows) but no longer get the extra font-weight:700 bump; the header row
+   (.mark-list-grid th) is the only bold left on this sheet. */
+.mark-list-grid .bs-agg-row td{background:#f7f9fb;font-weight:400}
 /* Live feedback: "PL has some background colours — remove the gray
    background colour in that column" — .badge.grade (main.css) carries a
    grey pill fill used on several OTHER reports (Report Form, Transcript,
@@ -1355,19 +1370,24 @@ table.data td.num,table.data th.num{text-align:center}
   .print-header{break-inside:avoid;page-break-inside:avoid}
   .print-grid{font-size:10.5px}
   .print-grid th,.print-grid td{padding:5px 7px}
-  /* Live feedback (printed Mark List), two rounds: first "increase the
-     font by small bit" (13.5px -> 14.5px), then "we need to make font of
-     numbers a little bit bigger" again — one more small notch, 14.5px ->
-     15.5px. Still never touches the header row or any column width/row
-     height. The same feedback also flagged DEV specifically ("only DEV
-     had that issue, not every column") sitting too close to STREAM POS
-     right next to it — DEV can read "+9.83"/"-12.35", and at this bigger
-     font that string was crowding right up against the 54px-wide column's
+  /* Live feedback (printed Mark List), three rounds now: first "increase
+     the font by small bit" (13.5px -> 14.5px), then "we need to make font
+     of numbers a little bit bigger" again (14.5px -> 15.5px), then "there
+     is too much space left within a cell, we can increase the font again"
+     — cell padding was tightened (see .mark-list-grid th,td above,
+     6px/7px -> 4px/6px) which freed up exactly the room needed to go one
+     more notch, 15.5px -> 16.5px, without any column needing to widen.
+     Still never touches the header row's own font-size or any column
+     width/row height. The same feedback also flagged DEV specifically
+     ("only DEV had that issue, not every column") sitting too close to
+     STREAM POS right next to it — DEV can read "+9.8"/"-12.3" (now
+     rounded to 1dp per later feedback, was 2dp), and at this bigger font
+     that string was crowding right up against the 54px-wide column's
      border. Every other sum-col (TT PTS/MN PTS/STREAM POS/OVR POS) is left
      at its original 54px — .dev-col (broadsheet.mjs) is the one extra
      class added so DEV alone can be widened without touching its
      siblings. */
-  .mark-list-grid td{font-size:15.5px}
+  .mark-list-grid td{font-size:16.5px}
   .mark-list-grid th.dev-col,.mark-list-grid td.dev-col{width:60px}
   /* Round 3 §11 originally forced the Mark List's Class Grade Summary (+
      Gender Grade Summary / Grade Breakdown by Subject, .bs-summary) onto
