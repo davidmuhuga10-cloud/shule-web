@@ -1507,11 +1507,24 @@ export function createResultsApi(supabase, gradingApi) {
         const classIds = [...new Set((examClassRows || []).map((r) => r.class_id).filter(Boolean))];
         if (!classIds.length) return ok([]);
         const idsByClass = await getEffectiveClassSubjectIdsBatch(supabase, classIds);
-        const subjectIds = [...new Set(Object.values(idsByClass).flat())];
+        // Invert to subject_id -> which of this exam's classes it's actually
+        // assigned to. Needed because two different classes can each have
+        // their OWN subject row that happens to share the same name (e.g. a
+        // CBC school's Grade 6 "Mathematics" and Grade 7 "Mathematics" are
+        // seeded as two separate subjects — see cbcDefaults.mjs's per-level
+        // CBC_SUBJECTS list) — without this, the Learning Area Papers screen
+        // showed every subject against every class in the exam, including
+        // classes it was never actually assigned to.
+        const classIdsBySubject = {};
+        Object.entries(idsByClass).forEach(([classId, subjIds]) => {
+          subjIds.forEach((sid) => { (classIdsBySubject[sid] = classIdsBySubject[sid] || []).push(classId); });
+        });
+        const subjectIds = Object.keys(classIdsBySubject);
         if (!subjectIds.length) return ok([]);
         const { data: subjects, error } = await supabase.from('subjects').select('id, name, code').in('id', subjectIds);
         if (error) return err(error.message);
-        return ok((subjects || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name))));
+        return ok((subjects || []).map((s) => ({ ...s, classIds: classIdsBySubject[s.id] || [] }))
+          .sort((a, b) => String(a.name).localeCompare(String(b.name))));
       });
     },
 

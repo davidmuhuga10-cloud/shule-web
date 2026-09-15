@@ -80,7 +80,7 @@ async function load(root, exam) {
     <div class="card">
       <div class="card-b table-wrap"><table class="data">
         <thead><tr><th style="width:36px">#</th><th>Subject</th><th>Class</th><th>Papers</th><th style="width:110px"></th></tr></thead>
-        <tbody>${subjects.map((s, i) => classes.map((c, ci) => subjectClassRowHtml(s, c, i, ci, papersBySubjectClass[`${s.id}|${c.id}`] || [])).join('')).join('')}</tbody>
+        <tbody>${subjects.map((s, i) => classes.filter((c) => (s.classIds || []).includes(c.id)).map((c, ci) => subjectClassRowHtml(s, c, i, ci, papersBySubjectClass[`${s.id}|${c.id}`] || [])).join('')).join('')}</tbody>
       </table></div>
     </div>
   `;
