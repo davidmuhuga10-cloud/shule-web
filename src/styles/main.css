@@ -1323,6 +1323,23 @@ table.data td.num,table.data th.num{text-align:center}
      hand — this covers the tab STRIP itself everywhere it's used, since
      that one was never opted out anywhere. */
   .sidebar,.topbar,.no-print,.fin-tabs,.tabs{display:none!important}
+  /* Live feedback (Mark List, printed via the real Print button on
+     desktop): "leaving a lot of spaces below... look at the size of the
+     whitespace below each page". Traced to .shell/.main (the app's own
+     outer page layout — sidebar + main column) being display:flex —
+     .shell{display:flex} above and .main{display:flex;flex-direction:
+     column} further down. Flex (and grid) containers are where browsers'
+     print pagination is well known to fall apart: a browser cannot
+     fragment a flex child cleanly across a page boundary the way it can
+     an ordinary block, so instead of flowing the Mark List's rows right
+     up to the page edge it stops early and force-pushes the remainder as
+     one lump onto the next page — a big blank gap on every page,
+     regardless of how much more would have actually fit. Forcing both
+     back to plain block layout ONLY for print restores normal
+     paragraph/table fragmentation (rows fill the page right up to the
+     edge, only breaking where they must), with zero visual effect on
+     screen since these two rules are scoped inside @media print. */
+  .shell,.main{display:block!important}
   .main{margin-left:0}.content{padding:0;max-width:none}
   .report{border:none;box-shadow:none;max-width:none}
   body{background:#fff}
