@@ -208,9 +208,10 @@ function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm) {
   // switches to print media (smaller @media print font-size/padding) and
   // actually paginates, and sub-pixel rounding in the scale/border math can
   // land a hair over the true printable edge either way. A small safety
-  // margin (1.5%) costs a sliver of unused white space but guarantees the
+  // margin (bumped 1.5% -> 2.5% — see the border-vanishing defensive fix
+  // below) costs a sliver of unused white space but guarantees the
   // right-most column always survives onto the page.
-  const printableWidthPx = (pageWidthMm - 2 * (marginMm || 10)) * PX_PER_MM * 0.985;
+  const printableWidthPx = (pageWidthMm - 2 * (marginMm || 10)) * PX_PER_MM * 0.975;
   const naturalWidth = tableEl.scrollWidth;
   const scale = naturalWidth > printableWidthPx ? printableWidthPx / naturalWidth : 1;
   if (scale >= 1) return () => {};
@@ -348,11 +349,33 @@ function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm) {
   // td at 15.5px regardless of scale; targeting th/td directly here (same
   // selector already used for box-sizing/padding, which never had this
   // problem) measured the correctly shrunk size in both screen and print.
+  // BUG FIX (partial/defensive): "the very last column sometimes loses its
+  // closing/right border line." Checked the obvious box-model suspect
+  // first — the table's own 1.5px outer border rendering outside the
+  // pinned `width` (the same trap the per-column fix above already had to
+  // solve) — but a controlled test proved that's NOT it: with
+  // border-collapse:collapse, a table's own border doesn't add outside its
+  // box the way a normal element's would, and box-sizing:border-box here
+  // measurably changed nothing. A real headless-Chrome PDF export of this
+  // exact table/CSS then rendered the right border intact, every time —
+  // so whatever causes it to vanish on a real desktop print didn't
+  // reproduce here, most likely a hairline-border sub-pixel rounding quirk
+  // tied to that machine's specific print DPI (a known category of
+  // Chromium print bug: a 1-1.5px border whose edge lands on certain
+  // fractional device-pixel positions can anti-alias away to nothing).
+  // Since the exact trigger isn't pinned down, this is deliberately
+  // defensive rather than a proven fix: a little more safety margin
+  // (0.985 -> 0.975) so the table sits further from the true page edge,
+  // plus reinforcing the last column's own right border explicitly so it
+  // isn't relying solely on the collapsed border from the table's outer
+  // edge. If this still recurs, it needs a real fresh PDF from whoever
+  // sees it (not a screenshot) to pin down the actual cause. */
   const style = document.createElement('style');
   style.id = 'print-autofit-override';
   style.textContent = `
     table[data-pf-id="${pfId}"]{width:${printableWidthPx.toFixed(2)}px!important}
     table[data-pf-id="${pfId}"] th,table[data-pf-id="${pfId}"] td{box-sizing:border-box!important;font-size:${(baseFontSize * scale).toFixed(2)}px!important;padding:${(padTop * scale).toFixed(2)}px ${(padRight * scale).toFixed(2)}px!important}
+    table[data-pf-id="${pfId}"] th:last-child,table[data-pf-id="${pfId}"] td:last-child{border-right:1.5px solid var(--grid-ink)!important}
     ${colRules}
   `;
   document.head.appendChild(style);
