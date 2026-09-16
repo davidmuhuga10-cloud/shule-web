@@ -234,16 +234,106 @@ function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm) {
   // trailing blank PAGE at the very end) made it worse in a second way:
   // a box with clipped overflow is fragmentation-monolithic per the print
   // spec, so its rows couldn't reliably keep paginating normally at all.
-  // `zoom` fixes both at once — unlike `transform`, it rescales the
-  // element's actual LAYOUT box together with its paint, so the browser's
-  // own page-break math and what gets drawn always agree, and rows
-  // fragment across pages normally with no separate height/overflow
-  // trick needed. (zoom is non-standard but has solid, long-standing
-  // support in every browser this app is actually used from — Chrome
-  // desktop and Android Chrome, confirmed via this exact bug's reports.) */
-  const prevZoom = tableEl.style.zoom;
-  tableEl.style.zoom = String(scale);
-  return () => { tableEl.style.zoom = prevZoom; };
+  //
+  // ROUND 2: switched to `zoom`, which DOES fix the pagination mismatch
+  // (proved with a real before/after test) — but live feedback then
+  // reported the printed numbers went blurry again, sharp only in the
+  // live on-screen preview. Checked the actual PDF's own embedded fonts
+  // (`pdffonts`) to confirm rather than guess again: every glyph in it
+  // was "Type 3" — a bitmap stamp, not real vector text. That's a real,
+  // known Chromium quirk: `zoom` is a legacy, non-standard property, and
+  // its print/PDF pipeline falls back to rasterizing text into Type 3
+  // bitmap glyphs rather than embedding it as a normal scalable font —
+  // sharp at whatever DPI the screen preview happened to render at,
+  // visibly blurry once committed to the page/PDF at a different one.
+  //
+  // ROUND 3: stop using ANY visual shrink trick at all — `transform`
+  // broke pagination, `zoom` broke font quality. Instead, shrink the
+  // table for real: a smaller actual font-size and smaller actual
+  // column widths, set directly. This is genuine layout, the exact same
+  // kind of sizing every other, always-fine report already uses — so
+  // there is no separate "shrink pass" left to disagree with the
+  // browser's own pagination, and text stays real, scalable, crisp
+  // vector text at every DPI, never rasterized. table-layout:fixed reads
+  // its column widths from the FIRST row's cells (thead th here), so
+  // resizing just those is enough to resize every column consistently.
+  //
+  // ROUND 4 (this one): this exact fix was shipped, then rolled all the
+  // way back the same day alongside an unrelated bold/font/padding
+  // change that WAS genuinely disliked ("that's the most awkward change
+  // we just made") — the rollback covered every change made that
+  // session, this one included, without isolating which part was
+  // actually the problem. Checked a real PDF the user had just printed
+  // AFTER that rollback (a fresh "exam.pdf" in their Downloads) with
+  // `pdffonts`: every font in it was still "Type 3" — i.e. the ROUND 2
+  // zoom bug (blur, described this time as "blur" and "shadowing" —
+  // same Type-3-bitmap symptom, different words) was still live,
+  // because the rollback had put `zoom` back too. Reapplying this exact
+  // fix (proven with a controlled Playwright test: proper CID TrueType
+  // fonts, all columns fit with none clipped, normal pagination) — the
+  // bold/font/padding round that was actually disliked is NOT part of
+  // this change and stays reverted. */
+  const cs = getComputedStyle(tableEl);
+  const baseFontSize = parseFloat(cs.fontSize) || 13.5;
+  const sampleCell = tableEl.querySelector('td, th');
+  const cellCs = sampleCell ? getComputedStyle(sampleCell) : null;
+  const padTop = cellCs ? (parseFloat(cellCs.paddingTop) || 0) : 6;
+  const padRight = cellCs ? (parseFloat(cellCs.paddingRight) || 0) : 7;
+  if (!tableEl.dataset.pfId) tableEl.dataset.pfId = 'pf' + Math.random().toString(36).slice(2);
+  const pfId = tableEl.dataset.pfId;
+  const headerCells = Array.from(tableEl.querySelectorAll('thead th'));
+  const colRules = headerCells.map((th, i) => {
+    const w = th.getBoundingClientRect().width;
+    const scaledW = w * scale;
+    th.dataset.pfCol = 'c' + i;
+    return `table[data-pf-id="${pfId}"] th[data-pf-col="c${i}"]{width:${scaledW.toFixed(2)}px!important}`;
+  }).join('');
+  // BUG FIX: shrinking each column's own width isn't enough on its own.
+  // .mark-list-grid sets the TABLE itself to width:100%, and per the CSS
+  // table-layout:fixed spec, if a table's explicit columns don't add up to
+  // its own rendered width, a browser proportionally stretches every
+  // column to fill the leftover space anyway — silently undoing exactly
+  // the per-column shrink above. Confirmed directly: a controlled test
+  // page with 5 columns given an explicit 154px width each (770px total)
+  // inside a wider 100%-width table still measured 237.594px per column
+  // once rendered — the browser redistributed the "missing" width across
+  // every column, both on a fresh page load and after every kind of
+  // dynamic re-application tried (a new stylesheet rule, mutating the
+  // CSSOM rule directly, inline `!important` styles, forcing a reflow,
+  // toggling table-layout fixed/auto, even fully detaching and
+  // reattaching the table). None of that is a caching bug — it's the
+  // browser correctly doing what table-layout:fixed says to do when a
+  // table's own width doesn't match the sum of its columns' widths. The
+  // real, missing fix: also pin the TABLE's own width so there is no
+  // leftover space left for the browser to redistribute.
+  //
+  // The obvious way to do that — add up the (now smaller) column widths —
+  // turned out to be its own trap: per the same spec, a table's rendered
+  // width is the GREATER of its own specified width and the SUM of its
+  // columns' rendered widths — and, confirmed with a second controlled
+  // test, that per-column sum is measured in BORDER-BOX terms (content +
+  // padding + border), not the plain CSS `width` value. `colRules` above
+  // computes each column's target size from `getBoundingClientRect()`,
+  // which is already border-box — but then writes that number into the
+  // `width` CSS property, which by default means CONTENT-box. So every
+  // column actually ends up rendering at (target) + its own padding/
+  // border ON TOP, and the table follows that larger real sum, undoing
+  // most of the intended shrink (confirmed: table still rendered ~180px
+  // wider than the requested target in a 20-column test). Putting
+  // `box-sizing:border-box` on the cells themselves as well makes their
+  // `width` property mean exactly what `getBoundingClientRect()` measured
+  // it as, so the target border-box size is what actually gets rendered,
+  // and the table's own sum-of-columns comes out matching printableWidthPx
+  // as designed (also confirmed with the same test).
+  const style = document.createElement('style');
+  style.id = 'print-autofit-override';
+  style.textContent = `
+    table[data-pf-id="${pfId}"]{font-size:${(baseFontSize * scale).toFixed(2)}px!important;width:${printableWidthPx.toFixed(2)}px!important}
+    table[data-pf-id="${pfId}"] th,table[data-pf-id="${pfId}"] td{box-sizing:border-box!important;padding:${(padTop * scale).toFixed(2)}px ${(padRight * scale).toFixed(2)}px!important}
+    ${colRules}
+  `;
+  document.head.appendChild(style);
+  return () => { style.remove(); };
 }
 
 /** marginMm (optional) lets one specific screen ask for tighter page
@@ -720,11 +810,40 @@ function wireDownloadPdf(root, idPrefix, suggestedFilename, marginMm, fitSelecto
       const pageHeightMm = orient === 'landscape' ? shortMm : longMm;
       const printableWidthMm = pageWidthMm - 2 * margin;
       const printableHeightMm = pageHeightMm - 2 * margin;
-      const doc = new jsPDF({ orientation: orient, unit: 'mm', format: PDF_JSPDF_FORMAT[size] || 'a4' });
+      // Live feedback: numbers/names in a downloaded PDF came out with two
+      // copies of the same text overlapping each other (e.g. "Victor" and
+      // "Kiptoo" both starting from the same spot, or a mark and its grade
+      // badge stamped on top of one another) — on real phones specifically,
+      // not reproducible in a desktop-browser test built the same way this
+      // table actually renders. Root cause: by default html2canvas does NOT
+      // use the real browser to lay out text — it walks the DOM by hand and
+      // re-measures each run of text on its own hidden canvas to decide
+      // where the next piece goes, and that measurement can come out
+      // slightly wrong for whatever font a given device actually renders
+      // this app's font stack as ('Inter' isn't bundled/loaded here at all,
+      // so every device is silently falling back to its own default system
+      // font — Roboto on most Android phones, Segoe UI on Windows, etc.). A
+      // small enough mismatch between what html2canvas THINKS a word's
+      // width is and what the browser actually drew is exactly what makes
+      // it start painting the next word/badge before the first one ends.
+      // The real fix is `foreignObjectRendering`: it tells html2canvas to
+      // stop hand-measuring text altogether and instead hand the actual
+      // DOM+CSS to an SVG <foreignObject>, which the BROWSER'S OWN engine
+      // lays out and paints exactly as it would on screen — the capture can
+      // no longer disagree with real layout because it no longer does its
+      // own. html2canvas feature-detects support and silently falls back to
+      // the old path if a browser can't do it, so this is safe everywhere.
+      // (Also reduced `scale` 2 -> 1.5 and turned on jsPDF's own
+      // compression — see the jsPDF constructor below — since the same 2x,
+      // uncompressed-PNG capture that was overlapping was also the direct
+      // cause of the 40MB+ file size: more pixels than a printed report's
+      // small text actually needs, times a lossless format with
+      // compression left off.)
+      const doc = new jsPDF({ orientation: orient, unit: 'mm', format: PDF_JSPDF_FORMAT[size] || 'a4', compress: true });
       for (let i = 0; i < targets.length; i += 1) {
         const el = targets[i];
         if (!el) continue;
-        const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true, windowWidth: PDF_CAPTURE_WINDOW_WIDTH });
+        const canvas = await html2canvas(el, { scale: 1.5, backgroundColor: '#ffffff', useCORS: true, windowWidth: PDF_CAPTURE_WINDOW_WIDTH, foreignObjectRendering: true });
         addCanvasAsPages(doc, canvas, { printableWidthMm, printableHeightMm, marginMm: margin, isFirstEl: i === 0 });
       }
       restoreCapture();

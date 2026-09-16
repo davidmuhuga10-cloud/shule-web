@@ -166,19 +166,25 @@ function aggregate(nums, mode) {
   const sum = nums.reduce((a, v) => a + v, 0);
   return mode === 'sum' ? sum : sum / nums.length;
 }
-function subjectAggCellsHtml(sub, students, mode, examOutOf) {
+// Live feedback: the combined "870/1200" (earned/possible) format packed
+// into one TOTAL-row cell was hard to read at a glance — asked to split it
+// into its own two rows instead: TOTAL (just the earned figure) directly
+// above a new OUT OF row (just the possible figure), with AVERAGE staying
+// where it already was, below both. `sumPart` ('earned' | 'outof') picks
+// which half of that pair a 'sum' mode row shows; it's ignored for 'avg'
+// mode, which was never a combined earned/possible figure to begin with.
+function subjectAggCellsHtml(sub, students, mode, examOutOf, sumPart) {
   if (!sub.papers || !sub.papers.length) {
     const nums = students.map((s) => s.scores[sub.id]).filter((v) => v !== null && v !== undefined && !isNaN(v));
     const val = aggregate(nums, mode);
     if (val === null) return '<td class="num">—</td>';
     // Round 6 §1: whole number for every subject's TOTAL/AVERAGE row, not
     // just Subject Combinations (see subjectRowCellsHtml above for why).
-    // Round 6 (Sprint Review §4, redo of the original §3 fix): the TOTAL
-    // row — and only the TOTAL row, an AVERAGE isn't a "total" and has no
-    // "possible" of its own — shows the earned/possible total-of-total
-    // (e.g. "870/1200": 870 marks earned across the students who sat this
-    // subject, out of nums.length students times the exam's out_of).
-    if (mode === 'sum') return `<td class="num"><b>${Math.round(val)}/${nums.length * examOutOf}</b></td>`;
+    if (mode === 'sum') {
+      return sumPart === 'outof'
+        ? `<td class="num"><b>${nums.length * examOutOf}</b></td>`
+        : `<td class="num"><b>${Math.round(val)}</b></td>`;
+    }
     // Sprint Review correction: the AVERAGE row is this sheet's "Mean
     // Marks" figure — an explicit exception to the "round everything to a
     // whole number" rule, so it keeps 2 decimal places instead.
@@ -188,20 +194,28 @@ function subjectAggCellsHtml(sub, students, mode, examOutOf) {
     const nums = students.map((s) => (s.paperScores && s.paperScores[sub.id] ? s.paperScores[sub.id][p.id] : undefined)).filter((v) => v !== null && v !== undefined && !isNaN(v));
     const val = aggregate(nums, mode);
     if (val === null) return '<td class="num">—</td>';
-    if (mode === 'sum') return `<td class="num">${Math.round(val)}/${nums.length * (Number(p.out_of) || 100)}</td>`;
+    if (mode === 'sum') {
+      return sumPart === 'outof'
+        ? `<td class="num">${nums.length * (Number(p.out_of) || 100)}</td>`
+        : `<td class="num">${Math.round(val)}</td>`;
+    }
     return `<td class="num">${val.toFixed(2)}</td>`;
   }).join('');
   const pctNums = students.map((s) => s.subjectPct && s.subjectPct[sub.id]).filter((v) => v !== null && v !== undefined && !isNaN(v));
   const pctVal = aggregate(pctNums, mode);
   let pctCell;
   if (pctVal === null) pctCell = '<td class="num">—</td>';
-  else if (mode === 'sum') pctCell = `<td class="num"><b>${Math.round(pctVal)}/${pctNums.length * 100}</b></td>`; // subjectPct is already 0-100
-  else pctCell = `<td class="num"><b>${pctVal.toFixed(2)}</b></td>`;
+  else if (mode === 'sum') {
+    // subjectPct is already 0-100
+    pctCell = sumPart === 'outof'
+      ? `<td class="num"><b>${pctNums.length * 100}</b></td>`
+      : `<td class="num"><b>${Math.round(pctVal)}</b></td>`;
+  } else pctCell = `<td class="num"><b>${pctVal.toFixed(2)}</b></td>`;
   return `${paperCells}${pctCell}`;
 }
-function aggRowHtml(label, subjects, students, mode, examOutOf) {
+function aggRowHtml(label, subjects, students, mode, examOutOf, sumPart) {
   return `<tr class="bs-agg-row"><td class="id-col"></td><td class="name-col"><b>${esc(label)}</b></td><td class="str-col"></td>
-    ${subjects.map((sub) => subjectAggCellsHtml(sub, students, mode, examOutOf)).join('')}
+    ${subjects.map((sub) => subjectAggCellsHtml(sub, students, mode, examOutOf, sumPart)).join('')}
     <td class="num sum-col" colspan="9"></td>
   </tr>`;
 }
@@ -316,7 +330,7 @@ async function load(root, classes, sel) {
           <td class="num sum-col">${s.total_points === null ? '—' : s.total_points.toFixed(2)}</td><td class="num sum-col">${s.mean_points === null ? '—' : s.mean_points.toFixed(2)}</td>
           <td class="num sum-col dev-col">${s.deviation > 0 ? '+' : ''}${s.deviation.toFixed(2)}</td>
           <td class="num sum-col">${s.stream_position || '—'}</td><td class="num sum-col"><b>${s.position || '—'}</b></td>
-        </tr>`).join('')}${aggRowHtml('TOTAL', res.subjects, res.students, 'sum', examOutOf)}${aggRowHtml('AVERAGE', res.subjects, res.students, 'avg', examOutOf)}</tbody>
+        </tr>`).join('')}${aggRowHtml('TOTAL', res.subjects, res.students, 'sum', examOutOf, 'earned')}${aggRowHtml('OUT OF', res.subjects, res.students, 'sum', examOutOf, 'outof')}${aggRowHtml('AVERAGE', res.subjects, res.students, 'avg', examOutOf)}</tbody>
       </table></div>
       ${showLevels ? summaryTablesHtml(res.students, res.subjects, bands) : ''}
     </div>
