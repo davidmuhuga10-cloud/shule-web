@@ -805,19 +805,10 @@ table.data td.num,table.data th.num{text-align:center}
   .print-opts select{display:none}
   .xlsx-download-btn{display:none}
 }
-/* Live feedback: "can we have both print and download as pdf on phone —
-   clicking print just works as expected then download when clicked downloads
-   the intended document in pdf... implement this everywhere any report needs
-   downloading or printing." A second, separate button (#idPrefix-pdf-btn,
-   see app.js's printOptionsHtml()/wireDownloadPdf()) sits next to Print,
-   phone-width only — desktop never sees it, same "screen and" reasoning as
-   the block above. Both buttons live in the same shared .print-opts markup
-   every printable screen already renders, so this shows up everywhere at
-   once rather than needing a per-screen change. */
-.print-download-mobile-btn{display:none}
-@media screen and (max-width:960px){
-  .print-download-mobile-btn{display:inline-flex}
-}
+/* ROUND 7: the separate mobile/app "Download PDF" button this rule used to
+   show (#idPrefix-pdf-btn, phone-width only) is gone — see app.js's ROUND 7
+   comment on printOptionsHtml() for why. Print (above) is the only button on
+   every printable screen now, at every width. */
 
 /* ---------- Badges ---------- */
 .badge{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:11.5px;font-weight:650}

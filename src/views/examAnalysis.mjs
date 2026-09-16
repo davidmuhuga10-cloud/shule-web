@@ -223,14 +223,16 @@ function mostImprovedHtml(title, rows, devExamName) {
  *  #ea-print-btn is exempted from it (see main.css) and always reads
  *  "🖨️ Print" — desktop is untouched, and every other report's own print
  *  button keeps the normal mobile "Download" label. */
-// Live feedback: "implement download as pdf everywhere any report needs
-// downloading or printing" surfaced a gap here specifically — the mobile
-// Download PDF button (#idPrefix-pdf-btn, wired generically by app.js's
-// wireDownloadPdf(), independent of this function) has no idea the two
-// reports here are individually tick-able, so without this it would always
-// capture BOTH regardless of the checkboxes. Wiring it exactly the same way
-// as the Print button below (wrap whatever's already there, hide/restore
-// around it) fixes that with no changes needed in app.js itself.
+// The two reports on this screen (Class Analysis / Top Students) are each
+// individually tick-able, so printing needs to know which are actually
+// wanted — without this it would always print both regardless of the
+// checkboxes. Wraps whichever Print button app.js rendered (hide/restore
+// around it) with no changes needed in app.js itself.
+// ROUND 7 note: app.js's mobile-only "Download PDF" button (#idPrefix-pdf-btn)
+// this used to also wrap has been removed entirely — Print is now the only
+// way to get a PDF anywhere in the app (see app.js's ROUND 7 comment on
+// printOptionsHtml()). wrap()'s own null-check makes that querySelector here
+// a harmless no-op now rather than something that needs cleaning up.
 function wireCombinedPrint(root, idPrefix, sections) {
   const wrap = (btn) => {
     if (!btn) return;
