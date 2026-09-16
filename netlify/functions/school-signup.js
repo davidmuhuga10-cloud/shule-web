@@ -46,6 +46,7 @@ const { getAdminClient } = require('./_lib/supabaseAdmin');
 const { staffUsernameFor, staffEmailFor } = require('./_lib/studentLogin');
 const { isValidPhone } = require('../../src/lib/phone.shared.js');
 const { verifyToken } = require('./_lib/otp');
+const { friendlyDbError, toClientError } = require('./_lib/errors');
 
 function json(statusCode, body) {
   return { statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
@@ -71,14 +72,15 @@ exports.handler = async (event) => {
   try {
     admin = getAdminClient();
   } catch (e) {
-    return json(500, { ok: false, message: e.message });
+    const { statusCode, message } = toClientError(e, 'school-signup: getAdminClient failed');
+    return json(statusCode, { ok: false, message });
   }
 
   try {
     return json(200, await createSchoolAndAdmin(admin, payload));
   } catch (e) {
-    console.error('school-signup error:', e);
-    return json(500, { ok: false, message: e.message || 'Unexpected server error.' });
+    const { statusCode, message } = toClientError(e, 'school-signup error:');
+    return json(statusCode, { ok: false, message });
   }
 };
 
@@ -135,7 +137,8 @@ async function createSchoolAndAdmin(admin, payload) {
     if (String(schoolErr.message || '').toLowerCase().includes('duplicate')) {
       return { ok: false, message: `School Code "${code}" is already taken — please choose another.` };
     }
-    return { ok: false, message: 'Could not create the school: ' + schoolErr.message };
+    console.error('school-signup: creating school failed', schoolErr);
+    return { ok: false, message: 'Could not create the school: ' + friendlyDbError(schoolErr) };
   }
 
   // The admin signs in with a username (their first name) or phone number,
@@ -155,7 +158,8 @@ async function createSchoolAndAdmin(admin, payload) {
   });
   if (createErr) {
     await admin.from('schools').delete().eq('id', school.id);
-    return { ok: false, message: 'Could not create the admin login: ' + createErr.message };
+    console.error('school-signup: creating admin login failed', createErr);
+    return { ok: false, message: 'Could not create the admin login: ' + friendlyDbError(createErr) };
   }
 
   const { error: profileErr } = await admin
@@ -164,7 +168,8 @@ async function createSchoolAndAdmin(admin, payload) {
   if (profileErr) {
     await admin.auth.admin.deleteUser(created.user.id);
     await admin.from('schools').delete().eq('id', school.id);
-    return { ok: false, message: 'Could not link the admin profile: ' + profileErr.message };
+    console.error('school-signup: linking admin profile failed', profileErr);
+    return { ok: false, message: 'Could not link the admin profile: ' + friendlyDbError(profileErr) };
   }
 
   // Seeding sensible defaults (CBC subjects, default grading scale, default

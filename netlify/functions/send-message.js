@@ -48,6 +48,7 @@ const crypto = require('crypto');
 const { getAdminClient, requireStaff } = require('./_lib/supabaseAdmin');
 const { loadSmsConfig, isConfigured, smsUnits } = require('./_lib/smsProvider');
 const { sign } = require('./_lib/internalToken');
+const { friendlyDbError, toClientError } = require('./_lib/errors');
 
 const MAX_PERSONALIZED_RECIPIENTS = 2000;
 
@@ -96,7 +97,8 @@ exports.handler = async (event) => {
   try {
     admin = getAdminClient();
   } catch (e) {
-    return json(500, { ok: false, message: e.message });
+    const { statusCode, message } = toClientError(e, 'send-message: getAdminClient failed');
+    return json(statusCode, { ok: false, message });
   }
 
   let caller;
@@ -109,8 +111,8 @@ exports.handler = async (event) => {
   try {
     return json(200, await sendMessage(admin, payload, caller.profile, triggerBackgroundDelivery));
   } catch (e) {
-    console.error('send-message error:', e);
-    return json(500, { ok: false, message: e.message || 'Unexpected server error.' });
+    const { statusCode, message } = toClientError(e, 'send-message error:');
+    return json(statusCode, { ok: false, message });
   }
 };
 
@@ -244,6 +246,12 @@ async function sendMessage(admin, payload, callerProfile, deliveryTrigger) {
   if (providerConfigured) {
     const totalCredits = finalized.reduce((sum, r) => sum + r.credits, 0);
     const { error: debitErr } = await admin.rpc('debit_sms_wallet', { p_school_id: schoolId, p_credits: totalCredits });
+    // Cleanup audit note: debit_sms_wallet()'s raised exceptions (see
+    // migrations/0041_sms_wallet_debit_rpc.sql) are deliberately safe,
+    // hand-authored, user-facing text ("Not enough SMS credit — top up
+    // before sending.", etc.) — not a raw schema/column-name leak — so
+    // debitErr.message is passed through here on purpose, unlike the raw
+    // Postgres insert error below.
     if (debitErr) return { ok: false, message: debitErr.message };
   }
 
@@ -268,7 +276,10 @@ async function sendMessage(admin, payload, callerProfile, deliveryTrigger) {
   }));
 
   const { error: insertErr } = await admin.from('message_logs').insert(rows);
-  if (insertErr) return { ok: false, message: 'Could not save the message log: ' + insertErr.message };
+  if (insertErr) {
+    console.error('send-message: inserting message_logs failed', insertErr);
+    return { ok: false, message: 'Could not save the message log: ' + friendlyDbError(insertErr) };
+  }
 
   if (providerConfigured) {
     // Not awaited by the CALLER of sendMessage in spirit — deliveryTrigger

@@ -16,6 +16,7 @@
  */
 const { getAdminClient, requireStaff } = require('./_lib/supabaseAdmin');
 const { triggerBackgroundDelivery } = require('./send-message');
+const { toClientError } = require('./_lib/errors');
 
 function json(statusCode, body) {
   return { statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
@@ -71,7 +72,8 @@ exports.handler = async (event) => {
   try {
     admin = getAdminClient();
   } catch (e) {
-    return json(500, { ok: false, message: e.message });
+    const { statusCode, message } = toClientError(e, 'resend-message: getAdminClient failed');
+    return json(statusCode, { ok: false, message });
   }
 
   let caller;
@@ -84,8 +86,8 @@ exports.handler = async (event) => {
   try {
     return json(200, await resendMessages(admin, payload, caller.profile));
   } catch (e) {
-    console.error('resend-message error:', e);
-    return json(500, { ok: false, message: e.message || 'Unexpected server error.' });
+    const { statusCode, message } = toClientError(e, 'resend-message error:');
+    return json(statusCode, { ok: false, message });
   }
 };
 

@@ -18,6 +18,7 @@
 
 const { getAdminClient } = require('./_lib/supabaseAdmin');
 const { verifyToken } = require('./_lib/otp');
+const { friendlyDbError, toClientError } = require('./_lib/errors');
 
 function json(statusCode, body) {
   return { statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
@@ -52,7 +53,10 @@ async function resetForgottenPassword(admin, payload) {
   if (!profile || profile.status !== 'active') return { ok: false, message: 'Could not find that account.' };
 
   const { error } = await admin.auth.admin.updateUserById(profile.id, { password: newPassword });
-  if (error) return { ok: false, message: error.message };
+  if (error) {
+    console.error('forgot-password: updateUserById failed', error);
+    return { ok: false, message: friendlyDbError(error) };
+  }
   return { ok: true };
 }
 
@@ -72,14 +76,15 @@ exports.handler = async (event) => {
   try {
     admin = getAdminClient();
   } catch (e) {
-    return json(500, { ok: false, message: e.message });
+    const { statusCode, message } = toClientError(e, 'forgot-password: getAdminClient failed');
+    return json(statusCode, { ok: false, message });
   }
 
   try {
     return json(200, await resetForgottenPassword(admin, payload));
   } catch (e) {
-    console.error('forgot-password error:', e);
-    return json(500, { ok: false, message: e.message || 'Unexpected server error.' });
+    const { statusCode, message } = toClientError(e, 'forgot-password error:');
+    return json(statusCode, { ok: false, message });
   }
 };
 

@@ -28,6 +28,7 @@
  * ----------------------------------------------------------------------------
  */
 const { getAdminClient, requireSuperAdmin, requireStaff } = require('./_lib/supabaseAdmin');
+const { friendlyDbError, toClientError } = require('./_lib/errors');
 
 function json(statusCode, body) {
   return { statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
@@ -49,7 +50,8 @@ exports.handler = async (event) => {
   try {
     admin = getAdminClient();
   } catch (e) {
-    return json(500, { ok: false, message: e.message });
+    const { statusCode, message } = toClientError(e, 'admin-impersonate: getAdminClient failed');
+    return json(statusCode, { ok: false, message });
   }
 
   try {
@@ -71,8 +73,8 @@ exports.handler = async (event) => {
     }
     return json(200, await startImpersonation(admin, payload, caller.user.id));
   } catch (e) {
-    console.error('admin-impersonate error:', e);
-    return json(e.statusCode || 500, { ok: false, message: e.message || 'Unexpected server error.' });
+    const { statusCode, message } = toClientError(e, 'admin-impersonate error:');
+    return json(statusCode, { ok: false, message });
   }
 };
 
@@ -100,7 +102,8 @@ async function startImpersonation(admin, payload, adminId) {
     email: targetProfile.email
   });
   if (linkErr || !linkData || !linkData.properties) {
-    return { ok: false, message: 'Could not create an impersonation session: ' + (linkErr && linkErr.message) };
+    console.error('admin-impersonate: generateLink failed', linkErr);
+    return { ok: false, message: 'Could not create an impersonation session. Try again.' };
   }
 
   // Record the audit trail directly (this function already runs under the
@@ -112,7 +115,10 @@ async function startImpersonation(admin, payload, adminId) {
     .from('admin_impersonation_sessions')
     .insert({ admin_id: adminId, school_id: schoolId, target_profile_id: targetProfile.id })
     .select('id').single();
-  if (sessionErr) return { ok: false, message: 'Could not record the impersonation session: ' + sessionErr.message };
+  if (sessionErr) {
+    console.error('admin-impersonate: recording impersonation session failed', sessionErr);
+    return { ok: false, message: 'Could not record the impersonation session. Try again.' };
+  }
 
   await admin.from('admin_audit_log').insert({
     actor: adminId, action: 'impersonation_start', target_school_id: schoolId,

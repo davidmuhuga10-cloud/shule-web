@@ -20,6 +20,7 @@ const { getAdminClient } = require('./_lib/supabaseAdmin');
 const { isValidPhone, normalize } = require('../../src/lib/phone.shared.js');
 const { loadSmsConfig, isConfigured, sendSms } = require('./_lib/smsProvider');
 const { CODE_TTL_MS, RESEND_COOLDOWN_MS, PURPOSES, generateCode, hashCode } = require('./_lib/otp');
+const { toClientError } = require('./_lib/errors');
 
 const MAX_SENDS_PER_WINDOW = 5;
 const WINDOW_MS = 15 * 60 * 1000;
@@ -100,14 +101,15 @@ exports.handler = async (event) => {
   try {
     admin = getAdminClient();
   } catch (e) {
-    return json(500, { ok: false, message: e.message });
+    const { statusCode, message } = toClientError(e, 'send-otp: getAdminClient failed');
+    return json(statusCode, { ok: false, message });
   }
 
   try {
     return json(200, await sendOtp(admin, payload));
   } catch (e) {
-    console.error('send-otp error:', e);
-    return json(500, { ok: false, message: e.message || 'Unexpected server error.' });
+    const { statusCode, message } = toClientError(e, 'send-otp error:');
+    return json(statusCode, { ok: false, message });
   }
 };
 

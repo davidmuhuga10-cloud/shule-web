@@ -19,6 +19,7 @@
  */
 const { getAdminClient, requireStaff } = require('./_lib/supabaseAdmin');
 const { loadSmsConfig, isConfigured, sendSms } = require('./_lib/smsProvider');
+const { toClientError } = require('./_lib/errors');
 
 const ADMIN_PHONE = '0705041512';
 
@@ -42,7 +43,8 @@ exports.handler = async (event) => {
   try {
     admin = getAdminClient();
   } catch (e) {
-    return json(500, { ok: false, message: e.message });
+    const { statusCode, message } = toClientError(e, 'sms-credit-notify: getAdminClient failed');
+    return json(statusCode, { ok: false, message });
   }
 
   let caller;
@@ -55,8 +57,8 @@ exports.handler = async (event) => {
   try {
     return json(200, await notifyAdmin(admin, payload, caller.profile));
   } catch (e) {
-    console.error('sms-credit-notify error:', e);
-    return json(500, { ok: false, message: e.message || 'Unexpected server error.' });
+    const { statusCode, message } = toClientError(e, 'sms-credit-notify error:');
+    return json(statusCode, { ok: false, message });
   }
 };
 

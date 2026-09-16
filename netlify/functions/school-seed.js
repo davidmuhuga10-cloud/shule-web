@@ -20,6 +20,7 @@
  */
 
 const { getAdminClient } = require('./_lib/supabaseAdmin');
+const { toClientError } = require('./_lib/errors');
 
 function json(statusCode, body) {
   return { statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
@@ -63,7 +64,8 @@ exports.handler = async (event) => {
   try {
     admin = getAdminClient();
   } catch (e) {
-    return json(500, { ok: false, message: e.message });
+    const { statusCode, message } = toClientError(e, 'school-seed: getAdminClient failed');
+    return json(statusCode, { ok: false, message });
   }
 
   return json(200, await seedSchool(admin, payload));

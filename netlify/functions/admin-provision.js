@@ -20,6 +20,7 @@
 
 const { getAdminClient, requireAdmin } = require('./_lib/supabaseAdmin');
 const { studentEmailFor, studentPasswordFor, parentEmailFor, staffUsernameFor, staffEmailFor, DEFAULT_TEACHER_PASSWORD } = require('./_lib/studentLogin');
+const { friendlyDbError, toClientError } = require('./_lib/errors');
 
 function json(statusCode, body) {
   return {
@@ -45,7 +46,12 @@ exports.handler = async (event) => {
   try {
     admin = getAdminClient();
   } catch (e) {
-    return json(500, { ok: false, message: e.message });
+    // Cleanup audit fix: getAdminClient() throws a message naming the exact
+    // missing env vars when the site is misconfigured — useful in the
+    // Netlify logs, never in a response body. toClientError() logs it and
+    // returns a generic message instead.
+    const { statusCode, message } = toClientError(e, 'admin-provision: getAdminClient failed');
+    return json(statusCode, { ok: false, message });
   }
 
   let caller;
@@ -83,8 +89,13 @@ exports.handler = async (event) => {
         return json(400, { ok: false, message: 'Unknown action: ' + payload.action });
     }
   } catch (e) {
-    console.error('admin-provision error:', e);
-    return json(500, { ok: false, message: e.message || 'Unexpected server error.' });
+    // Cleanup audit fix: this used to return the raw caught error's message
+    // straight to the client, which for an unexpected failure (rather than
+    // one of the deliberate {ok:false,...} returns above) could be anything
+    // — including raw Postgres/Auth details. toClientError() logs the real
+    // error server-side and answers with one generic message instead.
+    const { statusCode, message } = toClientError(e, 'admin-provision error:');
+    return json(statusCode, { ok: false, message });
   }
 };
 
@@ -123,14 +134,15 @@ async function provisionOneStudent(admin, schoolId, schoolCode, { student_id, ad
     email_confirm: true,
     user_metadata: { role: 'student', student_id, full_name, school_id: schoolId }
   });
-  if (createErr) return { ok: false, admission_no, message: 'Could not create the login: ' + createErr.message };
+  if (createErr) { console.error('admin-provision: createUser (student) failed', createErr); return { ok: false, admission_no, message: 'Could not create the login: ' + friendlyDbError(createErr) }; }
 
   const { error: profileErr } = await admin
     .from('profiles')
     .insert({ id: created.user.id, school_id: schoolId, name: full_name, email, role: 'student', student_id, status: 'active' });
   if (profileErr) {
     await admin.auth.admin.deleteUser(created.user.id); // don't leave an orphaned auth account behind
-    return { ok: false, admission_no, message: 'Could not link the profile: ' + profileErr.message };
+    console.error('admin-provision: linking student profile failed', profileErr);
+    return { ok: false, admission_no, message: 'Could not link the profile: ' + friendlyDbError(profileErr) };
   }
 
   return { ok: true, profile_id: created.user.id, email, defaultPassword: password, admission_no };
@@ -215,14 +227,15 @@ async function provisionOneStaff(admin, schoolId, schoolCode, { staff_id, full_n
     email_confirm: true,
     user_metadata: { role: appRole, staff_id, full_name, school_id: schoolId }
   });
-  if (createErr) return { ok: false, staff_id, message: 'Could not create the login: ' + createErr.message };
+  if (createErr) { console.error('admin-provision: createUser (staff) failed', createErr); return { ok: false, staff_id, message: 'Could not create the login: ' + friendlyDbError(createErr) }; }
 
   const { error: profileErr } = await admin
     .from('profiles')
     .insert({ id: created.user.id, school_id: schoolId, name: full_name, email, username, phone: phone || null, role: appRole, staff_id, status: 'active' });
   if (profileErr) {
     await admin.auth.admin.deleteUser(created.user.id);
-    return { ok: false, staff_id, message: 'Could not link the profile: ' + profileErr.message };
+    console.error('admin-provision: linking staff profile failed', profileErr);
+    return { ok: false, staff_id, message: 'Could not link the profile: ' + friendlyDbError(profileErr) };
   }
 
   return { ok: true, profile_id: created.user.id, username, defaultPassword: password, staff_id };
@@ -328,14 +341,15 @@ async function createParentLogin(admin, payload, schoolId) {
     email_confirm: true,
     user_metadata: { role: 'parent', full_name, school_id: schoolId }
   });
-  if (createErr) return { ok: false, message: 'Could not create the login: ' + createErr.message };
+  if (createErr) { console.error('admin-provision: createUser (parent) failed', createErr); return { ok: false, message: 'Could not create the login: ' + friendlyDbError(createErr) }; }
 
   const { error: profileErr } = await admin
     .from('profiles')
     .insert({ id: created.user.id, school_id: schoolId, name: full_name, email, role: 'parent', status: 'active' });
   if (profileErr) {
     await admin.auth.admin.deleteUser(created.user.id); // don't leave an orphaned auth account behind
-    return { ok: false, message: 'Could not link the profile: ' + profileErr.message };
+    console.error('admin-provision: linking parent profile failed', profileErr);
+    return { ok: false, message: 'Could not link the profile: ' + friendlyDbError(profileErr) };
   }
 
   return { ok: true, profile_id: created.user.id, email, defaultPassword: password };
@@ -388,7 +402,7 @@ async function resetPassword(admin, payload, schoolId) {
   }
 
   const { error: updateErr } = await admin.auth.admin.updateUserById(profile_id, { password });
-  if (updateErr) return { ok: false, message: updateErr.message };
+  if (updateErr) { console.error('admin-provision: resetPassword updateUserById failed', updateErr); return { ok: false, message: friendlyDbError(updateErr) }; }
 
   return { ok: true, defaultPassword: isGeneratedDefault ? password : undefined };
 }
@@ -407,10 +421,10 @@ async function setLoginStatus(admin, payload, schoolId) {
   const { error: banErr } = await admin.auth.admin.updateUserById(profile_id, {
     ban_duration: status === 'inactive' ? '87600h' : 'none' // ~10 years, effectively "disabled", vs. lifted
   });
-  if (banErr) return { ok: false, message: banErr.message };
+  if (banErr) { console.error('admin-provision: setLoginStatus ban update failed', banErr); return { ok: false, message: friendlyDbError(banErr) }; }
 
   const { error: profileErr } = await admin.from('profiles').update({ status }).eq('id', profile_id).eq('school_id', schoolId);
-  if (profileErr) return { ok: false, message: profileErr.message };
+  if (profileErr) { console.error('admin-provision: setLoginStatus profile update failed', profileErr); return { ok: false, message: friendlyDbError(profileErr) }; }
 
   return { ok: true };
 }

@@ -14,6 +14,7 @@
 const { getAdminClient } = require('./_lib/supabaseAdmin');
 const { normalize } = require('../../src/lib/phone.shared.js');
 const { PURPOSES, MAX_ATTEMPTS, hashCode, signVerifiedToken } = require('./_lib/otp');
+const { toClientError } = require('./_lib/errors');
 
 function json(statusCode, body) {
   return { statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
@@ -77,14 +78,15 @@ exports.handler = async (event) => {
   try {
     admin = getAdminClient();
   } catch (e) {
-    return json(500, { ok: false, message: e.message });
+    const { statusCode, message } = toClientError(e, 'verify-otp: getAdminClient failed');
+    return json(statusCode, { ok: false, message });
   }
 
   try {
     return json(200, await verifyOtp(admin, payload));
   } catch (e) {
-    console.error('verify-otp error:', e);
-    return json(500, { ok: false, message: e.message || 'Unexpected server error.' });
+    const { statusCode, message } = toClientError(e, 'verify-otp error:');
+    return json(statusCode, { ok: false, message });
   }
 };
 
