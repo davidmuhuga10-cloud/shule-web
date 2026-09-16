@@ -305,7 +305,10 @@ async function load(root, classes, sel) {
     <div class="card ea-report" id="ea-class-report">
       <div class="card-b" style="padding-bottom:12px">
         ${printHeaderHtml(settings)}
-        ${reportTitleBarHtml(`${bsRes.exam.name} — Class Analysis Report — ${cls ? cls.name : ''}`)}
+        <!-- Same approved letterhead/title-bar design as the Mark List
+             (broadsheet.mjs): class far left, exam centered, report name
+             far right — see reportTitleBarHtml()'s array form. -->
+        ${reportTitleBarHtml([cls ? cls.name : '', bsRes.exam.name, 'Class Analysis Report'])}
       </div>
       <div class="card-b">
         <div class="ea-stat-row">
@@ -344,7 +347,7 @@ async function load(root, classes, sel) {
     <div class="card ea-report" id="ea-top-report">
       <div class="card-b" style="padding-bottom:12px">
         ${printHeaderHtml(settings)}
-        ${reportTitleBarHtml(`${bsRes.exam.name} — Top Students Report — ${cls ? cls.name : ''}`)}
+        ${reportTitleBarHtml([cls ? cls.name : '', bsRes.exam.name, 'Top Students Report'])}
       </div>
       <div class="card-b">
         <div style="font-weight:750;font-size:13.5px">TOP 3 — OVERALL</div>

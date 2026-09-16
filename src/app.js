@@ -197,20 +197,38 @@ const PX_PER_MM = 96 / 25.4;
  *  guarantees every column survives onto the page — nothing is ever
  *  clipped — and the shrink is never more aggressive than the table
  *  actually needs, which is as WYSIWYG as a forced print rescale can be.
- *  `headerEl` (optional): "the green box and address is not in line with
- *  the marks table" — the Mark List's printed header (school name/address,
- *  the green title bar) sits in its own sibling `.card-b`, padded 20px by
- *  `.card .card-b{padding:20px}`. The table below it lives in the same
- *  padded card too, but once this function pins the TABLE's own width to
- *  printableWidthPx (nearly the full page width), that plain `<table>`
- *  element — unlike its `.card-b` wrapper — isn't confined by the card's
- *  padding at all (nothing here clips overflow; `.card` sets none), so it
- *  visibly extends past the header's right edge, which stayed at the
- *  card's normal padded width. When passed, headerEl is pinned to that
- *  same printableWidthPx (and same box-sizing) so both end up flush at
- *  the exact same right edge — real content, not a guess: verified with a
- *  Playwright measurement that both elements' rendered right edges match
- *  to sub-pixel precision. */
+ *  `headerEl` (optional): "the end of the address must be inline with the
+ *  end of the table." Two separate bugs were hiding behind that one
+ *  complaint:
+ *  (1) The original fix here only ever ran when the table needed
+ *      shrinking (`scale < 1`) — for a class with few enough subjects that
+ *      the Mark List grid already fits the page, this whole block used to
+ *      return early and never touch headerEl at all, leaving it at its
+ *      default width. Confirmed with a Playwright measurement: with no
+ *      shrink needed, the table (100%-width child of its OWN `.card-b`
+ *      wrapper, which is itself already inset by that wrapper's 20px
+ *      padding) naturally renders ~20-40px narrower than headerEl's
+ *      default box — so on any "everything fits" print, the header and
+ *      table were never aligned in the first place. Fixed by always
+ *      computing/applying the header-alignment rule below when headerEl is
+ *      passed, whether or not the table itself needs shrinking.
+ *  (2) Even when the shrink path DID run, this used to pin headerEl's own
+ *      outer box to the table's right edge — but headerEl is a `.card-b`
+ *      with its own 20px padding, and the actual printed address
+ *      (`.ph-address`) sits flush against headerEl's PADDED inner edge,
+ *      not its outer border-box edge. So the old fix successfully lined up
+ *      the invisible header *box* with the table while the visible address
+ *      *text* stayed one padding-width (~20px) short of it — exactly the
+ *      "not quite inline, looks awkward" gap reported, confirmed by
+ *      reading printHeader.mjs/main.css's actual box structure (no bug
+ *      needed reproducing — the padding is right there in the CSS).
+ *      Fixed by measuring how far `.ph-address` currently sits from
+ *      headerEl's own right edge (whatever that inset actually is, so this
+ *      keeps working no matter how the header's own CSS changes later) and
+ *      solving for the headerEl width that puts the ADDRESS's right edge,
+ *      not the box's, flush with the table's — verified with a Playwright
+ *      measurement that both elements' rendered right edges match to
+ *      sub-pixel precision, with and without the shrink path engaged. */
 function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm, headerEl) {
   if (!tableEl) return () => {};
   const [shortMm, longMm] = PAPER_DIMENSIONS_MM[paperSize] || PAPER_DIMENSIONS_MM.A4;
@@ -228,7 +246,35 @@ function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm, headerEl) 
   const printableWidthPx = (pageWidthMm - 2 * (marginMm || 10)) * PX_PER_MM * 0.975;
   const naturalWidth = tableEl.scrollWidth;
   const scale = naturalWidth > printableWidthPx ? printableWidthPx / naturalWidth : 1;
-  if (scale >= 1) return () => {};
+  // Whatever the table's own rendered width ends up being once printing
+  // actually happens — shrunk to printableWidthPx below when it doesn't
+  // fit, otherwise exactly what it renders at today. Needed even when
+  // nothing is shrinking — see headerEl's own comment above (bug 1). */
+  const finalTableWidth = scale < 1 ? printableWidthPx : naturalWidth;
+  let headerRule = '';
+  if (headerEl) {
+    if (!headerEl.dataset.pfHeaderId) headerEl.dataset.pfHeaderId = 'pfh' + Math.random().toString(36).slice(2);
+    const tableRectBefore = tableEl.getBoundingClientRect();
+    const headerRectBefore = headerEl.getBoundingClientRect();
+    const targetTableRight = tableRectBefore.left + finalTableWidth;
+    // Measure how far the actual printed address block sits from headerEl's
+    // own right edge right now (see headerEl's doc comment, bug 2) — rather
+    // than assuming a specific padding value, so this keeps working however
+    // printHeader.mjs's own markup/CSS changes later. Falls back to aligning
+    // headerEl's own box (the old behavior) if that element isn't found.
+    const addressEl = headerEl.querySelector('.ph-address');
+    const rightInset = addressEl ? (headerRectBefore.right - addressEl.getBoundingClientRect().right) : 0;
+    const newHeaderWidth = (targetTableRight + rightInset) - headerRectBefore.left;
+    headerRule = `[data-pf-header-id="${headerEl.dataset.pfHeaderId}"]{box-sizing:border-box!important;width:${newHeaderWidth.toFixed(2)}px!important}`;
+  }
+  if (scale >= 1) {
+    if (!headerRule) return () => {};
+    const style = document.createElement('style');
+    style.id = 'print-autofit-header-only';
+    style.textContent = headerRule;
+    document.head.appendChild(style);
+    return () => { style.remove(); };
+  }
   // BUG FIX (the real root cause of the Mark List's huge, inconsistent
   // blank gaps partway down page after page — confirmed by the pattern
   // itself: one printed page held 14 student rows before a big gap,
@@ -384,26 +430,10 @@ function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm, headerEl) 
   // isn't relying solely on the collapsed border from the table's outer
   // edge. If this still recurs, it needs a real fresh PDF from whoever
   // sees it (not a screenshot) to pin down the actual cause. */
-  // headerEl lives in its OWN `.card-b` (its own 20px padding), a sibling of
-  // the table's `.card-b` — not a shared ancestor with the table. The table
-  // ignores its own wrapper's padding once it's wider than the wrapper (see
-  // the comment above headerEl in the doc comment), so its true right edge
-  // is wrapperLeft + wrapper'sOwnLeftPadding + printableWidthPx. headerEl's
-  // rect already starts flush at that same wrapperLeft (both `.card-b`s are
-  // siblings at the same x), so matching its WIDTH to wrapperPadLeft +
-  // printableWidthPx (not printableWidthPx alone) is what actually lines up
-  // the two right edges — confirmed with a Playwright measurement of both
-  // rects; using printableWidthPx alone left headerEl short by exactly one
-  // wrapper-padding's worth (~20px), which is what "not quite in line"
-  // looked like in practice, not the full width of the mismatch.
-  let headerRule = '';
-  if (headerEl) {
-    if (!headerEl.dataset.pfHeaderId) headerEl.dataset.pfHeaderId = pfId;
-    const tableWrapEl = tableEl.parentElement;
-    const wrapPadLeft = tableWrapEl ? (parseFloat(getComputedStyle(tableWrapEl).paddingLeft) || 0) : 0;
-    const headerWidthPx = printableWidthPx + wrapPadLeft;
-    headerRule = `[data-pf-header-id="${pfId}"]{box-sizing:border-box!important;width:${headerWidthPx.toFixed(2)}px!important}`;
-  }
+  // headerRule (the ADDRESS-edge-matching rule, not just the header box's
+  // own edge — see headerEl's doc comment, bugs 1 and 2) was already
+  // computed above, before this shrink path even runs, since it applies
+  // whether or not the table needs shrinking.
   const style = document.createElement('style');
   style.id = 'print-autofit-override';
   style.textContent = `

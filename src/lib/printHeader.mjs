@@ -41,11 +41,12 @@ export function addressLines(settings) {
   return lines;
 }
 
-/** The standard report header: logo far left, school name centered, address
- *  block far right. Round 5 §2/§3: no divider line under this row anymore —
- *  that line used to run under every report's header except the Report
- *  Form's (which had already dropped it, see reportTitleBarHtml() below);
- *  now nothing does. */
+/** The standard report header, Round 6 "Bold Letterhead Band" redesign
+ *  (approved design: logo far left in a circular badge, school name
+ *  centered in white/uppercase, address block far right in white — all on
+ *  a solid brand-teal band, closed off by a doubled amber rule). Logo/
+ *  school/address positions are unchanged from before; only the visual
+ *  treatment (solid color band instead of plain white) changed. */
 export function printHeaderHtml(settings) {
   settings = settings || {};
   const logoHtml = settings.logo
@@ -61,16 +62,33 @@ export function printHeaderHtml(settings) {
   </div>`;
 }
 
-/** Round 5 §2/§3: the solid brand-green title bar that used to be built by
- *  hand just for the Report Form (_reportCard.mjs's old bespoke
- *  `.r-title-bar` div) — pulled out here so every printable report can use
- *  the exact same "green rectangle" treatment under its header, instead of
- *  each report inventing its own subtitle styling (previously a small plain
- *  ph-title text line for everything except Report Forms). Pass whatever
- *  descriptive title that report already shows (exam name, class, etc). */
-export function reportTitleBarHtml(title) {
-  if (!title) return '';
-  return `<div class="ph-title-bar">${esc(title)}</div>`;
+/** Round 6 redesign: the old solid brand-green "rectangle" bar is gone —
+ *  replaced by a plain black-text row directly under the new letterhead
+ *  band (see printHeaderHtml() above), which now carries the color. Two
+ *  shapes are supported:
+ *   - a single string (every report that only ever had one descriptive
+ *     title) renders centered, bold black text — same spot, same content,
+ *     just restyled to match the new letterhead.
+ *   - an array of parts (the approved Mark List design: class name / exam
+ *     name / report name spread across the full width) renders the first
+ *     part flush left, the last part flush right and enlarged (it's the
+ *     report's own name — "MARK LIST" in the approved design), and
+ *     anything in between centered. Falsy parts are dropped, so a report
+ *     that only has two of the three slots still lays out sensibly. */
+export function reportTitleBarHtml(titleOrParts) {
+  const parts = Array.isArray(titleOrParts) ? titleOrParts.filter((p) => p) : (titleOrParts ? [titleOrParts] : []);
+  if (!parts.length) return '';
+  if (parts.length === 1) {
+    return `<div class="ph-title-bar"><span class="ph-title-solo">${esc(parts[0])}</span></div>`;
+  }
+  const left = parts[0];
+  const right = parts[parts.length - 1];
+  const center = parts.slice(1, -1).join(' — ');
+  return `<div class="ph-title-bar">
+    <span class="ph-title-left">${esc(left)}</span>
+    <span class="ph-title-center">${esc(center)}</span>
+    <span class="ph-title-right">${esc(right)}</span>
+  </div>`;
 }
 
 /** The blocking message shown instead of a report when contact info isn't

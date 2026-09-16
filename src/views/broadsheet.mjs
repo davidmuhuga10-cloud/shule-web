@@ -319,7 +319,10 @@ async function load(root, classes, sel) {
            past this card's normal 20px padding. -->
       <div class="card-b" id="bs-print-header" style="padding-bottom:12px">
         ${printHeaderHtml(settings)}
-        ${reportTitleBarHtml(`${res.exam.name} — Mark List — ${cls ? cls.name : ''}`)}
+        <!-- Approved design (Option 2D): class far left, exam name centered,
+             the report's own name ("Mark List") far right, enlarged — see
+             reportTitleBarHtml()'s array form in printHeader.mjs. -->
+        ${reportTitleBarHtml([cls ? cls.name : '', res.exam.name, 'Mark List'])}
       </div>
       <div class="card-b table-wrap" id="bs-table-wrap"><table class="mark-list-grid">
         <thead><tr><th class="id-col">Adm. No.</th><th class="name-col">Name</th><th class="str-col">Stream</th>

@@ -716,17 +716,23 @@ table.data td.num,table.data th.num{text-align:center}
    (main.css's .print-grid/.mark-list-grid). */
 .bs-summary{padding:16px 18px}
 
-/* Shared printable-report header (feature brief §2/§4; Round 5 §2/§3): logo
-   far left, school name centered, address block far right — same layout for
-   the Class List, Mark List, Score Sheet, Exam Analysis and Report Form.
-   Round 5 dropped the divider line that used to run under this row (it now
-   reads as an unnecessary straight line once the green title bar sits right
-   underneath) and moved the report's own title out into that title bar
-   (.ph-title-bar) instead of the small plain-text subtitle this used to
-   carry — see src/lib/printHeader.mjs's printHeaderHtml()/reportTitleBarHtml(). */
-.print-header{display:flex;align-items:center;gap:16px;padding-bottom:4px;margin-bottom:0}
+/* Shared printable-report header (feature brief §2/§4; Round 6 "Bold
+   Letterhead Band" redesign): logo far left in a white circular badge,
+   school name centered in white/uppercase, address block far right in
+   white — all on a solid brand-teal band closed off by a doubled amber
+   rule, same layout for the Class List, Mark List, Score Sheet, Exam
+   Analysis and Report Form. The band bleeds to the edges of its own
+   `.card-b` wrapper (negative margin equal to that wrapper's own 20px
+   padding, then its own padding restores the same inset for its content)
+   rather than sitting inset inside it like a plain white row used to.
+   Below it, reportTitleBarHtml()'s own row (.ph-title-bar) carries the
+   report's descriptive title in plain black text — see
+   src/lib/printHeader.mjs's printHeaderHtml()/reportTitleBarHtml(). */
+.print-header{display:flex;align-items:center;gap:16px;margin:-20px -20px 0 -20px;background:var(--brand);
+  padding:22px 20px 16px;border-bottom:10px solid var(--accent)}
 .print-header .ph-logo{flex:0 0 auto}
-.print-header .ph-logo-img{width:56px;height:56px}
+.print-header .ph-logo-img{width:52px;height:52px;border-radius:50%;background:#fff;object-fit:cover}
+.print-header .logo-placeholder{display:flex;align-items:center;justify-content:center;font-size:22px}
 .print-header .ph-center{flex:1;min-width:0;text-align:center}
 /* Live feedback: "when school name is too large it pushes everything down
    — imagine a person registered a school with 12 names" — with no cap this
@@ -736,13 +742,20 @@ table.data td.num,table.data th.num{text-align:center}
    Academy" is unaffected (fits on one line), a very long one like "Morning
    Glory Preparatory and Junior School" wraps onto exactly 2 lines and then
    trails off with "…" instead of a 3rd/4th line. */
-.print-header .ph-school{font-size:19px;font-weight:800;color:var(--grid-text);line-height:1.25;
+.print-header .ph-school{font-size:19px;font-weight:800;color:#fff;letter-spacing:.3px;text-transform:uppercase;line-height:1.25;
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
-.print-header .ph-address{flex:0 0 auto;text-align:right;font-size:11px;color:var(--grid-text);line-height:1.55;white-space:nowrap}
-/* The "green rectangle" title bar — was Report-Form-only (.report
-   .r-title-bar); now the one shared component every printable report uses
-   for its own descriptive title (exam name, class, etc). */
-.ph-title-bar{background:var(--brand);color:#fff;text-align:center;font-weight:750;letter-spacing:.2px;padding:9px 14px;font-size:13.5px;margin-top:10px}
+.print-header .ph-address{flex:0 0 auto;text-align:right;font-size:11px;color:rgba(255,255,255,.8);line-height:1.55;white-space:nowrap}
+/* reportTitleBarHtml()'s row, directly under the letterhead band above —
+   Round 6: plain black text, no fill (the band above now carries the
+   color), spread across the full width when the caller passes distinct
+   class/exam/report-name parts (see printHeader.mjs), otherwise a single
+   centered line for reports that only ever had one descriptive title. */
+.ph-title-bar{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-top:8px}
+.ph-title-bar .ph-title-left,.ph-title-bar .ph-title-center,.ph-title-bar .ph-title-right{flex:1;min-width:0;color:var(--grid-text);font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ph-title-bar .ph-title-left{text-align:left}
+.ph-title-bar .ph-title-center{text-align:center}
+.ph-title-bar .ph-title-right{text-align:right;font-weight:800;font-size:19px;text-transform:uppercase}
+.ph-title-bar .ph-title-solo{flex:1;text-align:center;font-weight:750;letter-spacing:.2px;font-size:15px;color:var(--grid-text)}
 /* Class List / Score Sheet full-grid print table (feature brief §2: "print
    as a table with clear rows, columns, and borders — the same standard
    already used on the mark list"), plus a shaded title band ("GRADE 8 -
