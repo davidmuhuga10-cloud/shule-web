@@ -22,7 +22,7 @@
  * clears every OTHER cached module too, not just this one, since e.g. a
  * Finance write can affect a student's balance shown elsewhere.
  */
-import { ok, err, friendlyDbError, fromResult, createMemoCache, clearAllCaches } from './_util.mjs';
+import { ok, err, friendlyDbError, fromResult, createMemoCache, clearAllCaches, selectAllRows } from './_util.mjs';
 
 export function createFinanceApi(supabase) {
   // Scoped per createFinanceApi() CALL, not module-level — production only
@@ -284,14 +284,31 @@ export function createFinanceApi(supabase) {
      *  status (opts.status: 'active' | 'reversed'; omitted = both). */
     async list(opts) {
       opts = opts || {};
-      let q = supabase.from('finance_debit_notes')
-        .select('*, students(full_name, admission_no, class_id, classes(name)), finance_vote_heads(name), created_by_profile:profiles!finance_debit_notes_created_by_fkey(name)')
-        .order('created_at', { ascending: false }).limit(opts.limit || 500);
-      if (opts.academic_year_id) q = q.eq('academic_year_id', opts.academic_year_id);
-      if (opts.term_id) q = q.eq('term_id', opts.term_id);
-      if (opts.status === 'active') q = q.is('reversed_at', null);
-      if (opts.status === 'reversed') q = q.not('reversed_at', 'is', null);
-      const { data, error } = await q;
+      const buildQuery = (from, to) => {
+        let q = supabase.from('finance_debit_notes')
+          .select('*, students(full_name, admission_no, class_id, classes(name)), finance_vote_heads(name), created_by_profile:profiles!finance_debit_notes_created_by_fkey(name)')
+          .order('created_at', { ascending: false });
+        if (opts.academic_year_id) q = q.eq('academic_year_id', opts.academic_year_id);
+        if (opts.term_id) q = q.eq('term_id', opts.term_id);
+        if (opts.status === 'active') q = q.is('reversed_at', null);
+        if (opts.status === 'reversed') q = q.not('reversed_at', 'is', null);
+        return q.range(from, to);
+      };
+      // Cleanup audit fix: this used to be a single query hard-capped at
+      // .limit(opts.limit || 500) with no .range() follow-up, so once a
+      // school passed 500 debit notes the oldest ones silently stopped
+      // appearing on the school-wide trail — no error, no "load more",
+      // nothing to indicate anything was cut off. An explicit opts.limit
+      // (a caller that genuinely only wants the first N) is still honored
+      // as a single bounded query; with no limit given, selectAllRows pages
+      // through with .range() until every matching row is back — the same
+      // fix already proven in results.mjs for the equivalent truncation bug.
+      if (opts.limit) {
+        const { data, error } = await buildQuery(0, opts.limit - 1);
+        if (error) return err(friendlyDbError(error));
+        return ok(data || []);
+      }
+      const { data, error } = await selectAllRows(buildQuery);
       if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
@@ -326,14 +343,24 @@ export function createFinanceApi(supabase) {
      *  debitNotes.list() above. */
     async list(opts) {
       opts = opts || {};
-      let q = supabase.from('finance_credit_notes')
-        .select('*, students(full_name, admission_no, class_id, classes(name)), finance_vote_heads(name), created_by_profile:profiles!finance_credit_notes_created_by_fkey(name)')
-        .order('created_at', { ascending: false }).limit(opts.limit || 500);
-      if (opts.academic_year_id) q = q.eq('academic_year_id', opts.academic_year_id);
-      if (opts.term_id) q = q.eq('term_id', opts.term_id);
-      if (opts.status === 'active') q = q.is('reversed_at', null);
-      if (opts.status === 'reversed') q = q.not('reversed_at', 'is', null);
-      const { data, error } = await q;
+      const buildQuery = (from, to) => {
+        let q = supabase.from('finance_credit_notes')
+          .select('*, students(full_name, admission_no, class_id, classes(name)), finance_vote_heads(name), created_by_profile:profiles!finance_credit_notes_created_by_fkey(name)')
+          .order('created_at', { ascending: false });
+        if (opts.academic_year_id) q = q.eq('academic_year_id', opts.academic_year_id);
+        if (opts.term_id) q = q.eq('term_id', opts.term_id);
+        if (opts.status === 'active') q = q.is('reversed_at', null);
+        if (opts.status === 'reversed') q = q.not('reversed_at', 'is', null);
+        return q.range(from, to);
+      };
+      // Cleanup audit fix: same truncation bug and same fix as
+      // debitNotes.list() above — see that comment for the full rationale.
+      if (opts.limit) {
+        const { data, error } = await buildQuery(0, opts.limit - 1);
+        if (error) return err(friendlyDbError(error));
+        return ok(data || []);
+      }
+      const { data, error } = await selectAllRows(buildQuery);
       if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
@@ -350,18 +377,32 @@ export function createFinanceApi(supabase) {
   const collections = {
     async list(opts) {
       opts = opts || {};
-      let q = supabase.from('finance_collections')
-        .select('*, students(full_name, admission_no, class_id, classes(name)), created_by_profile:profiles!finance_collections_created_by_fkey(name)')
-        .order('created_at', { ascending: false }).limit(opts.limit || 300);
-      if (opts.student_id) q = q.eq('student_id', opts.student_id);
-      if (opts.status) q = q.eq('status', opts.status);
-      // Notes & Reversals trail (live feedback: "we dont have a place for
-      // reversed receipts") needs to narrow a school-wide reversed list by
-      // year/term the same way the notes trail does — collections already
-      // carry both columns, just never had a filter for them until now.
-      if (opts.academic_year_id) q = q.eq('academic_year_id', opts.academic_year_id);
-      if (opts.term_id) q = q.eq('term_id', opts.term_id);
-      const { data, error } = await q;
+      const buildQuery = (from, to) => {
+        let q = supabase.from('finance_collections')
+          .select('*, students(full_name, admission_no, class_id, classes(name)), created_by_profile:profiles!finance_collections_created_by_fkey(name)')
+          .order('created_at', { ascending: false });
+        if (opts.student_id) q = q.eq('student_id', opts.student_id);
+        if (opts.status) q = q.eq('status', opts.status);
+        // Notes & Reversals trail (live feedback: "we dont have a place for
+        // reversed receipts") needs to narrow a school-wide reversed list by
+        // year/term the same way the notes trail does — collections already
+        // carry both columns, just never had a filter for them until now.
+        if (opts.academic_year_id) q = q.eq('academic_year_id', opts.academic_year_id);
+        if (opts.term_id) q = q.eq('term_id', opts.term_id);
+        return q.range(from, to);
+      };
+      // Cleanup audit fix: same truncation bug and fix as debitNotes.list()
+      // above (was hard-capped at .limit(opts.limit || 300) with no paging)
+      // — this is the one flagged as "real risk today, growing" since it's
+      // also the school-wide Collections list bursars use every day. An
+      // explicit opts.limit (e.g. a "does one exist yet" check, or a single
+      // student's full history) is still honored as a single bounded query.
+      if (opts.limit) {
+        const { data, error } = await buildQuery(0, opts.limit - 1);
+        if (error) return err(friendlyDbError(error));
+        return ok(data || []);
+      }
+      const { data, error } = await selectAllRows(buildQuery);
       if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },

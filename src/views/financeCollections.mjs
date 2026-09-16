@@ -20,7 +20,11 @@ export async function viewFinanceCollections(root, access, opts) {
 async function load(root, access, opts) {
   root.innerHTML = loader();
   const [colRes, termsRes] = await Promise.all([
-    Db.finance.collections.list({ student_id: opts.studentId || undefined, limit: 300 }),
+    // Cleanup audit fix: no explicit limit here any more — finance.mjs's
+    // collections.list() now pages through every matching row itself
+    // instead of silently capping at 300, so this screen (and the
+    // per-student Collections tab that reuses it) never drops old records.
+    Db.finance.collections.list({ student_id: opts.studentId || undefined }),
     opts.studentId ? Promise.resolve({ ok: true, data: [] }) : Db.terms.list()
   ]);
   if (!colRes.ok) { root.innerHTML = `<div class="card pad">⚠️ ${esc(colRes.message)}</div>`; return; }

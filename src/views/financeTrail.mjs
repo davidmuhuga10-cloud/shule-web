@@ -183,7 +183,9 @@ async function renderNotesTab(root, access, settings, years, terms, sel) {
 /* ------------------------------------------------------- Reversed Receipts */
 async function renderReversedTab(root, access, settings, years, terms, sel) {
   root.innerHTML = loader();
-  const res = await Db.finance.collections.list({ status: 'reversed', academic_year_id: sel.academic_year_id || undefined, term_id: sel.term_id || undefined, limit: 500 });
+  // Cleanup audit fix: no explicit limit — collections.list() now pages
+  // through every reversed receipt itself instead of capping at 500.
+  const res = await Db.finance.collections.list({ status: 'reversed', academic_year_id: sel.academic_year_id || undefined, term_id: sel.term_id || undefined });
   const allRows = res.ok ? res.data : [];
   const totalPages = Math.max(1, Math.ceil(allRows.length / PAGE_SIZE));
   const page = Math.min(Math.max(1, sel.page || 1), totalPages);
