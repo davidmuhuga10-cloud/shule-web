@@ -877,6 +877,7 @@ function wireDownloadPdf(root, idPrefix, suggestedFilename, marginMm, fitSelecto
     btn.innerHTML = '⏳ Preparing…';
     let unfit = () => {};
     let restoreCapture = () => {};
+    let biggestRowCount = 0;
     try {
       const [{ jsPDF }, html2canvas] = await Promise.all([loadJsPdf(), loadHtml2Canvas()]);
       window.dispatchEvent(new Event('beforeprint'));
@@ -930,7 +931,26 @@ function wireDownloadPdf(root, idPrefix, suggestedFilename, marginMm, fitSelecto
       for (let i = 0; i < targets.length; i += 1) {
         const el = targets[i];
         if (!el) continue;
-        const canvas = await html2canvas(el, { scale: 1.5, backgroundColor: '#ffffff', useCORS: true, windowWidth: PDF_CAPTURE_WINDOW_WIDTH, foreignObjectRendering: true });
+        // Live feedback: Download on a large Mark List (72 students, 20+
+        // subject columns) "took some time" then failed with "couldn't
+        // create the PDF" — the previously-flagged, then-unconfirmed risk:
+        // this whole target (header + the full table + the summary tables)
+        // is rasterized as ONE html2canvas() canvas, so its memory
+        // footprint scales with class size, and a big-enough class can
+        // exceed what a phone's WebView will allocate for one canvas/PNG
+        // encode. `scale` is the one safe, easily-verified lever available
+        // here without a much larger capture rewrite: it shrinks total
+        // pixel count quadratically (scale 1.0 vs 1.5 is ~44% fewer
+        // pixels), while the output stays real lossless PNG text — still
+        // sharp, just at a size actually needed for a large report instead
+        // of the same fixed multiplier every download used regardless of
+        // class size. Only large tables step down; a typical class's
+        // Download is completely unchanged (still scale 1.5, the same
+        // value already proven fine there).
+        const rowCount = el.querySelectorAll ? el.querySelectorAll('table tr').length : 0;
+        biggestRowCount = Math.max(biggestRowCount, rowCount);
+        const scale = rowCount > 60 ? 1 : rowCount > 40 ? 1.25 : 1.5;
+        const canvas = await html2canvas(el, { scale, backgroundColor: '#ffffff', useCORS: true, windowWidth: PDF_CAPTURE_WINDOW_WIDTH, foreignObjectRendering: true });
         addCanvasAsPages(doc, canvas, { printableWidthMm, printableHeightMm, marginMm: margin, isFirstEl: i === 0 });
       }
       restoreCapture();
@@ -944,7 +964,15 @@ function wireDownloadPdf(root, idPrefix, suggestedFilename, marginMm, fitSelecto
       unfit();
       window.dispatchEvent(new Event('afterprint'));
       console.error('Download PDF failed:', e);
-      toast('Could not create the PDF — please try Print instead.', 'err');
+      // A big class (lots of rows) is the one concrete, likely cause we
+      // can actually point at — see the scale-reduction comment above.
+      // Print doesn't have this failure mode at all: it hands the page
+      // straight to the platform's own print pipeline instead of
+      // rasterizing it into one in-memory image first, so it stays the
+      // reliable fallback regardless of class size.
+      toast(biggestRowCount > 60
+        ? 'Could not create the PDF — this class may be too large to download directly on this device. Please try Print instead.'
+        : 'Could not create the PDF — please try Print instead.', 'err');
     } finally {
       btn.disabled = false;
       btn.innerHTML = prevHtml;
