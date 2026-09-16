@@ -15,19 +15,30 @@ function isTeacher(s) {
 }
 
 export async function viewTeachers(root) {
-  await render(root, '');
+  await load(root, '');
 }
 
-async function render(root, query) {
+// Cleanup audit fix: render() used to call Db.staff.list() itself, so the
+// search box's oninput handler re-fetched the ENTIRE staff list from the
+// server on every single keystroke even though the filtering that follows
+// is a plain in-memory .filter() — pure wasted network traffic (and, on a
+// slow connection, a laggy-feeling search box). load() now fetches once;
+// render() takes the already-fetched list and re-runs it locally, and only
+// an action that actually changes the data (add/edit/remove a teacher)
+// goes back through load() for a fresh fetch.
+async function load(root, query) {
   const res = await Db.staff.list();
   // BUG FIX (same class of issue as Classes & Streams): a failed fetch used
   // to silently fall back to an empty list, rendering as "no teachers yet"
   // instead of the shared offline/connectivity screen. Show the real state.
   if (!res.ok) {
-    renderPrereqOrConnectivity(root, { ok: false, onRetry: () => render(root, query) });
+    renderPrereqOrConnectivity(root, { ok: false, onRetry: () => load(root, query) });
     return;
   }
-  const all = res.data;
+  render(root, res.data, query);
+}
+
+function render(root, all, query) {
   const teachers = all.filter(isTeacher);
   const q = String(query || '').trim().toLowerCase();
   const filtered = q ? teachers.filter((t) => String(t.full_name || '').toLowerCase().indexOf(q) !== -1) : teachers;
@@ -78,11 +89,11 @@ async function render(root, query) {
     </div></div></div>`}
   `;
 
-  root.querySelector('#add-teacher').onclick = () => openAddChoiceModal(root, () => render(root, query));
+  root.querySelector('#add-teacher').onclick = () => openAddChoiceModal(root, () => load(root, query));
   const emptyBtn = root.querySelector('#empty-add-teacher');
-  if (emptyBtn) emptyBtn.onclick = () => openAddChoiceModal(root, () => render(root, query));
-  root.querySelector('#teacher-search').oninput = (e) => render(root, e.target.value);
-  root.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => openStaffModal(root, all.find((s) => s.id === b.dataset.edit), () => render(root, query)));
+  if (emptyBtn) emptyBtn.onclick = () => openAddChoiceModal(root, () => load(root, query));
+  root.querySelector('#teacher-search').oninput = (e) => render(root, all, e.target.value);
+  root.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => openStaffModal(root, all.find((s) => s.id === b.dataset.edit), () => load(root, query)));
   // Teacher-to-subject assignment now happens inside Classes & Streams (per
   // stream, right next to that stream's subjects) — the standalone "Teacher
   // Assignments" module was removed as a duplicate of that (feature brief:
@@ -98,7 +109,7 @@ async function render(root, query) {
     'Remove this teacher? This cannot be undone.',
     async () => {
       const r = await Db.staff.remove(b.dataset.del);
-      if (r.ok) { toast('Teacher removed.', 'ok'); render(root, query); } else toast(r.message, 'err');
+      if (r.ok) { toast('Teacher removed.', 'ok'); load(root, query); } else toast(r.message, 'err');
     },
     true
   ));

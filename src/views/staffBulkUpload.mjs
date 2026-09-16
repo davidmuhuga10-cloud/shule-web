@@ -7,7 +7,7 @@
  * the whole import until fixed) — just for the `staff` table instead of
  * `students`, and with no class/stream step (staff aren't enrolled in one).
  */
-import { esc, toast, $ } from '../app.js';
+import { esc, toast, $, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { downloadXlsx, readXlsxFile } from '../lib/xlsxUtil.mjs';
 import { JOB_TITLES } from './staff.mjs';
@@ -136,8 +136,14 @@ function renderPreview(root, state) {
   const importBtn = area.querySelector('#su-import');
   if (blocked) return;
 
-  importBtn.onclick = async () => {
-    importBtn.disabled = true; importBtn.textContent = 'Importing…';
+  // Cleanup audit fix: this used to disable the button by hand with no
+  // try/finally, so a genuine network blip (Db.staff.bulkCreate/
+  // provisionStaffLogins throwing rather than resolving {ok:false}) left
+  // "Importing…" stuck disabled forever with no way out short of reloading
+  // — the same bug already fixed in bulkUpload.mjs and financeMessaging.mjs.
+  // withBusy() restores the button automatically once the click handler
+  // settles, success or failure.
+  importBtn.onclick = () => withBusy(importBtn, async () => {
     area.insertAdjacentHTML('beforeend', `<div class="card-b" id="su-progress"><p class="hint">📥 Creating ${validCount} staff record(s), please wait…</p></div>`);
     const validRows = withStatus.filter((r) => !r.error).map(({ error, ...r }) => ({
       full_name: r.full_name,
@@ -149,7 +155,7 @@ function renderPreview(root, state) {
       is_admin: r.is_admin === 'Yes'
     }));
     const res = await Db.staff.bulkCreate({ rows: validRows });
-    if (!res.ok) { toast(res.message, 'err'); importBtn.disabled = false; importBtn.textContent = `Import ${validCount} staff member(s)`; $('#su-progress', area)?.remove(); return; }
+    if (!res.ok) { toast(res.message, 'err'); $('#su-progress', area)?.remove(); return; }
 
     // Provision logins in CHUNKS, same rationale as bulkUpload.mjs's student
     // import — one Netlify function round trip per chunk, not per staff
@@ -190,5 +196,5 @@ function renderPreview(root, state) {
     </div></div>`;
     if (succeeded) toast(`Imported ${res.created} staff member(s).`, 'ok');
     else toast('Import failed — no staff were created.', 'err');
-  };
+  }, 'Importing…');
 }

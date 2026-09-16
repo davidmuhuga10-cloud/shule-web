@@ -10,6 +10,14 @@
  */
 import { ok, err, friendlyDbError, createMemoCache, clearAllCaches } from './_util.mjs';
 
+// Cleanup audit fix: list()/get() used to select('*') — every column,
+// including school_id/created_at/updated_at, which a repo-wide check found
+// are never read off a staff row anywhere in src/ (no spread of a staff
+// row into a generic form either, so this is a plain "only fetch what's
+// used" trim, not a behavior change). Named as its own constant so both
+// functions below stay in sync if a future screen needs another column.
+const STAFF_COLUMNS = 'id, full_name, email, phone, role, gender, qualifications, employment_start_date, status, date_of_birth, national_id, tsc_number, next_of_kin_name, next_of_kin_contact';
+
 export function createStaffApi(supabase) {
   // Same short-window in-memory memoization pattern as the rest of the app
   // (see _util.mjs's createMemoCache header comment for the app-wide
@@ -22,7 +30,7 @@ export function createStaffApi(supabase) {
   return {
     async list() {
       return cached('staff.list', null, async () => {
-        const { data, error } = await supabase.from('staff').select('*').order('full_name', { ascending: true });
+        const { data, error } = await supabase.from('staff').select(STAFF_COLUMNS).order('full_name', { ascending: true });
         if (error) return err(friendlyDbError(error));
         return ok(data || []);
       });
@@ -30,7 +38,7 @@ export function createStaffApi(supabase) {
 
     async get(id) {
       return cached('staff.get', id, async () => {
-        const { data, error } = await supabase.from('staff').select('*').eq('id', id).maybeSingle();
+        const { data, error } = await supabase.from('staff').select(STAFF_COLUMNS).eq('id', id).maybeSingle();
         if (error) return err(friendlyDbError(error));
         if (!data) return err('Staff member not found.');
         return ok(data);

@@ -20,6 +20,15 @@
  */
 import { ok, err, friendlyDbError, byAdmissionNo, createMemoCache, clearAllCaches } from './_util.mjs';
 
+// Cleanup audit fix: list()/search()/get() used to select('*') — every
+// column, including school_id/created_at/updated_at, which a repo-wide
+// check found are never read off a student row anywhere in src/ (no
+// spread of a student row into a generic form either — every consumer,
+// from report cards to the edit-student modal, reads named fields). Named
+// as its own constant so all three functions stay in sync if a future
+// screen needs another column.
+const STUDENT_COLUMNS = 'id, admission_no, full_name, gender, class_id, stream_id, guardian_name, guardian_contact, status, left_reason, left_date, left_notes, date_of_birth, admission_date, upi_number, assessment_number, previous_school, guardian_relationship, guardian_id_number, medical_notes';
+
 const VALID_GENDERS = ['Male', 'Female'];
 export const LEAVING_REASONS = ['transferred', 'graduated', 'withdrawn', 'other'];
 export const LEAVING_REASON_LABELS = {
@@ -67,7 +76,7 @@ export function createStudentsApi(supabase) {
     async list(filters) {
       filters = filters || {};
       return cached('students.list', filters, async () => {
-        let q = supabase.from('students').select('*');
+        let q = supabase.from('students').select(STUDENT_COLUMNS);
         if (filters.class_id) q = q.eq('class_id', filters.class_id);
         if (filters.stream_id) q = q.eq('stream_id', filters.stream_id);
         q = q.eq('status', filters.status || 'active');
@@ -89,7 +98,7 @@ export function createStudentsApi(supabase) {
       query = String(query || '').trim().toLowerCase();
       if (!query) return ok([]);
       return cached('students.search', query, async () => {
-        const { data, error } = await supabase.from('students').select('*').eq('status', 'active');
+        const { data, error } = await supabase.from('students').select(STUDENT_COLUMNS).eq('status', 'active');
         if (error) return err(friendlyDbError(error));
         const matched = (data || []).filter((s) =>
           String(s.admission_no || '').toLowerCase().indexOf(query) !== -1 ||
@@ -103,7 +112,7 @@ export function createStudentsApi(supabase) {
 
     async get(id) {
       return cached('students.get', id, async () => {
-        const { data, error } = await supabase.from('students').select('*').eq('id', id).maybeSingle();
+        const { data, error } = await supabase.from('students').select(STUDENT_COLUMNS).eq('id', id).maybeSingle();
         if (error) return err(friendlyDbError(error));
         if (!data) return err('Student not found.');
         const [withN] = await withNames([data]);
