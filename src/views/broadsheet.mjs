@@ -362,7 +362,21 @@ async function load(root, classes, sel) {
   // app.js: this table's fixed column widths can sum wider than even a
   // landscape page once a school has enough subjects, and this guarantees
   // no column is ever silently clipped off the printed page.
-  wirePrintOptions(sheetEl, 'bs', `${cls ? cls.name : 'Class'} Mark List — ${res.exam.name}`, 5, '.mark-list-grid', '#bs-print-header');
+  // Round 8 live feedback: "the header should not have any margin at all to
+  // the top/left/right" — dropped to a genuine 0mm @page margin (this only
+  // reaches 0, not a negative value, because a real @page margin can never
+  // go negative — it's the paper's own physical bound, not a CSS box a
+  // negative number could push past). The letterhead band itself bleeds all
+  // the way to that now-zero edge (see .print-header's own negative margin
+  // in main.css); the table and every other section below it stay safely
+  // inset from the true page edge regardless, because they still sit inside
+  // their own `.card-b`'s normal 20px padding — only the header cancels
+  // that padding on purpose. NOTE: a genuinely borderless physical printer
+  // is needed to see zero white edge on paper — most inkjets/laser printers
+  // have their own small hardware-unprintable margin (a few mm) no CSS or
+  // browser setting can override, so a "Save/Print to PDF" or a printer
+  // with a true borderless mode is what actually shows this at 0.
+  wirePrintOptions(sheetEl, 'bs', `${cls ? cls.name : 'Class'} Mark List — ${res.exam.name}`, 0, '.mark-list-grid', '#bs-print-header');
   sheetEl.querySelector('#bs-download').onclick = () => {
     const streamSel = root.querySelector('#bs-stream');
     const streamName = streamSel && streamSel.selectedIndex > 0 ? streamSel.options[streamSel.selectedIndex].textContent : '';

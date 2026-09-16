@@ -399,11 +399,11 @@ async function load(root, classes, sel) {
   const classReportEl = sheetEl.querySelector('#ea-class-report');
   const topReportEl = sheetEl.querySelector('#ea-top-report');
 
-  // Live feedback: "make sure the space left to the left and right is very
-  // small" — same tight-margin treatment broadsheet.mjs already uses for its
-  // own wide grid (marginMm=5), just for both of these reports' left/right
-  // margins rather than a wide table specifically.
-  wirePrintOptions(sheetEl, 'ea', combinedSuggestedName, 6);
+  // Round 8 live feedback: "the header should not have any margin at all to
+  // the top/left/right" — 0mm @page margin, same reasoning as
+  // broadsheet.mjs's own wirePrintOptions() call (see its comment there for
+  // the full explanation and the physical-printer caveat).
+  wirePrintOptions(sheetEl, 'ea', combinedSuggestedName, 0);
   wireCombinedPrint(sheetEl, 'ea', [
     { checkbox: sheetEl.querySelector('#ea-check-class'), el: classReportEl },
     { checkbox: sheetEl.querySelector('#ea-check-top'), el: topReportEl }

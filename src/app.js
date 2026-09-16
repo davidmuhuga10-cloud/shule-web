@@ -243,7 +243,12 @@ function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm, headerEl) 
   // margin (bumped 1.5% -> 2.5% — see the border-vanishing defensive fix
   // below) costs a sliver of unused white space but guarantees the
   // right-most column always survives onto the page.
-  const printableWidthPx = (pageWidthMm - 2 * (marginMm || 10)) * PX_PER_MM * 0.975;
+  // BUG FIX: `marginMm || 10` treats an explicit 0 the same as "not passed"
+  // (0 is falsy in JS) and silently substitutes the 10mm default — which
+  // would have quietly defeated a genuine zero-margin request. Only an
+  // actually-missing/non-numeric marginMm should fall back to 10.
+  const effectiveMarginMm = Number.isFinite(marginMm) ? marginMm : 10;
+  const printableWidthPx = (pageWidthMm - 2 * effectiveMarginMm) * PX_PER_MM * 0.975;
   const naturalWidth = tableEl.scrollWidth;
   const scale = naturalWidth > printableWidthPx ? printableWidthPx / naturalWidth : 1;
   // Whatever the table's own rendered width ends up being once printing
@@ -517,7 +522,10 @@ function hideNativeSplashOnce() {
 export function printWithOptions(orientation, paperSize, marginMm, fitEl, headerEl) {
   const size = PRINT_PAPER_SIZES[paperSize] || 'A4';
   const orient = orientation === 'landscape' ? 'landscape' : 'portrait';
-  const margin = Number.isFinite(marginMm) && marginMm > 0 ? marginMm : 10;
+  // Same bug as autoFitPrintWidth's own marginMm handling (see its comment):
+  // `marginMm > 0` rejects an explicit, intentional 0 and silently
+  // substitutes 10mm. `>= 0` lets a real zero-margin request through.
+  const margin = Number.isFinite(marginMm) && marginMm >= 0 ? marginMm : 10;
   const style = document.createElement('style');
   style.id = 'print-options-override';
   style.textContent = `@page{size:${size} ${orient};margin:${margin}mm}`;
