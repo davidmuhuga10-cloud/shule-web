@@ -308,7 +308,10 @@ async function load(root, classes, sel) {
         <!-- Same approved letterhead/title-bar design as the Mark List
              (broadsheet.mjs): class far left, exam centered, report name
              far right — see reportTitleBarHtml()'s array form. -->
-        ${reportTitleBarHtml([cls ? cls.name : '', bsRes.exam.name, 'Class Analysis Report'])}
+        <!-- Live feedback: "the name class analysis report should not be
+             cut, just call it analysis report" — shortened label instead of
+             relying on truncation to make the longer one fit. -->
+        ${reportTitleBarHtml([cls ? cls.name : '', bsRes.exam.name, 'Analysis Report'])}
       </div>
       <div class="card-b">
         <div class="ea-stat-row">

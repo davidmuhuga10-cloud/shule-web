@@ -74,7 +74,19 @@ function render(root, exams, classes, sel) {
     const next = { exam_id: root.querySelector('#bs-exam').value, class_id: root.querySelector('#bs-class').value, stream_id: root.querySelector('#bs-stream').value };
     if (next.exam_id && next.class_id) load(root, classes, next); else root.querySelector('#bs-sheet').innerHTML = '';
   };
-  classSel.onchange = async (e) => { await refreshStreams(e.target.value); reload(); };
+  // Live feedback: "there is an idle time before I see the loading circle...
+  // I keep changing classes" — refreshStreams() does its own network round
+  // trip first, and reload() (the thing that actually shows load()'s real
+  // spinner) didn't run until that finished, so picking a new class used to
+  // sit with zero visible feedback for a beat first. Show the sheet's own
+  // loading state immediately, before that stream lookup even starts.
+  classSel.onchange = async (e) => {
+    const cid = e.target.value;
+    const examId = root.querySelector('#bs-exam').value;
+    if (examId && cid) root.querySelector('#bs-sheet').innerHTML = loader();
+    await refreshStreams(cid);
+    reload();
+  };
   streamSel.onchange = reload;
   root.querySelector('#bs-exam').onchange = reload;
 

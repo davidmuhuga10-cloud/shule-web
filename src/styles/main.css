@@ -731,7 +731,9 @@ table.data td.num,table.data th.num{text-align:center}
 .print-header{display:flex;align-items:center;gap:16px;margin:-20px -20px 0 -20px;background:var(--brand);
   padding:22px 20px 16px;border-bottom:10px solid var(--accent)}
 .print-header .ph-logo{flex:0 0 auto}
-.print-header .ph-logo-img{width:52px;height:52px;border-radius:50%;background:#fff;object-fit:cover}
+/* Live feedback: "logo be a square instead of circle" — a small rounded
+   square (9px radius) rather than a full circle. */
+.print-header .ph-logo-img{width:52px;height:52px;border-radius:9px;background:#fff;object-fit:cover}
 .print-header .logo-placeholder{display:flex;align-items:center;justify-content:center;font-size:22px}
 .print-header .ph-center{flex:1;min-width:0;text-align:center}
 /* Live feedback: "when school name is too large it pushes everything down
@@ -744,18 +746,32 @@ table.data td.num,table.data th.num{text-align:center}
    trails off with "…" instead of a 3rd/4th line. */
 .print-header .ph-school{font-size:19px;font-weight:800;color:#fff;letter-spacing:.3px;text-transform:uppercase;line-height:1.25;
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
-.print-header .ph-address{flex:0 0 auto;text-align:right;font-size:11px;color:rgba(255,255,255,.8);line-height:1.55;white-space:nowrap}
+/* Live feedback: "force capitalization of the address... just like the
+   school name does" — same uppercase treatment as .ph-school below. */
+.print-header .ph-address{flex:0 0 auto;text-align:right;font-size:11px;color:rgba(255,255,255,.8);line-height:1.55;white-space:nowrap;text-transform:uppercase}
 /* reportTitleBarHtml()'s row, directly under the letterhead band above —
    Round 6: plain black text, no fill (the band above now carries the
    color), spread across the full width when the caller passes distinct
    class/exam/report-name parts (see printHeader.mjs), otherwise a single
-   centered line for reports that only ever had one descriptive title. */
+   centered line for reports that only ever had one descriptive title.
+   Round 7 live feedback: "grade, exam name and name marklist should be
+   same font" + "make sure everything is capitalized" — all three parts
+   now share one size/weight/uppercase treatment (no more one enlarged
+   part). Also dropped `flex:1` on each part (which forced three equal-
+   width columns and left uneven-looking gaps whenever the actual text in
+   each slot was a different length) in favor of natural content width —
+   with `justify-content:space-between` and no flex-grow, three items
+   naturally get two EQUAL gaps between them (left<->center and
+   center<->right) that adapt to however long each part's actual text is,
+   instead of a fixed one-third split. A long center part (a long exam
+   name) just pushes the two side gaps apart evenly rather than being
+   forced to sit at the dead-center of the whole row. */
 .ph-title-bar{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-top:8px}
-.ph-title-bar .ph-title-left,.ph-title-bar .ph-title-center,.ph-title-bar .ph-title-right{flex:1;min-width:0;color:var(--grid-text);font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ph-title-bar .ph-title-left,.ph-title-bar .ph-title-center,.ph-title-bar .ph-title-right{color:var(--grid-text);font-weight:700;font-size:15px;text-transform:uppercase;letter-spacing:.02em;white-space:nowrap}
 .ph-title-bar .ph-title-left{text-align:left}
 .ph-title-bar .ph-title-center{text-align:center}
-.ph-title-bar .ph-title-right{text-align:right;font-weight:800;font-size:19px;text-transform:uppercase}
-.ph-title-bar .ph-title-solo{flex:1;text-align:center;font-weight:750;letter-spacing:.2px;font-size:15px;color:var(--grid-text)}
+.ph-title-bar .ph-title-right{text-align:right}
+.ph-title-bar .ph-title-solo{flex:1;text-align:center;font-weight:750;letter-spacing:.2px;font-size:15px;text-transform:uppercase;color:var(--grid-text)}
 /* Class List / Score Sheet full-grid print table (feature brief §2: "print
    as a table with clear rows, columns, and borders — the same standard
    already used on the mark list"), plus a shaded title band ("GRADE 8 -
@@ -1367,7 +1383,7 @@ table.data td.num,table.data th.num{text-align:center}
   .main{margin-left:0}.content{padding:0;max-width:none}
   .report{border:none;box-shadow:none;max-width:none}
   body{background:#fff}
-  .card{box-shadow:none;border:none}
+  .card{box-shadow:none;border:none;border-radius:0}
   .batch-page{page-break-after:always}
   .batch-page:last-child{page-break-after:auto}
   /* Wide printable tables (broadsheet, class list, transcript) — shrink to
