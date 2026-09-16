@@ -852,6 +852,105 @@ async function deliverPdfBlob(blob, filename) {
   return { savedTo: name };
 }
 
+/** ROUND 6 — Download PDF redesign (mobile). Live feedback: "currently not
+ *  working at all its saying 'too many...' even for a class with few
+ *  students" — a NEW, plainer failure than the previous large-class-only one
+ *  (see the scale-reduction history below), and one that a battery of real
+ *  html2canvas+jsPDF reproductions against the exact vendored libraries
+ *  (multi-page tall tables, transparent/noisy images, the real deployed
+ *  jspdf.esm.js/html2canvas.esm.js pulled straight off the live site) could
+ *  not reproduce — so rather than guess at one more single-line patch for a
+ *  string that can't be pinned down, this replaces the capture strategy
+ *  itself with a fundamentally sturdier one, on the reasoning that "redesign
+ *  it so it downloads well" (the actual ask) matters more than chasing one
+ *  exact error message that keeps changing shape release to release.
+ *
+ *  What was fragile about the old approach: header + every student row +
+ *  every summary table were rasterized as ONE html2canvas() canvas, then
+ *  sliced into page-sized images afterwards purely by pixel height. That
+ *  meant (a) the canvas's memory footprint scaled with class size with only
+ *  a blunt scale-reduction heuristic standing in the way, (b) the slicing
+ *  had no idea where a row started or ended, so a row could in principle
+ *  land split across two pages, and (c) if that one giant capture failed for
+ *  ANY reason, the whole PDF failed with it — there was no smaller unit of
+ *  work to retry or skip.
+ *
+ *  The redesign, only for a screen that passes a real `<table>` as fitEl
+ *  (today: the Mark List) — every other screen's Download is untouched:
+ *  capture the table PAGE BY PAGE instead of whole. Row heights (already
+ *  final post-autoFitPrintWidth) and the page's printable height decide how
+ *  many rows fit per page; that many <tbody> rows are shown at a time (the
+ *  rest hidden with display:none) and each page's worth is captured on its
+ *  own — the header only on page 1, thead repeated on every page the same
+ *  way a real paginated print would. Every capture is now small and bounded
+ *  no matter how large the class is, so the old scale-reduction-by-row-count
+ *  hack is gone — it's no longer needed, and every class now captures at the
+ *  same, better-quality scale. Each page is also captured independently: one
+ *  page's html2canvas call throwing no longer takes the whole PDF down with
+ *  it — that page is swapped for a plain "could not render this page" note
+ *  and the rest of the document still comes through, which the old
+ *  all-or-nothing capture could never do. */
+async function captureFitTableByPage(html2canvas, fitEl, headerEl, { printableWidthMm, printableHeightMm }) {
+  const tbody = fitEl.querySelector('tbody');
+  const rows = tbody ? Array.from(tbody.children).filter((r) => r.tagName === 'TR') : [];
+  if (!rows.length) return null;
+  const thead = fitEl.querySelector('thead');
+  const cardEl = headerEl ? headerEl.parentElement : fitEl.closest('.table-wrap') ? fitEl.closest('.table-wrap').parentElement : fitEl.parentElement;
+  // Trailing sections (e.g. the Mark List's Class/Gender Grade Summary +
+  // Grade Breakdown tables) are siblings of the table's own wrapper, further
+  // down the same card — hide them while the table itself is being paged
+  // through, captured separately afterwards, same as before (they're small,
+  // the old whole-capture approach never showed a problem with them).
+  const tableWrapEl = fitEl.closest('.table-wrap') || fitEl.parentElement;
+  const trailing = [];
+  let sib = tableWrapEl && tableWrapEl.nextElementSibling;
+  while (sib) { trailing.push(sib); sib = sib.nextElementSibling; }
+
+  const rowHeightPx = rows[0].getBoundingClientRect().height || 20;
+  const theadHeightPx = thead ? thead.getBoundingClientRect().height : 0;
+  const headerHeightPx = headerEl ? headerEl.getBoundingClientRect().height : 0;
+  const printableHeightPx = printableHeightMm * PX_PER_MM;
+  const rowsPerPage = Math.max(1, Math.floor((printableHeightPx - theadHeightPx) / rowHeightPx));
+  const rowsPerFirstPage = Math.max(1, Math.floor((printableHeightPx - theadHeightPx - headerHeightPx) / rowHeightPx));
+
+  const windows = [];
+  for (let i = 0; i < rows.length;) {
+    const budget = windows.length === 0 ? rowsPerFirstPage : rowsPerPage;
+    windows.push(rows.slice(i, i + budget));
+    i += budget;
+  }
+
+  const prevRowDisplay = rows.map((r) => r.style.display);
+  const prevHeaderDisplay = headerEl ? headerEl.style.display : null;
+  const prevTrailingDisplay = trailing.map((el) => el.style.display);
+  trailing.forEach((el) => { el.style.display = 'none'; });
+  const pages = [];
+  let failures = 0;
+  try {
+    for (let w = 0; w < windows.length; w += 1) {
+      rows.forEach((r) => { r.style.display = 'none'; });
+      windows[w].forEach((r) => { r.style.display = ''; });
+      if (headerEl) headerEl.style.display = w === 0 ? '' : 'none';
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => setTimeout(r, 30));
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const canvas = await html2canvas(cardEl, { scale: 1.5, backgroundColor: '#ffffff', useCORS: true, windowWidth: PDF_CAPTURE_WINDOW_WIDTH, foreignObjectRendering: true });
+        pages.push(canvas);
+      } catch (e) {
+        failures += 1;
+        console.error(`Download PDF: Mark List page ${w + 1} of ${windows.length} failed to render:`, e);
+        pages.push(null);
+      }
+    }
+  } finally {
+    rows.forEach((r, idx) => { r.style.display = prevRowDisplay[idx]; });
+    if (headerEl) headerEl.style.display = prevHeaderDisplay;
+    trailing.forEach((el, idx) => { el.style.display = prevTrailingDisplay[idx]; });
+  }
+  return { pages, failures, trailing, printableWidthMm, printableHeightMm };
+}
+
 /** Wires #idPrefix-pdf-btn (rendered by printOptionsHtml() above, mobile-only
  *  via CSS) to build and save/share a real PDF of whatever's on screen,
  *  honoring the same orientation/paper-size/margin choices and the same
@@ -859,7 +958,9 @@ async function deliverPdfBlob(blob, filename) {
  *  printable blocks (Report Forms' batch run, one `.report` per student) are
  *  captured one block at a time so each student lands on their own PDF
  *  page(s), same as `.batch-page{page-break-after:always}` does for real
- *  print; everything else is captured as a whole via resolvePdfTarget(). */
+ *  print; everything else is captured as a whole via resolvePdfTarget(). A
+ *  screen that passes a real `<table>` fitEl (only the Mark List today) goes
+ *  through captureFitTableByPage() above instead — see its own comment. */
 function wireDownloadPdf(root, idPrefix, suggestedFilename, marginMm, fitSelector, headerSelector) {
   const btn = root.querySelector(`#${idPrefix}-pdf-btn`);
   if (!btn) return;
@@ -877,7 +978,8 @@ function wireDownloadPdf(root, idPrefix, suggestedFilename, marginMm, fitSelecto
     btn.innerHTML = '⏳ Preparing…';
     let unfit = () => {};
     let restoreCapture = () => {};
-    let biggestRowCount = 0;
+    let pageFailures = 0;
+    let totalPages = 0;
     try {
       const [{ jsPDF }, html2canvas] = await Promise.all([loadJsPdf(), loadHtml2Canvas()]);
       window.dispatchEvent(new Event('beforeprint'));
@@ -887,92 +989,108 @@ function wireDownloadPdf(root, idPrefix, suggestedFilename, marginMm, fitSelecto
       // screenshot — a synchronous read right after setting styles can catch
       // the browser mid-layout on some engines.
       await new Promise((r) => setTimeout(r, 50));
-      // Report Forms' batch run (one .report per student) lives as a sibling
-      // of the toolbar (both children of #rf-card), not inside it — same
-      // "toolbar-only root" case resolvePdfTarget() below accounts for.
-      let batchEls = Array.from(root.querySelectorAll('.batch-page'));
-      if (!batchEls.length && root.parentElement) batchEls = Array.from(root.parentElement.querySelectorAll('.batch-page'));
-      const targets = batchEls.length ? batchEls : [resolvePdfTarget(root)];
       const [shortMm, longMm] = { A4: [210, 297], A5: [148, 210], Letter: [215.9, 279.4] }[size] || [210, 297];
       const pageWidthMm = orient === 'landscape' ? longMm : shortMm;
       const pageHeightMm = orient === 'landscape' ? shortMm : longMm;
       const printableWidthMm = pageWidthMm - 2 * margin;
       const printableHeightMm = pageHeightMm - 2 * margin;
-      // Live feedback: numbers/names in a downloaded PDF came out with two
-      // copies of the same text overlapping each other (e.g. "Victor" and
-      // "Kiptoo" both starting from the same spot, or a mark and its grade
-      // badge stamped on top of one another) — on real phones specifically,
-      // not reproducible in a desktop-browser test built the same way this
-      // table actually renders. Root cause: by default html2canvas does NOT
-      // use the real browser to lay out text — it walks the DOM by hand and
-      // re-measures each run of text on its own hidden canvas to decide
-      // where the next piece goes, and that measurement can come out
-      // slightly wrong for whatever font a given device actually renders
-      // this app's font stack as ('Inter' isn't bundled/loaded here at all,
-      // so every device is silently falling back to its own default system
-      // font — Roboto on most Android phones, Segoe UI on Windows, etc.). A
-      // small enough mismatch between what html2canvas THINKS a word's
-      // width is and what the browser actually drew is exactly what makes
-      // it start painting the next word/badge before the first one ends.
-      // The real fix is `foreignObjectRendering`: it tells html2canvas to
-      // stop hand-measuring text altogether and instead hand the actual
-      // DOM+CSS to an SVG <foreignObject>, which the BROWSER'S OWN engine
-      // lays out and paints exactly as it would on screen — the capture can
-      // no longer disagree with real layout because it no longer does its
-      // own. html2canvas feature-detects support and silently falls back to
-      // the old path if a browser can't do it, so this is safe everywhere.
-      // (Also reduced `scale` 2 -> 1.5 and turned on jsPDF's own
-      // compression — see the jsPDF constructor below — since the same 2x,
-      // uncompressed-PNG capture that was overlapping was also the direct
-      // cause of the 40MB+ file size: more pixels than a printed report's
-      // small text actually needs, times a lossless format with
-      // compression left off.)
       const doc = new jsPDF({ orientation: orient, unit: 'mm', format: PDF_JSPDF_FORMAT[size] || 'a4', compress: true });
-      for (let i = 0; i < targets.length; i += 1) {
-        const el = targets[i];
-        if (!el) continue;
-        // Live feedback: Download on a large Mark List (72 students, 20+
-        // subject columns) "took some time" then failed with "couldn't
-        // create the PDF" — the previously-flagged, then-unconfirmed risk:
-        // this whole target (header + the full table + the summary tables)
-        // is rasterized as ONE html2canvas() canvas, so its memory
-        // footprint scales with class size, and a big-enough class can
-        // exceed what a phone's WebView will allocate for one canvas/PNG
-        // encode. `scale` is the one safe, easily-verified lever available
-        // here without a much larger capture rewrite: it shrinks total
-        // pixel count quadratically (scale 1.0 vs 1.5 is ~44% fewer
-        // pixels), while the output stays real lossless PNG text — still
-        // sharp, just at a size actually needed for a large report instead
-        // of the same fixed multiplier every download used regardless of
-        // class size. Only large tables step down; a typical class's
-        // Download is completely unchanged (still scale 1.5, the same
-        // value already proven fine there).
-        const rowCount = el.querySelectorAll ? el.querySelectorAll('table tr').length : 0;
-        biggestRowCount = Math.max(biggestRowCount, rowCount);
-        const scale = rowCount > 60 ? 1 : rowCount > 40 ? 1.25 : 1.5;
-        const canvas = await html2canvas(el, { scale, backgroundColor: '#ffffff', useCORS: true, windowWidth: PDF_CAPTURE_WINDOW_WIDTH, foreignObjectRendering: true });
-        addCanvasAsPages(doc, canvas, { printableWidthMm, printableHeightMm, marginMm: margin, isFirstEl: i === 0 });
+      let isFirstDocPage = true;
+      const addFailureNotice = (label) => {
+        if (!isFirstDocPage) doc.addPage();
+        isFirstDocPage = false;
+        doc.setFontSize(11);
+        doc.text(`${label} could not be rendered on this device. Try Print instead for this part.`, margin, margin + 6);
+      };
+      // See captureFitTableByPage()'s own comment (ROUND 6) for why the
+      // Mark List's table goes through a dedicated page-by-page capture
+      // instead of the generic whole-container path below.
+      if (fitEl && fitEl.tagName === 'TABLE') {
+        // eslint-disable-next-line no-await-in-loop
+        const result = await captureFitTableByPage(html2canvas, fitEl, headerEl, { printableWidthMm, printableHeightMm });
+        if (result) {
+          totalPages += result.pages.length;
+          pageFailures += result.failures;
+          for (let p = 0; p < result.pages.length; p += 1) {
+            const canvas = result.pages[p];
+            if (!canvas) { addFailureNotice(`Page ${p + 1} of the Mark List`); continue; }
+            addCanvasAsPages(doc, canvas, { printableWidthMm, printableHeightMm, marginMm: margin, isFirstEl: isFirstDocPage });
+            isFirstDocPage = false;
+          }
+          for (let t = 0; t < result.trailing.length; t += 1) {
+            const el = result.trailing[t];
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              const canvas = await html2canvas(el, { scale: 1.5, backgroundColor: '#ffffff', useCORS: true, windowWidth: PDF_CAPTURE_WINDOW_WIDTH, foreignObjectRendering: true });
+              addCanvasAsPages(doc, canvas, { printableWidthMm, printableHeightMm, marginMm: margin, isFirstEl: isFirstDocPage });
+              isFirstDocPage = false;
+            } catch (e) {
+              totalPages += 1;
+              pageFailures += 1;
+              console.error('Download PDF: a Mark List summary section failed to render:', e);
+              addFailureNotice('A summary section');
+            }
+          }
+        }
+      } else {
+        // Report Forms' batch run (one .report per student) lives as a
+        // sibling of the toolbar (both children of #rf-card), not inside it
+        // — same "toolbar-only root" case resolvePdfTarget() below accounts
+        // for. Every other screen is captured as a whole, unchanged from
+        // before — none of them have been reported to hit this failure.
+        let batchEls = Array.from(root.querySelectorAll('.batch-page'));
+        if (!batchEls.length && root.parentElement) batchEls = Array.from(root.parentElement.querySelectorAll('.batch-page'));
+        const targets = batchEls.length ? batchEls : [resolvePdfTarget(root)];
+        for (let i = 0; i < targets.length; i += 1) {
+          const el = targets[i];
+          if (!el) continue;
+          totalPages += 1;
+          try {
+            // Live feedback: numbers/names in a downloaded PDF came out with
+            // two copies of the same text overlapping each other — root
+            // cause and the foreignObjectRendering fix are covered in the
+            // ROUND 6 comment on captureFitTableByPage() above; scale 1.5
+            // is the same value already proven fine for a single, bounded
+            // capture like these (none of these screens batch anywhere near
+            // the row counts the Mark List can).
+            // eslint-disable-next-line no-await-in-loop
+            const canvas = await html2canvas(el, { scale: 1.5, backgroundColor: '#ffffff', useCORS: true, windowWidth: PDF_CAPTURE_WINDOW_WIDTH, foreignObjectRendering: true });
+            addCanvasAsPages(doc, canvas, { printableWidthMm, printableHeightMm, marginMm: margin, isFirstEl: isFirstDocPage });
+            isFirstDocPage = false;
+          } catch (e) {
+            pageFailures += 1;
+            console.error('Download PDF: a section failed to render:', e);
+            addFailureNotice(batchEls.length ? `Student ${i + 1}` : 'This report');
+          }
+        }
       }
       restoreCapture();
       unfit();
       window.dispatchEvent(new Event('afterprint'));
       const blob = doc.output('blob');
       await deliverPdfBlob(blob, suggestedFilename);
-      toast('PDF ready.', 'ok');
+      // Every page capture is now independent (see ROUND 6 above), so a
+      // partial failure no longer has to mean no PDF at all — say plainly
+      // what's missing instead of pretending it all came through clean.
+      if (pageFailures > 0) {
+        toast(`PDF ready, but ${pageFailures} of ${totalPages} page${totalPages === 1 ? '' : 's'} could not be rendered — see the note in the file, or use Print for those.`, 'err');
+      } else {
+        toast('PDF ready.', 'ok');
+      }
     } catch (e) {
       restoreCapture();
       unfit();
       window.dispatchEvent(new Event('afterprint'));
+      // ROUND 6: this used to show only a guessed, size-based message —
+      // several rounds of live feedback have now shown different wording
+      // each time ("couldn't create the pdf", then "too many..."), which a
+      // real reproduction of the exact same vendored html2canvas/jsPDF
+      // couldn't confirm from here. Showing the real error text (not just
+      // logging it) means the next report already carries the one detail
+      // that's actually been missing so far, instead of another guess.
       console.error('Download PDF failed:', e);
-      // A big class (lots of rows) is the one concrete, likely cause we
-      // can actually point at — see the scale-reduction comment above.
-      // Print doesn't have this failure mode at all: it hands the page
-      // straight to the platform's own print pipeline instead of
-      // rasterizing it into one in-memory image first, so it stays the
-      // reliable fallback regardless of class size.
-      toast(biggestRowCount > 60
-        ? 'Could not create the PDF — this class may be too large to download directly on this device. Please try Print instead.'
-        : 'Could not create the PDF — please try Print instead.', 'err');
+      const detail = e && (e.message || e.name) ? String(e.message || e.name).slice(0, 140) : '';
+      toast(`Could not create the PDF${detail ? ` (${detail})` : ''} — please try Print instead.`, 'err');
     } finally {
       btn.disabled = false;
       btn.innerHTML = prevHtml;
