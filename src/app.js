@@ -196,8 +196,22 @@ const PX_PER_MM = 96 / 25.4;
  *  `zoom` property, which prints inconsistently across engines). This
  *  guarantees every column survives onto the page — nothing is ever
  *  clipped — and the shrink is never more aggressive than the table
- *  actually needs, which is as WYSIWYG as a forced print rescale can be. */
-function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm) {
+ *  actually needs, which is as WYSIWYG as a forced print rescale can be.
+ *  `headerEl` (optional): "the green box and address is not in line with
+ *  the marks table" — the Mark List's printed header (school name/address,
+ *  the green title bar) sits in its own sibling `.card-b`, padded 20px by
+ *  `.card .card-b{padding:20px}`. The table below it lives in the same
+ *  padded card too, but once this function pins the TABLE's own width to
+ *  printableWidthPx (nearly the full page width), that plain `<table>`
+ *  element — unlike its `.card-b` wrapper — isn't confined by the card's
+ *  padding at all (nothing here clips overflow; `.card` sets none), so it
+ *  visibly extends past the header's right edge, which stayed at the
+ *  card's normal padded width. When passed, headerEl is pinned to that
+ *  same printableWidthPx (and same box-sizing) so both end up flush at
+ *  the exact same right edge — real content, not a guess: verified with a
+ *  Playwright measurement that both elements' rendered right edges match
+ *  to sub-pixel precision. */
+function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm, headerEl) {
   if (!tableEl) return () => {};
   const [shortMm, longMm] = PAPER_DIMENSIONS_MM[paperSize] || PAPER_DIMENSIONS_MM.A4;
   const pageWidthMm = orientation === 'landscape' ? longMm : shortMm;
@@ -370,6 +384,26 @@ function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm) {
   // isn't relying solely on the collapsed border from the table's outer
   // edge. If this still recurs, it needs a real fresh PDF from whoever
   // sees it (not a screenshot) to pin down the actual cause. */
+  // headerEl lives in its OWN `.card-b` (its own 20px padding), a sibling of
+  // the table's `.card-b` — not a shared ancestor with the table. The table
+  // ignores its own wrapper's padding once it's wider than the wrapper (see
+  // the comment above headerEl in the doc comment), so its true right edge
+  // is wrapperLeft + wrapper'sOwnLeftPadding + printableWidthPx. headerEl's
+  // rect already starts flush at that same wrapperLeft (both `.card-b`s are
+  // siblings at the same x), so matching its WIDTH to wrapperPadLeft +
+  // printableWidthPx (not printableWidthPx alone) is what actually lines up
+  // the two right edges — confirmed with a Playwright measurement of both
+  // rects; using printableWidthPx alone left headerEl short by exactly one
+  // wrapper-padding's worth (~20px), which is what "not quite in line"
+  // looked like in practice, not the full width of the mismatch.
+  let headerRule = '';
+  if (headerEl) {
+    if (!headerEl.dataset.pfHeaderId) headerEl.dataset.pfHeaderId = pfId;
+    const tableWrapEl = tableEl.parentElement;
+    const wrapPadLeft = tableWrapEl ? (parseFloat(getComputedStyle(tableWrapEl).paddingLeft) || 0) : 0;
+    const headerWidthPx = printableWidthPx + wrapPadLeft;
+    headerRule = `[data-pf-header-id="${pfId}"]{box-sizing:border-box!important;width:${headerWidthPx.toFixed(2)}px!important}`;
+  }
   const style = document.createElement('style');
   style.id = 'print-autofit-override';
   style.textContent = `
@@ -377,6 +411,7 @@ function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm) {
     table[data-pf-id="${pfId}"] th,table[data-pf-id="${pfId}"] td{box-sizing:border-box!important;font-size:${(baseFontSize * scale).toFixed(2)}px!important;padding:${(padTop * scale).toFixed(2)}px ${(padRight * scale).toFixed(2)}px!important}
     table[data-pf-id="${pfId}"] th:last-child,table[data-pf-id="${pfId}"] td:last-child{border-right:1.5px solid var(--grid-ink)!important}
     ${colRules}
+    ${headerRule}
   `;
   document.head.appendChild(style);
   return () => { style.remove(); };
@@ -449,7 +484,7 @@ function hideNativeSplashOnce() {
     }
   } catch (e) { /* best-effort — never let this block real content from showing */ }
 }
-export function printWithOptions(orientation, paperSize, marginMm, fitEl) {
+export function printWithOptions(orientation, paperSize, marginMm, fitEl, headerEl) {
   const size = PRINT_PAPER_SIZES[paperSize] || 'A4';
   const orient = orientation === 'landscape' ? 'landscape' : 'portrait';
   const margin = Number.isFinite(marginMm) && marginMm > 0 ? marginMm : 10;
@@ -457,7 +492,7 @@ export function printWithOptions(orientation, paperSize, marginMm, fitEl) {
   style.id = 'print-options-override';
   style.textContent = `@page{size:${size} ${orient};margin:${margin}mm}`;
   document.head.appendChild(style);
-  const unfit = autoFitPrintWidth(fitEl, orient, size, margin);
+  const unfit = autoFitPrintWidth(fitEl, orient, size, margin, headerEl);
   // BUG FIX (root cause of the Mark List printing portrait/unscaled no
   // matter what — confirmed on desktop Chrome AND Android Chrome, with
   // the deployed code verified correct both times, so this was never a
@@ -577,14 +612,19 @@ export function printOptionsHtml(idPrefix, defaultOrientation, opts) {
  *  CSS selector, resolved against `root` at click time, for a wide printable
  *  table that must never lose columns off the page — see
  *  autoFitPrintWidth()/printWithOptions() above. Only the Mark List passes
- *  this today. */
-export function wirePrintOptions(root, idPrefix, suggestedFilename, marginMm, fitSelector) {
+ *  this today. `headerSelector` (optional): a CSS selector, resolved the
+ *  same way, for the printed header block (school name/address, green
+ *  title bar) that should bleed out to the exact same right edge as
+ *  fitSelector's table once it's auto-shrunk — see autoFitPrintWidth()'s
+ *  own comment on headerEl. Only the Mark List passes this today too. */
+export function wirePrintOptions(root, idPrefix, suggestedFilename, marginMm, fitSelector, headerSelector) {
   const btn = root.querySelector(`#${idPrefix}-print-btn`);
   if (!btn) return;
   btn.onclick = () => {
     const orient = root.querySelector(`#${idPrefix}-orient`).value;
     const size = root.querySelector(`#${idPrefix}-size`).value;
     const fitEl = fitSelector ? root.querySelector(fitSelector) : null;
+    const headerEl = headerSelector ? root.querySelector(headerSelector) : null;
     if (suggestedFilename) {
       // POST-BUILD AUDIT (Sidebar_Performance_Login_Audit_Fixes.docx item
       // 7, BUG): a blind 5-second timeout used to be the ONLY safety net
@@ -617,9 +657,9 @@ export function wirePrintOptions(root, idPrefix, suggestedFilename, marginMm, fi
       window.addEventListener('focus', restore);
       setTimeout(restore, 120000);
     }
-    printWithOptions(orient, size, marginMm, fitEl);
+    printWithOptions(orient, size, marginMm, fitEl, headerEl);
   };
-  wireDownloadPdf(root, idPrefix, suggestedFilename, marginMm, fitSelector);
+  wireDownloadPdf(root, idPrefix, suggestedFilename, marginMm, fitSelector, headerSelector);
 }
 
 /* ---------------------------------------------------------------------
@@ -820,7 +860,7 @@ async function deliverPdfBlob(blob, filename) {
  *  captured one block at a time so each student lands on their own PDF
  *  page(s), same as `.batch-page{page-break-after:always}` does for real
  *  print; everything else is captured as a whole via resolvePdfTarget(). */
-function wireDownloadPdf(root, idPrefix, suggestedFilename, marginMm, fitSelector) {
+function wireDownloadPdf(root, idPrefix, suggestedFilename, marginMm, fitSelector, headerSelector) {
   const btn = root.querySelector(`#${idPrefix}-pdf-btn`);
   if (!btn) return;
   btn.onclick = async () => {
@@ -830,6 +870,7 @@ function wireDownloadPdf(root, idPrefix, suggestedFilename, marginMm, fitSelecto
     const size = sizeEl ? sizeEl.value : 'A4';
     const margin = Number.isFinite(marginMm) && marginMm > 0 ? marginMm : 10;
     const fitEl = fitSelector ? root.querySelector(fitSelector) : null;
+    const headerEl = headerSelector ? root.querySelector(headerSelector) : null;
     if (btn.disabled) return;
     const prevHtml = btn.innerHTML;
     btn.disabled = true;
@@ -839,7 +880,7 @@ function wireDownloadPdf(root, idPrefix, suggestedFilename, marginMm, fitSelecto
     try {
       const [{ jsPDF }, html2canvas] = await Promise.all([loadJsPdf(), loadHtml2Canvas()]);
       window.dispatchEvent(new Event('beforeprint'));
-      unfit = autoFitPrintWidth(fitEl, orient, size, margin);
+      unfit = autoFitPrintWidth(fitEl, orient, size, margin, headerEl);
       restoreCapture = applyPdfCaptureMode();
       // Let the fit/capture-mode style changes actually reflow before the
       // screenshot — a synchronous read right after setting styles can catch

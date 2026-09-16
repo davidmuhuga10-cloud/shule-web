@@ -312,7 +312,12 @@ async function load(root, classes, sel) {
            solid green rectangle. printHeader.mjs's own comment already says
            "no divider line under this row anymore"; this was the one place
            that hadn't caught up. -->
-      <div class="card-b" style="padding-bottom:12px">
+      <!-- id="bs-print-header": lets wirePrintOptions() below stretch this
+           block to match the Mark List table's own auto-fit width — see
+           autoFitPrintWidth()'s headerEl comment (app.js) for why they'd
+           otherwise fall out of alignment once the table shrinks/bleeds
+           past this card's normal 20px padding. -->
+      <div class="card-b" id="bs-print-header" style="padding-bottom:12px">
         ${printHeaderHtml(settings)}
         ${reportTitleBarHtml(`${res.exam.name} — Mark List — ${cls ? cls.name : ''}`)}
       </div>
@@ -342,7 +347,7 @@ async function load(root, classes, sel) {
   // app.js: this table's fixed column widths can sum wider than even a
   // landscape page once a school has enough subjects, and this guarantees
   // no column is ever silently clipped off the printed page.
-  wirePrintOptions(sheetEl, 'bs', `${cls ? cls.name : 'Class'} Mark List — ${res.exam.name}`, 5, '.mark-list-grid');
+  wirePrintOptions(sheetEl, 'bs', `${cls ? cls.name : 'Class'} Mark List — ${res.exam.name}`, 5, '.mark-list-grid', '#bs-print-header');
   sheetEl.querySelector('#bs-download').onclick = () => {
     const streamSel = root.querySelector('#bs-stream');
     const streamName = streamSel && streamSel.selectedIndex > 0 ? streamSel.options[streamSel.selectedIndex].textContent : '';
