@@ -329,14 +329,24 @@ async function load(root, classes, sel) {
            autoFitPrintWidth()'s headerEl comment (app.js) for why they'd
            otherwise fall out of alignment once the table shrinks/bleeds
            past this card's normal 20px padding. -->
-      <div class="card-b" id="bs-print-header" style="padding-bottom:12px">
+      <div class="card-b" id="bs-print-header" style="padding-bottom:6px">
         ${printHeaderHtml(settings)}
         <!-- Approved design (Option 2D): class far left, exam name centered,
              the report's own name ("Mark List") far right, enlarged — see
              reportTitleBarHtml()'s array form in printHeader.mjs. -->
         ${reportTitleBarHtml([cls ? cls.name : '', res.exam.name, 'Mark List'])}
       </div>
-      <div class="card-b table-wrap" id="bs-table-wrap"><table class="mark-list-grid">
+      <!-- Live feedback: the gap below this title-bar row down to the
+           table's first row was much bigger (12px + the table-wrap card-b's
+           own 20px top padding = 32px) than the gap above it, between the
+           header's orange rule and the title-bar text (ph-title-bar's own
+           8px margin-top) — visibly unbalanced. Tightened both sides of
+           this specific seam (12px->6px above, 20px->6px just for the top
+           of this table-wrap) so the two gaps read as the same size, per
+           the user's explicit preference to shrink this gap rather than
+           grow the other one. Left/right/bottom padding untouched (still
+           the normal 20px from .card-b). -->
+      <div class="card-b table-wrap" id="bs-table-wrap" style="padding-top:6px"><table class="mark-list-grid">
         <thead><tr><th class="id-col">Adm. No.</th><th class="name-col">Name</th><th class="str-col">Stream</th>
           ${res.subjects.map((s, i) => subjectHeaderHtml(s, i)).join('')}
           <th class="num sum-col">SBJ</th><th class="num sum-col">TT MKS</th><th class="num sum-col">MN MKS</th><th class="num sum-col">PL</th>
@@ -363,20 +373,25 @@ async function load(root, classes, sel) {
   // landscape page once a school has enough subjects, and this guarantees
   // no column is ever silently clipped off the printed page.
   // Round 8 live feedback: "the header should not have any margin at all to
-  // the top/left/right" — dropped to a genuine 0mm @page margin (this only
-  // reaches 0, not a negative value, because a real @page margin can never
-  // go negative — it's the paper's own physical bound, not a CSS box a
-  // negative number could push past). The letterhead band itself bleeds all
-  // the way to that now-zero edge (see .print-header's own negative margin
-  // in main.css); the table and every other section below it stay safely
-  // inset from the true page edge regardless, because they still sit inside
-  // their own `.card-b`'s normal 20px padding — only the header cancels
-  // that padding on purpose. NOTE: a genuinely borderless physical printer
-  // is needed to see zero white edge on paper — most inkjets/laser printers
-  // have their own small hardware-unprintable margin (a few mm) no CSS or
-  // browser setting can override, so a "Save/Print to PDF" or a printer
-  // with a true borderless mode is what actually shows this at 0.
-  wirePrintOptions(sheetEl, 'bs', `${cls ? cls.name : 'Class'} Mark List — ${res.exam.name}`, 0, '.mark-list-grid', '#bs-print-header');
+  // the top/left/right, BUT ONLY ON THE FIRST PAGE — continuation pages
+  // rendered badly once every page got that same zero margin." A single
+  // `@page{margin:...}` rule applies to EVERY page of a multi-page print
+  // job — there's no way to give just page 1 a different margin without a
+  // separate rule. `@page:first{margin:...}` (7th arg, firstPageMarginMm,
+  // wired through printWithOptions() in app.js) is exactly that separate
+  // rule: page 1 (where the letterhead lives) gets 0mm, every later page
+  // reverts to this screen's normal 5mm margin (4th arg, back to its
+  // original value). The letterhead band itself bleeds all the way to
+  // page 1's now-zero edge (see .print-header's own negative margin in
+  // main.css); the table and every other section stay safely inset from
+  // the page edge regardless, because they still sit inside their own
+  // `.card-b`'s normal 20px padding — only the header cancels that padding
+  // on purpose. NOTE: a genuinely borderless physical printer is needed to
+  // see zero white edge on paper — most inkjets/laser printers have their
+  // own small hardware-unprintable margin (a few mm) no CSS or browser
+  // setting can override, so a "Save/Print to PDF" or a printer with a
+  // true borderless mode is what actually shows this at 0.
+  wirePrintOptions(sheetEl, 'bs', `${cls ? cls.name : 'Class'} Mark List — ${res.exam.name}`, 5, '.mark-list-grid', '#bs-print-header', 0);
   sheetEl.querySelector('#bs-download').onclick = () => {
     const streamSel = root.querySelector('#bs-stream');
     const streamName = streamSel && streamSel.selectedIndex > 0 ? streamSel.options[streamSel.selectedIndex].textContent : '';

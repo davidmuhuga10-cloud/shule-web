@@ -519,16 +519,29 @@ function hideNativeSplashOnce() {
     }
   } catch (e) { /* best-effort — never let this block real content from showing */ }
 }
-export function printWithOptions(orientation, paperSize, marginMm, fitEl, headerEl) {
+// firstPageMarginMm (optional): "the header should have zero margin, but
+// only on the first page — the other (continuation) pages rendered badly
+// once every page got that same zero margin." A single `@page{margin:...}`
+// rule applies to EVERY page of the job, first and last alike — there is no
+// way to make just the header's page different without a SEPARATE rule.
+// `@page:first` is exactly that separate rule: it overrides margin only for
+// page 1, leaving every later page on the normal `@page{...}` margin above
+// (this is standard CSS paged-media, well supported for print). The
+// letterhead band only ever appears on page 1 anyway (reportTitleBarHtml/
+// printHeaderHtml render once, at the very top of the flow), so this is the
+// only page that needs — or should get — the zero margin.
+export function printWithOptions(orientation, paperSize, marginMm, fitEl, headerEl, firstPageMarginMm) {
   const size = PRINT_PAPER_SIZES[paperSize] || 'A4';
   const orient = orientation === 'landscape' ? 'landscape' : 'portrait';
   // Same bug as autoFitPrintWidth's own marginMm handling (see its comment):
   // `marginMm > 0` rejects an explicit, intentional 0 and silently
   // substitutes 10mm. `>= 0` lets a real zero-margin request through.
   const margin = Number.isFinite(marginMm) && marginMm >= 0 ? marginMm : 10;
+  const firstPageRule = Number.isFinite(firstPageMarginMm) && firstPageMarginMm >= 0
+    ? `@page:first{margin:${firstPageMarginMm}mm}` : '';
   const style = document.createElement('style');
   style.id = 'print-options-override';
-  style.textContent = `@page{size:${size} ${orient};margin:${margin}mm}`;
+  style.textContent = `@page{size:${size} ${orient};margin:${margin}mm}${firstPageRule}`;
   document.head.appendChild(style);
   const unfit = autoFitPrintWidth(fitEl, orient, size, margin, headerEl);
   // BUG FIX (root cause of the Mark List printing portrait/unscaled no
@@ -659,7 +672,7 @@ export function printOptionsHtml(idPrefix, defaultOrientation, opts) {
  *  title bar) that should bleed out to the exact same right edge as
  *  fitSelector's table once it's auto-shrunk — see autoFitPrintWidth()'s
  *  own comment on headerEl. Only the Mark List passes this today too. */
-export function wirePrintOptions(root, idPrefix, suggestedFilename, marginMm, fitSelector, headerSelector) {
+export function wirePrintOptions(root, idPrefix, suggestedFilename, marginMm, fitSelector, headerSelector, firstPageMarginMm) {
   const btn = root.querySelector(`#${idPrefix}-print-btn`);
   if (!btn) return;
   btn.onclick = () => {
@@ -699,7 +712,7 @@ export function wirePrintOptions(root, idPrefix, suggestedFilename, marginMm, fi
       window.addEventListener('focus', restore);
       setTimeout(restore, 120000);
     }
-    printWithOptions(orient, size, marginMm, fitEl, headerEl);
+    printWithOptions(orient, size, marginMm, fitEl, headerEl, firstPageMarginMm);
   };
 }
 

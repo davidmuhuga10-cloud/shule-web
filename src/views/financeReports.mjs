@@ -162,7 +162,7 @@ async function loadBalances(root, settings, classes, sel) {
       <tbody>${rows.map(balRow).join('') || noMatch}</tbody>
     </table></div>`;
   tableEl.innerHTML = reportSheetHtml('fb-sheet', settings, 'Balances', `${desktopTable}${printTable}<div class="frb-mobile-view no-print">${pageRows.length ? pageRows.map(balanceCardHtml).join('') : '<p class="muted center" style="margin:20px 0">No students match this filter.</p>'}</div>`);
-  wirePrintOptions(root, 'fb', 'Balances');
+  wirePrintOptions(root, 'fb', 'Balances', undefined, undefined, undefined, 0);
   const prevBtn = root.querySelector('#fb-page-prev');
   const nextBtn = root.querySelector('#fb-page-next');
   if (prevBtn) prevBtn.onclick = () => refilter({ page: page - 1 });
@@ -290,7 +290,7 @@ async function loadVoteHead(root, settings, years, terms, sel) {
       <thead><tr><th>Vote Head</th><th class="num">Collected</th></tr></thead>
       <tbody>${rows.map((r) => `<tr><td>${esc(r.vote_head_name)}</td><td class="num">${Number(r.collected || 0).toLocaleString()}</td></tr>`).join('') || '<tr><td colspan="2" class="muted">No collections yet.</td></tr>'}</tbody>
     </table>`);
-  wirePrintOptions(root, 'fv', 'Vote Head Balances');
+  wirePrintOptions(root, 'fv', 'Vote Head Balances', undefined, undefined, undefined, 0);
 }
 
 /* --------------------------------------------------------- cashbook --- */
@@ -361,7 +361,7 @@ async function loadCashbook(root, settings, sel) {
     </table></div>`;
   const mobileList = `<div class="rcb-mobile-view no-print">${pageRows.length ? pageRows.map(cashbookRowHtml).join('') : '<p class="muted center" style="margin:20px 0">No collections in this range.</p>'}${pageRows.length ? `<div class="rcb-row" style="font-weight:700"><span>Total (this page)</span><span>${pageRows.reduce((a, r) => a + Number(r.amount || 0), 0).toLocaleString()}</span></div>` : ''}</div>`;
   tableEl.innerHTML = reportSheetHtml('fcb-sheet', settings, `Cashbook — ${sel.from} to ${sel.to}`, `${desktopTable}${printTable}${mobileList}`);
-  wirePrintOptions(root, 'fcb', `Cashbook ${sel.from} to ${sel.to}`);
+  wirePrintOptions(root, 'fcb', `Cashbook ${sel.from} to ${sel.to}`, undefined, undefined, undefined, 0);
   const prevBtn = root.querySelector('#fcb-page-prev');
   const nextBtn = root.querySelector('#fcb-page-next');
   if (prevBtn) prevBtn.onclick = () => loadCashbook(root, settings, { ...sel, page: page - 1 });
@@ -425,7 +425,7 @@ async function loadTrial(root, settings, years, terms, sel) {
       <tbody>${rows.map((r) => `<tr><td>${esc(r.vote_head_name)}</td><td class="num">${Number(r.invoiced || 0).toLocaleString()}</td><td class="num">${Number(r.collected || 0).toLocaleString()}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No data yet.</td></tr>'}</tbody>
       <tfoot><tr><td><b>Total</b></td><td class="num"><b>${dr.toLocaleString()}</b></td><td class="num"><b>${cr.toLocaleString()}</b></td></tr></tfoot>
     </table>`);
-  wirePrintOptions(root, 'ft', 'Trial Balance');
+  wirePrintOptions(root, 'ft', 'Trial Balance', undefined, undefined, undefined, 0);
 }
 
 function wireGotoSettings(root) {

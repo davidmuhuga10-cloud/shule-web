@@ -389,7 +389,7 @@ function render(root, exams, classes, intent, settings) {
       // right top and bottom" — same tight-margin treatment now used
       // elsewhere (broadsheet.mjs's marginMm=5, examAnalysis.mjs's
       // marginMm=6) instead of the 10mm default.
-      wirePrintOptions(printBar, 'rf', `Report Forms — ${classes.find((c) => c.id === classId) ? classes.find((c) => c.id === classId).name : ''}`, 3);
+      wirePrintOptions(printBar, 'rf', `Report Forms — ${classes.find((c) => c.id === classId) ? classes.find((c) => c.id === classId).name : ''}`, 3, undefined, undefined, 0);
       return;
     }
 
@@ -405,7 +405,7 @@ function render(root, exams, classes, intent, settings) {
     const cardBody = document.createElement('div');
     cardEl.appendChild(cardBody);
     renderReportCard(cardBody, res.data, { ...extra, feeBalance });
-    wirePrintOptions(printBar, 'rf', `Report Form — ${res.data.student ? res.data.student.full_name : ''}`, 3);
+    wirePrintOptions(printBar, 'rf', `Report Form — ${res.data.student ? res.data.student.full_name : ''}`, 3, undefined, undefined, 0);
   };
 
   // Round 6 §6 (performance/perceived-freeze): the class/arm selects used

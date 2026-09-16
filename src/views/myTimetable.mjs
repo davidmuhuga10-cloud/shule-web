@@ -58,7 +58,7 @@ export async function viewMyTimetable(root) {
     `;
     root.querySelector('#my-tt-year').onchange = (e) => { sel.year_id = e.target.value; sel.term_id = (termsByYear[sel.year_id] || [])[0]?.id || ''; render(); };
     root.querySelector('#my-tt-term').onchange = (e) => { sel.term_id = e.target.value; loadView(); };
-    wirePrintOptions(root.querySelector('.card.no-print'), 'mtt', 'My Timetable');
+    wirePrintOptions(root.querySelector('.card.no-print'), 'mtt', 'My Timetable', undefined, undefined, undefined, 0);
     loadView();
   }
 
@@ -74,6 +74,6 @@ export async function viewMyTimetable(root) {
       return;
     }
     viewEl.innerHTML = timetableGridPageHtml(settings, 'My Timetable', periods, days, res.data, 'teacher', false);
-    wirePrintOptions(root.querySelector('.card.no-print'), 'mtt', `My Timetable — ${(years.find((y) => y.id === sel.year_id) || {}).name || ''}`);
+    wirePrintOptions(root.querySelector('.card.no-print'), 'mtt', `My Timetable — ${(years.find((y) => y.id === sel.year_id) || {}).name || ''}`, undefined, undefined, undefined, 0);
   }
 }

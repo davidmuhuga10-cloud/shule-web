@@ -173,5 +173,9 @@ async function load(root, classes, sel) {
     });
     downloadXlsx(suggestedName.replace(/[\\/:*?"<>|]+/g, ''), students, activeCols, 'Class List');
   };
-  wirePrintOptions(listEl, 'cl', suggestedName.replace(/[\\/:*?"<>|]+/g, ''));
+  // "Apply the rule to all reports": zero margin on page 1 only (where this
+  // screen's own printHeaderHtml() letterhead lives), normal margin
+  // (unchanged — left as the previous default) on any later page — see
+  // broadsheet.mjs's wirePrintOptions() comment for the full explanation.
+  wirePrintOptions(listEl, 'cl', suggestedName.replace(/[\\/:*?"<>|]+/g, ''), undefined, undefined, undefined, 0);
 }

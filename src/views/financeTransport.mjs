@@ -218,7 +218,7 @@ async function loadInvoicing(root, access, settings, routes, years, terms, sel) 
         </table></div>
       </div></div>
     `;
-    wirePrintOptions(rosterEl, 'fti', reportTitle);
+    wirePrintOptions(rosterEl, 'fti', reportTitle, undefined, undefined, undefined, 0);
     rosterEl.querySelector('#fti-xlsx').onclick = () => {
       downloadXlsx(`${reportTitle}.xlsx`, rows.map((r) => ({
         route_name: r.route_name,
@@ -525,7 +525,7 @@ async function loadReport(root, settings, routes, years, terms, sel) {
       </table></div>
     </div></div>
   `;
-  wirePrintOptions(tableEl, 'ftr', `Transport Report ${termLabel}`);
+  wirePrintOptions(tableEl, 'ftr', `Transport Report ${termLabel}`, undefined, undefined, undefined, 0);
   tableEl.querySelector('#ftr-xlsx').onclick = () => {
     downloadXlsx('Transport Report — Summary.xlsx', rows.map((r) => ({
       route: r.route.name, assigned: r.assigned, invoiced: r.invoiced, pending: r.pending

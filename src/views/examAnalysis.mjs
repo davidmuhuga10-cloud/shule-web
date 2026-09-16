@@ -400,10 +400,14 @@ async function load(root, classes, sel) {
   const topReportEl = sheetEl.querySelector('#ea-top-report');
 
   // Round 8 live feedback: "the header should not have any margin at all to
-  // the top/left/right" — 0mm @page margin, same reasoning as
+  // the top/left/right, BUT ONLY ON THE FIRST PAGE" — 0mm on page 1 via the
+  // 7th arg (firstPageMarginMm), normal 6mm margin (4th arg, reverted to
+  // its original value) on every subsequent page. Same reasoning as
   // broadsheet.mjs's own wirePrintOptions() call (see its comment there for
-  // the full explanation and the physical-printer caveat).
-  wirePrintOptions(sheetEl, 'ea', combinedSuggestedName, 0);
+  // the full explanation and the physical-printer caveat). Args 5/6
+  // (fitSelector/headerSelector) are left undefined — this screen has no
+  // wide-table auto-fit target, unlike the Mark List.
+  wirePrintOptions(sheetEl, 'ea', combinedSuggestedName, 6, undefined, undefined, 0);
   wireCombinedPrint(sheetEl, 'ea', [
     { checkbox: sheetEl.querySelector('#ea-check-class'), el: classReportEl },
     { checkbox: sheetEl.querySelector('#ea-check-top'), el: topReportEl }

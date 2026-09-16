@@ -160,7 +160,7 @@ async function renderNotesTab(root, access, settings, years, terms, sel) {
     }), true
   ));
 
-  wirePrintOptions(root, 'ftl', reportTitle);
+  wirePrintOptions(root, 'ftl', reportTitle, undefined, undefined, undefined, 0);
   root.querySelector('#ftl-xlsx').onclick = () => {
     downloadXlsx(`${reportTitle}.xlsx`, allRows.map((n) => ({
       date: new Date(n.created_at).toLocaleDateString(),
@@ -245,7 +245,7 @@ async function renderReversedTab(root, access, settings, years, terms, sel) {
   if (prevBtn) prevBtn.onclick = () => renderReversedTab(root, access, settings, years, terms, { ...sel, page: page - 1 });
   if (nextBtn) nextBtn.onclick = () => renderReversedTab(root, access, settings, years, terms, { ...sel, page: page + 1 });
 
-  wirePrintOptions(root, 'ftl', reportTitle);
+  wirePrintOptions(root, 'ftl', reportTitle, undefined, undefined, undefined, 0);
   root.querySelector('#ftl-xlsx').onclick = () => {
     downloadXlsx(`${reportTitle}.xlsx`, allRows.map((c) => ({
       date: new Date(c.created_at).toLocaleDateString(), receipt_no: c.receipt_no || '',

@@ -45,7 +45,7 @@ export async function viewMyResults(root) {
     // screen uses now covers this one too.
     printBtn.innerHTML = printOptionsHtml('mr', 'portrait', { simple: true });
     cardEl.appendChild(printBtn);
-    wirePrintOptions(cardEl, 'mr', `Report Form — ${cardRes.data.student ? cardRes.data.student.full_name : ''}`);
+    wirePrintOptions(cardEl, 'mr', `Report Form — ${cardRes.data.student ? cardRes.data.student.full_name : ''}`, undefined, undefined, undefined, 0);
   };
 
   // Auto-select the most recent exam.

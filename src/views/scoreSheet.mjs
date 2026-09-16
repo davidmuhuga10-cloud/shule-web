@@ -143,7 +143,10 @@ async function load(root, classes, subjects, sel) {
     </div>
   `;
 
-  wirePrintOptions(sheetEl, 'ss', suggestedName);
+  // "Apply the rule to all reports": zero margin on page 1 only (this
+  // screen's printHeaderHtml() letterhead), normal margin unchanged on any
+  // later page — see broadsheet.mjs's wirePrintOptions() comment.
+  wirePrintOptions(sheetEl, 'ss', suggestedName, undefined, undefined, undefined, 0);
   sheetEl.querySelector('#ss-download').onclick = () => {
     const aoa = buildScoreSheetAoa({
       settings, className: cls ? cls.name : '', streamName, learningArea: subject ? subject.name : '',

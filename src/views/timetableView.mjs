@@ -172,7 +172,7 @@ function render(root, state) {
       classSel.onchange = async () => { sel.class_id = classSel.value; sel.stream_id = ''; await refreshStreams(sel.class_id); loadView(); };
       streamSel.onchange = () => { sel.stream_id = streamSel.value; loadView(); };
       if (sel.class_id) refreshStreams(sel.class_id, sel.stream_id);
-      wirePrintOptions(picker, 'tt', 'Timetable');
+      wirePrintOptions(picker, 'tt', 'Timetable', undefined, undefined, undefined, 0);
     } else {
       picker.innerHTML = `<div class="card-b grid3">
         <div class="field"><label>Teacher</label><select id="tt-staff">${options(staff, 'id', 'full_name', sel.staff_id, 'Choose a teacher')}</select></div>
@@ -180,7 +180,7 @@ function render(root, state) {
         <div class="field"><label>&nbsp;</label>${printOptionsHtml('tt', 'landscape')}</div>
       </div>`;
       picker.querySelector('#tt-staff').onchange = (e) => { sel.staff_id = e.target.value; loadView(); };
-      wirePrintOptions(picker, 'tt', 'Timetable');
+      wirePrintOptions(picker, 'tt', 'Timetable', undefined, undefined, undefined, 0);
     }
   }
 
@@ -210,7 +210,7 @@ function render(root, state) {
     const editable = sel.mode === 'stream';
 
     viewEl.innerHTML = timetableGridPageHtml(state.settings, title, periods, days, res.data, sel.mode, editable);
-    wirePrintOptions(root.querySelector('#tt-picker'), 'tt', title);
+    wirePrintOptions(root.querySelector('#tt-picker'), 'tt', title, undefined, undefined, undefined, 0);
 
     if (editable) {
       const entryById = {}; res.data.forEach((e) => { entryById[e.id] = e; });
