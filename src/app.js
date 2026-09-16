@@ -325,11 +325,34 @@ function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm) {
   // it as, so the target border-box size is what actually gets rendered,
   // and the table's own sum-of-columns comes out matching printableWidthPx
   // as designed (also confirmed with the same test).
+  // BUG FIX (ROUND 5 — the real cause of the desktop Print regression: cut
+  // columns, huge multi-line headers breaking mid-word, marks bigger than
+  // the achievement badges next to them): the font-size shrink above was
+  // being set on the <table> element itself, expecting th/td to inherit it.
+  // They never did. .mark-list-grid th has its OWN font-size:11.5px rule,
+  // and (at print time specifically) .mark-list-grid td has its own
+  // font-size:15.5px rule — both DIRECTLY target th/td, so per basic CSS
+  // cascade rules a directly-specified value on an element always wins over
+  // an inherited one from an ancestor, `!important` or not (`!important`
+  // only breaks ties between rules that target the SAME element). So the
+  // column WIDTHS shrank exactly as computed, but the actual rendered font
+  // never shrank at all — worse, switching into print media forced body
+  // cells' font back up to the full 15.5px, bigger than the un-shrunk
+  // widths were ever measured for. Columns that used to fit stopped
+  // fitting: numbers got silently clipped by `td{overflow:hidden}`, and
+  // long header words got forced into overflow-wrap:break-word's
+  // mid-word split as their column ran out of room.
+  // Proven with a controlled test loading this app's real main.css (not a
+  // simplified stand-in, which is what let this slip through the ROUND 3/4
+  // Playwright checks): with the old table-level rule, print media measured
+  // td at 15.5px regardless of scale; targeting th/td directly here (same
+  // selector already used for box-sizing/padding, which never had this
+  // problem) measured the correctly shrunk size in both screen and print.
   const style = document.createElement('style');
   style.id = 'print-autofit-override';
   style.textContent = `
-    table[data-pf-id="${pfId}"]{font-size:${(baseFontSize * scale).toFixed(2)}px!important;width:${printableWidthPx.toFixed(2)}px!important}
-    table[data-pf-id="${pfId}"] th,table[data-pf-id="${pfId}"] td{box-sizing:border-box!important;padding:${(padTop * scale).toFixed(2)}px ${(padRight * scale).toFixed(2)}px!important}
+    table[data-pf-id="${pfId}"]{width:${printableWidthPx.toFixed(2)}px!important}
+    table[data-pf-id="${pfId}"] th,table[data-pf-id="${pfId}"] td{box-sizing:border-box!important;font-size:${(baseFontSize * scale).toFixed(2)}px!important;padding:${(padTop * scale).toFixed(2)}px ${(padRight * scale).toFixed(2)}px!important}
     ${colRules}
   `;
   document.head.appendChild(style);
