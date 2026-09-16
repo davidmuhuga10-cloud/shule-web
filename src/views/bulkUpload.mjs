@@ -23,7 +23,7 @@
  *     guarantees every class has at least one arm (a class can no longer
  *     exist with zero arms), so there's always something valid to type in.
  */
-import { esc, toast, options, renderPrereq, renderPrereqOrConnectivity, $ } from '../app.js';
+import { esc, toast, options, renderPrereq, renderPrereqOrConnectivity, $, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { downloadXlsx, readXlsxFile } from '../lib/xlsxUtil.mjs';
 
@@ -244,12 +244,18 @@ function renderPreview(root, classes, state) {
   const importBtn = area.querySelector('#bu-import');
   if (blocked) return;
 
-  importBtn.onclick = async () => {
-    importBtn.disabled = true; importBtn.textContent = 'Importing…';
+  // Cleanup audit: this used to disable the button by hand with no
+  // try/finally, so a genuine network blip (Db.students.bulkCreate/
+  // provisionStudentLogins throwing rather than resolving {ok:false}) left
+  // "Importing…" stuck disabled forever with no explanation — the admin's
+  // only way out was reloading the whole screen. withBusy() (used
+  // everywhere else in the app for exactly this) restores the button
+  // automatically once the click handler settles, success or failure.
+  importBtn.onclick = () => withBusy(importBtn, async () => {
     area.insertAdjacentHTML('beforeend', `<div class="card-b" id="bu-progress"><p class="hint">📥 Creating ${validCount} student record(s), please wait…</p></div>`);
     const validRows = withStatus.filter((r) => !r.error).map(({ error, ...r }) => r);
     const res = await Db.students.bulkCreate({ class_id: state.class_id, rows: validRows });
-    if (!res.ok) { toast(res.message, 'err'); importBtn.disabled = false; importBtn.textContent = `Import ${validCount} student(s)`; $('#bu-progress', area)?.remove(); return; }
+    if (!res.ok) { toast(res.message, 'err'); $('#bu-progress', area)?.remove(); return; }
 
     // Provision logins in CHUNKS (one Netlify function round trip per chunk,
     // not per student — see admin-provision.js's createStudentsBulk) so a
@@ -292,5 +298,5 @@ function renderPreview(root, classes, state) {
     </div></div>`;
     if (succeeded) toast(`Imported ${res.created} student(s).`, 'ok');
     else toast('Import failed — no students were created.', 'err');
-  };
+  }, 'Importing…');
 }

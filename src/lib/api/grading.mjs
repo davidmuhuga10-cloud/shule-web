@@ -3,7 +3,7 @@
  * Configurable grading scales and their grade bands. One scale is flagged
  * default and is used for all grading.
  */
-import { ok, err, gradeScore, createMemoCache, clearAllCaches } from './_util.mjs';
+import { ok, err, friendlyDbError, gradeScore, createMemoCache, clearAllCaches } from './_util.mjs';
 
 /** The official 8-band CBC competency scale (Below/Approaching/Meeting/Exceeding
  *  Expectation, split 1/2) — Round 3 §8: this is now the scale every new
@@ -46,7 +46,7 @@ export function createGradingApi(supabase) {
     async listScales() {
       return cached('listScales', null, async () => {
         const { data: scales, error } = await supabase.from('grading_scales').select('*');
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         const rows = scales || [];
         if (rows.length) {
           const { data: allBands } = await supabase.from('grade_ranges').select('*').in('grading_scale_id', rows.map((sc) => sc.id));
@@ -67,14 +67,14 @@ export function createGradingApi(supabase) {
       if (payload.id) {
         const { data, error } = await supabase.from('grading_scales')
           .update({ name, description: payload.description || '' }).eq('id', payload.id).select().single();
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         clearCache();
         return ok(data);
       }
       const { count } = await supabase.from('grading_scales').select('id', { count: 'exact', head: true });
       const { data, error } = await supabase.from('grading_scales')
         .insert({ name, description: payload.description || '', is_default: (count || 0) === 0 }).select().single();
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
@@ -95,7 +95,7 @@ export function createGradingApi(supabase) {
       }
       // grade_ranges cascade-delete automatically (ON DELETE CASCADE in schema.sql).
       const { error } = await supabase.from('grading_scales').delete().eq('id', id);
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(true);
     },
@@ -116,19 +116,19 @@ export function createGradingApi(supabase) {
       };
       if (payload.id) {
         const { data, error } = await supabase.from('grade_ranges').update(rec).eq('id', payload.id).select().single();
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         clearCache();
         return ok(data);
       }
       const { data, error } = await supabase.from('grade_ranges').insert(rec).select().single();
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
 
     async deleteBand(id) {
       const { error } = await supabase.from('grade_ranges').delete().eq('id', id);
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(true);
     },
@@ -154,7 +154,7 @@ export function createGradingApi(supabase) {
             description: 'The 8-band CBC competency-based scale (Below/Approaching/Meeting/Exceeding Expectation).',
             is_default: false
           }).select().single();
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         scaleId = scale.id;
         added = true;
 

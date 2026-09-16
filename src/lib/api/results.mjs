@@ -20,7 +20,7 @@
  *                      result_submissions in schema.sql. Staff always see
  *                      everything in their own school regardless of status.
  */
-import { ok, err, byAdmissionNo, indexById, createMemoCache, clearAllCaches, selectAllRows } from './_util.mjs';
+import { ok, err, friendlyDbError, byAdmissionNo, indexById, createMemoCache, clearAllCaches, selectAllRows } from './_util.mjs';
 import { getEffectiveClassSubjectIds, getEffectiveClassSubjectIdsBatch } from './assignments.mjs';
 
 // Same short-window in-memory memoization pattern as finance.mjs/students.mjs
@@ -87,13 +87,13 @@ async function setSubmissionStatus(supabase, examId, classId, subjectId, nextSta
     .eq('exam_id', examId).eq('class_id', classId).eq('subject_id', subjectId).maybeSingle();
   if (existing) {
     const { data, error } = await supabase.from('result_submissions').update({ status: nextStatus }).eq('id', existing.id).select().single();
-    if (error) return err(error.message || 'You do not have permission to do that.');
+    if (error) return err(friendlyDbError(error));
     clearAllCaches();
     return ok(data);
   }
   const { data, error } = await supabase.from('result_submissions')
     .insert({ exam_id: examId, class_id: classId, subject_id: subjectId, status: nextStatus }).select().single();
-  if (error) return err(error.message || 'You do not have permission to do that.');
+  if (error) return err(friendlyDbError(error));
   clearAllCaches();
   return ok(data);
 }
@@ -119,7 +119,7 @@ async function saveResultsEntryImpl(supabase, clearCache, payload) {
     p_exam_id: payload.exam_id, p_class_id: payload.class_id, p_subject_id: payload.subject_id,
     p_paper_id: payload.paper_id || null, p_scores: scores
   });
-  if (error) return err(error.message || 'Could not save marks.');
+  if (error) return err(friendlyDbError(error));
   const row = Array.isArray(data) ? data[0] : data;
   clearCache();
   return ok(null, { saved: (row && row.saved) || 0, cleared: (row && row.cleared) || 0 });
@@ -170,7 +170,7 @@ async function purgeExpired(supabase) {
   const ids = (expired || []).map((e) => e.id);
   if (!ids.length) return ok(null, { purged: 0 });
   const { error } = await supabase.from('exams').delete().in('id', ids);
-  if (error) return err(error.message);
+  if (error) return err(friendlyDbError(error));
   return ok(null, { purged: ids.length });
 }
 
@@ -255,7 +255,7 @@ export function createResultsApi(supabase, gradingApi) {
     async listExams() {
       return cached('listExams', null, async () => {
         const { data, error } = await supabase.from('exams').select('*, academic_years(name), terms(name)').is('deleted_at', null);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         const rows = (data || []).map((e) => ({
           ...e,
           academic_year_name: e.academic_years ? e.academic_years.name : '',
@@ -284,7 +284,7 @@ export function createResultsApi(supabase, gradingApi) {
         const examIds = [...new Set((examClassRows || []).map((r) => r.exam_id).filter(Boolean))];
         if (!examIds.length) return ok([]);
         const { data, error } = await supabase.from('exams').select('*, academic_years(name), terms(name)').is('deleted_at', null).in('id', examIds);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         const rows = (data || []).map((e) => ({
           ...e,
           academic_year_name: e.academic_years ? e.academic_years.name : '',
@@ -313,11 +313,11 @@ export function createResultsApi(supabase, gradingApi) {
       let saved;
       if (payload.id) {
         const { data, error } = await supabase.from('exams').update(rec).eq('id', payload.id).select().single();
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         saved = data;
       } else {
         const { data, error } = await supabase.from('exams').insert(rec).select().single();
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         saved = data;
       }
 
@@ -352,7 +352,7 @@ export function createResultsApi(supabase, gradingApi) {
             const m = wantedMin(class_id);
             return m === undefined ? { exam_id: saved.id, class_id } : { exam_id: saved.id, class_id, min_subjects: m };
           }));
-          if (error) return err(error.message);
+          if (error) return err(friendlyDbError(error));
         }
         for (const a of toKeep) {
           const m = wantedMin(String(a.class_id));
@@ -378,7 +378,7 @@ export function createResultsApi(supabase, gradingApi) {
     // CASCADE in schema.sql).
     async deleteExam(id) {
       const { error } = await supabase.from('exams').delete().eq('id', id);
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(true);
     },
@@ -390,7 +390,7 @@ export function createResultsApi(supabase, gradingApi) {
     async softDeleteExam(id) {
       if (!id) return err('Missing exam.');
       const { data, error } = await supabase.from('exams').update({ deleted_at: new Date().toISOString() }).eq('id', id).select().single();
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
@@ -406,7 +406,7 @@ export function createResultsApi(supabase, gradingApi) {
     async listDeletedExams() {
       await purgeExpired(supabase);
       const { data, error } = await supabase.from('exams').select('*, academic_years(name), terms(name)').not('deleted_at', 'is', null);
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       const now = Date.now();
       const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
       const rows = (data || []).map((e) => {
@@ -429,7 +429,7 @@ export function createResultsApi(supabase, gradingApi) {
     async restoreExam(id) {
       if (!id) return err('Missing exam.');
       const { data, error } = await supabase.from('exams').update({ deleted_at: null }).eq('id', id).select().single();
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
@@ -468,7 +468,7 @@ export function createResultsApi(supabase, gradingApi) {
     async listConsolidatableExams(excludeExamId) {
       const { data, error } = await supabase.from('exams').select('*, academic_years(name), terms(name)')
         .is('deleted_at', null).neq('exam_type', 'consolidated');
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       const rows = (data || [])
         .filter((e) => String(e.id) !== String(excludeExamId || ''))
         .map((e) => ({ ...e, academic_year_name: e.academic_years ? e.academic_years.name : '', term_name: e.terms ? e.terms.name : '' }));
@@ -482,7 +482,7 @@ export function createResultsApi(supabase, gradingApi) {
     async getExamComponents(examId) {
       if (!examId) return ok([]);
       const { data, error } = await supabase.from('exam_components').select('*, exams:component_exam_id(name, exam_type, academic_year_id, term_id)').eq('exam_id', examId);
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       const rows = (data || []).map((c) => ({
         id: c.id, exam_id: c.exam_id, component_exam_id: c.component_exam_id, weight: Number(c.weight) || 1,
         component_name: c.exams ? c.exams.name : '(deleted exam)'
@@ -514,17 +514,17 @@ export function createResultsApi(supabase, gradingApi) {
 
       for (const r of toRemove) {
         const { error } = await supabase.from('exam_components').delete().eq('id', r.id);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
       }
       if (toAdd.length) {
         const { error } = await supabase.from('exam_components').insert(toAdd.map((c) => ({ exam_id: examId, component_exam_id: c.exam_id, weight: c.weight })));
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
       }
       for (const c of toUpdate) {
         const row = (existing || []).find((r) => String(r.component_exam_id) === c.exam_id);
         if (!row) continue;
         const { error } = await supabase.from('exam_components').update({ weight: c.weight }).eq('id', row.id);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
       }
       clearCache();
       return ok(true);
@@ -685,13 +685,13 @@ export function createResultsApi(supabase, gradingApi) {
         .eq('exam_id', examId).eq('class_id', classId).eq('subject_id', subjectId).maybeSingle();
       if (existing) {
         const { data, error } = await supabase.from('result_submissions').update({ max_marks: mm }).eq('id', existing.id).select().single();
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         clearCache();
         return ok(data);
       }
       const { data, error } = await supabase.from('result_submissions')
         .insert({ exam_id: examId, class_id: classId, subject_id: subjectId, max_marks: mm }).select().single();
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
@@ -749,7 +749,7 @@ export function createResultsApi(supabase, gradingApi) {
       const { data, error } = await supabase.rpc('save_results_batch_multi', {
         p_exam_id: examId, p_class_id: classId, p_entries: cleanEntries
       });
-      if (error) return err(error.message || 'Could not save marks — please check your connection and try again.');
+      if (error) return err(friendlyDbError(error));
       clearCache();
       const rows = data || [];
       const totalSaved = rows.reduce((a, r) => a + (r.saved || 0), 0);
@@ -774,7 +774,7 @@ export function createResultsApi(supabase, gradingApi) {
       }
       const { error, count } = await supabase.from('results').delete({ count: 'exact' })
         .eq('exam_id', examId).eq('class_id', classId).eq('subject_id', subjectId);
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(null, { deleted: count || 0 });
     },
@@ -1268,7 +1268,7 @@ export function createResultsApi(supabase, gradingApi) {
         .eq('status', 'published')
         .order('published_at', { ascending: false })
         .limit(1);
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok((data && data[0]) || null);
     },
 
@@ -1522,7 +1522,7 @@ export function createResultsApi(supabase, gradingApi) {
         const subjectIds = Object.keys(classIdsBySubject);
         if (!subjectIds.length) return ok([]);
         const { data: subjects, error } = await supabase.from('subjects').select('id, name, code').in('id', subjectIds);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok((subjects || []).map((s) => ({ ...s, classIds: classIdsBySubject[s.id] || [] }))
           .sort((a, b) => String(a.name).localeCompare(String(b.name))));
       });
@@ -1542,7 +1542,7 @@ export function createResultsApi(supabase, gradingApi) {
         const classIds = [...new Set((examClassRows || []).map((r) => r.class_id).filter(Boolean))];
         if (!classIds.length) return ok([]);
         const { data: classes, error } = await supabase.from('classes').select('id, name').in('id', classIds);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok((classes || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name))));
       });
     },
@@ -1656,7 +1656,7 @@ export function createResultsApi(supabase, gradingApi) {
       const { data: existing } = await supabase.from('exam_classes').select('id').eq('exam_id', examId).eq('class_id', classId).maybeSingle();
       if (!existing) return err('This class is not on this exam yet.');
       const { data, error } = await supabase.from('exam_classes').update(rec).eq('id', existing.id).select().single();
-      if (error) return err(error.message || 'You do not have permission to change publish settings.');
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
@@ -1715,7 +1715,7 @@ export function createResultsApi(supabase, gradingApi) {
       if (!ec) return err('This class is not on this exam.');
       const { data, error } = await supabase.from('exam_classes')
         .update({ released_at: new Date().toISOString(), released_by: staffId || null }).eq('id', ec.id).select().single();
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
@@ -1724,7 +1724,7 @@ export function createResultsApi(supabase, gradingApi) {
     async getReportCard(examId, studentId) {
       if (!examId || !studentId) return err('Missing exam or student.');
       const { data, error } = await supabase.rpc('get_report_card', { p_exam_id: examId, p_student_id: studentId });
-      if (error) return err(error.message || 'You are not authorized to view this report card.');
+      if (error) return err(friendlyDbError(error));
       return ok(data);
     },
 

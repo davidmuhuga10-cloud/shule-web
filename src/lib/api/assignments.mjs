@@ -19,7 +19,7 @@
  * same subjects) and is what actually fixes the reported "every class
  * attached to 30+ subjects" problem — a class only shows what belongs to it.
  */
-import { ok, err, createMemoCache, clearAllCaches } from './_util.mjs';
+import { ok, err, friendlyDbError, createMemoCache, clearAllCaches } from './_util.mjs';
 import { levelBucketForClassName, defaultSubjectsFor } from './cbcDefaults.mjs';
 
 /** Auto-populate a brand-new stream with its grade's default subjects
@@ -184,7 +184,7 @@ export function createAssignmentsApi(supabase) {
 
       if (toAdd.length) {
         const { error } = await supabase.from('subject_class_assignments').insert(toAdd.map((sid) => ({ subject_id: sid, class_id: classId })));
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
       }
       for (const a of toRemove) {
         await supabase.from('subject_class_assignments').delete().eq('id', a.id);
@@ -276,7 +276,7 @@ export function createAssignmentsApi(supabase) {
         const { error } = await supabase.from('subject_class_assignments').insert(
           toAdd.map((subject_id) => ({ subject_id, class_id: classId, stream_id: streamId || null }))
         );
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
       }
       if (toRemove.length) {
         // Perf fix: this used to be 2 sequential round trips PER removed
@@ -325,7 +325,7 @@ export function createAssignmentsApi(supabase) {
       const { error } = await supabase.from('subject_teacher_assignments').insert({
         subject_id: payload.subject_id, staff_id: payload.staff_id, class_id: payload.class_id, stream_id: payload.stream_id || null
       });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(true);
     },
@@ -338,7 +338,7 @@ export function createAssignmentsApi(supabase) {
       if (filters.class_id) q = q.eq('class_id', filters.class_id);
       if (filters.stream_id) q = q.eq('stream_id', filters.stream_id);
       const { data, error } = await q;
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       const rows = data || [];
 
       const subjectIds = [...new Set(rows.map((r) => r.subject_id).filter(Boolean))];
@@ -386,14 +386,14 @@ export function createAssignmentsApi(supabase) {
         academic_year_id: payload.academic_year_id || null,
         term_id: payload.term_id || null
       }).select().single();
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
 
     async deleteTeacherAssignment(id) {
       const { error } = await supabase.from('subject_teacher_assignments').delete().eq('id', id);
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(true);
     }

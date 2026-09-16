@@ -538,8 +538,7 @@ function renderResultsSendCard(el, data, sel, root, body) {
     // back — this at least turns it into a visible, actionable error.
     console.error('renderResultsSendCard: failed to load results for messaging', e);
     const previewBox = el.querySelector('#msg-results-preview-box');
-    const detail = (e && e.message) ? ` (${e.message})` : '';
-    if (previewBox) previewBox.innerHTML = `⚠️ Something went wrong loading results for this class${esc(detail)}. Try again — if it keeps happening, note the exam and class and let support know.`;
+    if (previewBox) previewBox.innerHTML = '⚠️ Something went wrong loading results for this class. Try again — if it keeps happening, note the exam and class and let support know.';
   });
 }
 

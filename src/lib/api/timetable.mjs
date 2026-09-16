@@ -13,7 +13,7 @@
  * rationale and Timetable_Module_Research_and_Design_Proposal.docx for the
  * research this is built on.
  */
-import { ok, err, createMemoCache, clearAllCaches } from './_util.mjs';
+import { ok, err, friendlyDbError, createMemoCache, clearAllCaches } from './_util.mjs';
 import { generateTimetable, checkCapacity, DEFAULT_PERIODS_PER_WEEK, CONSTRAINT_TYPES } from '../timetable/generate.mjs';
 
 export const TIMETABLE_DAYS_DEFAULT = [1, 2, 3, 4, 5];
@@ -139,7 +139,7 @@ export function createTimetableApi(supabase, settingsApi) {
       async list() {
         return cached('rooms.list', null, async () => {
           const { data, error } = await supabase.from('rooms').select('*').order('name', { ascending: true });
-          if (error) return err(error.message);
+          if (error) return err(friendlyDbError(error));
           return ok(data || []);
         });
       },
@@ -150,12 +150,12 @@ export function createTimetableApi(supabase, settingsApi) {
         const rec = { name, capacity: payload.capacity === '' || payload.capacity === undefined || payload.capacity === null ? null : Number(payload.capacity) || null };
         if (payload.id) {
           const { data, error } = await supabase.from('rooms').update(rec).eq('id', payload.id).select().single();
-          if (error) return err(error.message.includes('duplicate') ? `A room named "${name}" already exists.` : error.message);
+          if (error) return err(error.message.includes('duplicate') ? `A room named "${name}" already exists.` : friendlyDbError(error));
           clearCache();
           return ok(data);
         }
         const { data, error } = await supabase.from('rooms').insert(rec).select().single();
-        if (error) return err(error.message.includes('duplicate') ? `A room named "${name}" already exists.` : error.message);
+        if (error) return err(error.message.includes('duplicate') ? `A room named "${name}" already exists.` : friendlyDbError(error));
         clearCache();
         return ok(data);
       },
@@ -164,7 +164,7 @@ export function createTimetableApi(supabase, settingsApi) {
         // NULL, so removing a room just clears it off any lesson that had
         // it, rather than blocking the delete or cascading data loss.
         const { error } = await supabase.from('rooms').delete().eq('id', id);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         clearCache();
         return ok(true);
       }
@@ -174,7 +174,7 @@ export function createTimetableApi(supabase, settingsApi) {
       async list() {
         return cached('periods.list', null, async () => {
           const { data, error } = await supabase.from('timetable_periods').select('*').order('period_index', { ascending: true });
-          if (error) return err(error.message);
+          if (error) return err(friendlyDbError(error));
           return ok(data || []);
         });
       },
@@ -198,7 +198,7 @@ export function createTimetableApi(supabase, settingsApi) {
         const { error: delError } = await supabase.from('timetable_periods').delete().neq('period_index', -1);
         if (delError) return err(delError.message);
         const { error } = await supabase.from('timetable_periods').insert(rows);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         clearCache();
         return ok(true);
       }
@@ -224,7 +224,7 @@ export function createTimetableApi(supabase, settingsApi) {
       async listForStaff(staffId) {
         if (!staffId) return ok([]);
         const { data, error } = await supabase.from('teacher_unavailability').select('day_of_week, period_index').eq('staff_id', staffId);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(data || []);
       },
       /** Replace-all for one teacher — blocks = [{day_of_week, period_index}]. */
@@ -235,7 +235,7 @@ export function createTimetableApi(supabase, settingsApi) {
         const rows = (blocks || []).map((b) => ({ staff_id: staffId, day_of_week: Number(b.day_of_week), period_index: Number(b.period_index) }));
         if (!rows.length) return ok(true);
         const { error } = await supabase.from('teacher_unavailability').insert(rows);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(true);
       }
     },
@@ -261,7 +261,7 @@ export function createTimetableApi(supabase, settingsApi) {
         }
         const rec = { periods_per_week: periods, double_periods_per_week: doubles };
         const { error } = await supabase.from('subject_class_assignments').update(rec).eq('id', assignmentId);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(true);
       }
     },
@@ -277,7 +277,7 @@ export function createTimetableApi(supabase, settingsApi) {
     constraints: {
       async list() {
         const { data, error } = await supabase.from('timetable_constraints').select('*').order('created_at', { ascending: true });
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(data || []);
       },
       async save(payload) {
@@ -317,17 +317,17 @@ export function createTimetableApi(supabase, settingsApi) {
         const rec = { type, enabled, config: cleanConfig };
         if (payload.id) {
           const { error } = await supabase.from('timetable_constraints').update(rec).eq('id', payload.id);
-          if (error) return err(error.message);
+          if (error) return err(friendlyDbError(error));
           return ok(true);
         }
         const { data, error } = await supabase.from('timetable_constraints').insert(rec).select().single();
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(data);
       },
       async remove(id) {
         if (!id) return err('Missing constraint.');
         const { error } = await supabase.from('timetable_constraints').delete().eq('id', id);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(true);
       }
     },
@@ -352,7 +352,7 @@ export function createTimetableApi(supabase, settingsApi) {
           if (filters.version_number) q = q.eq('version_number', Number(filters.version_number));
           else q = q.eq('is_active', true);
           const { data, error } = await q;
-          if (error) return err(error.message);
+          if (error) return err(friendlyDbError(error));
           const rows = (data || []).map((r) => ({
             ...r,
             subject_name: r.subjects ? r.subjects.name : '',
@@ -407,14 +407,14 @@ export function createTimetableApi(supabase, settingsApi) {
         };
         if (payload.id) {
           const { error } = await supabase.from('timetable_entries').update(rec).eq('id', payload.id);
-          if (error) return err(error.message);
+          if (error) return err(friendlyDbError(error));
           clearCache();
           return ok(true);
         }
         rec.version_number = await activeVersionNumber(supabase, payload.academic_year_id, payload.term_id);
         rec.is_active = true;
         const { error } = await supabase.from('timetable_entries').insert(rec);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         clearCache();
         return ok(true);
       },
@@ -422,7 +422,7 @@ export function createTimetableApi(supabase, settingsApi) {
       async deleteEntry(id) {
         if (!id) return err('Missing entry.');
         const { error } = await supabase.from('timetable_entries').delete().eq('id', id);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         clearCache();
         return ok(true);
       },
@@ -434,7 +434,7 @@ export function createTimetableApi(supabase, settingsApi) {
       async clearScope(academicYearId, termId) {
         if (!academicYearId || !termId) return err('Missing academic year or term.');
         const { error } = await supabase.from('timetable_entries').delete().eq('academic_year_id', academicYearId).eq('term_id', termId);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         clearCache();
         return ok(true);
       },
@@ -448,7 +448,7 @@ export function createTimetableApi(supabase, settingsApi) {
         const { data, error } = await supabase.from('timetable_entries')
           .select('version_number, is_active, created_at')
           .eq('academic_year_id', academicYearId).eq('term_id', termId);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         const byVersion = {};
         (data || []).forEach((r) => {
           const v = Number(r.version_number) || 1;
@@ -570,7 +570,7 @@ export function createTimetableApi(supabase, settingsApi) {
       if (entries.length) {
         const rows = entries.map((e) => ({ ...e, academic_year_id: academicYearId, term_id: termId, version_number: nextVersion, is_active: true }));
         const { error } = await supabase.from('timetable_entries').insert(rows);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
       }
 
       const keepVersions = [...existingVersions, nextVersion].sort((a, b) => b - a).slice(0, 3);

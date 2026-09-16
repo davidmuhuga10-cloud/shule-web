@@ -14,26 +14,26 @@
  * "text the admin" notification afterward (sendAdminNotification below),
  * same reasoning as messaging.mjs's send().
  */
-import { ok, err } from './_util.mjs';
+import { ok, err, friendlyDbError } from './_util.mjs';
 import { getAccessToken } from '../auth.js';
 
 export function createSmsCreditsApi(supabase) {
   return {
     async wallet() {
       const { data, error } = await supabase.from('sms_wallets').select('*').maybeSingle();
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || { balance: 0 });
     },
 
     async requests() {
       const { data, error } = await supabase.from('sms_credit_requests').select('*').order('created_at', { ascending: false });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
 
     async ledger() {
       const { data, error } = await supabase.from('sms_credit_ledger').select('*').order('created_at', { ascending: false });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
 
@@ -49,7 +49,7 @@ export function createSmsCreditsApi(supabase) {
         .from('sms_credit_requests')
         .insert({ requested_credits, amount_paid: amount_paid || null, payment_message: payment_message.trim() })
         .select('id').single();
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
 
       try {
         const token = await getAccessToken();

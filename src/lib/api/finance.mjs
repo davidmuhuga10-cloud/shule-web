@@ -22,7 +22,7 @@
  * clears every OTHER cached module too, not just this one, since e.g. a
  * Finance write can affect a student's balance shown elsewhere.
  */
-import { ok, err, fromResult, createMemoCache, clearAllCaches } from './_util.mjs';
+import { ok, err, friendlyDbError, fromResult, createMemoCache, clearAllCaches } from './_util.mjs';
 
 export function createFinanceApi(supabase) {
   // Scoped per createFinanceApi() CALL, not module-level — production only
@@ -34,7 +34,7 @@ export function createFinanceApi(supabase) {
   const voteHeads = {
     async list() {
       const { data, error } = await supabase.from('finance_vote_heads').select('*').order('priority').order('name');
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     async save(payload) {
@@ -62,7 +62,7 @@ export function createFinanceApi(supabase) {
   const routes = {
     async list() {
       const { data, error } = await supabase.from('finance_routes').select('*').order('name');
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     async save(payload) {
@@ -86,7 +86,7 @@ export function createFinanceApi(supabase) {
         p_academic_year_id: academicYearId, p_term_id: termId,
         p_amount_override: (amountOverride === undefined || amountOverride === null || amountOverride === '') ? null : Number(amountOverride)
       });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
@@ -122,7 +122,7 @@ export function createFinanceApi(supabase) {
     async forStudent(studentId, academicYearId, termId) {
       const { data, error } = await supabase.from('finance_student_routes').select('*')
         .eq('student_id', studentId).eq('academic_year_id', academicYearId).eq('term_id', termId).maybeSingle();
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || null);
     },
     /** Round 2 §8 — the roster of students currently assigned to one route
@@ -134,7 +134,7 @@ export function createFinanceApi(supabase) {
       if (academicYearId) q = q.eq('academic_year_id', academicYearId);
       if (termId) q = q.eq('term_id', termId);
       const { data, error } = await q;
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     /** Round 2 §9 — every student's route assignment for a term, for the
@@ -146,7 +146,7 @@ export function createFinanceApi(supabase) {
       if (academicYearId) q = q.eq('academic_year_id', academicYearId);
       if (termId) q = q.eq('term_id', termId);
       const { data, error } = await q;
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     /** Round 2 §8 — bulk-invoices every student on a route for a term,
@@ -156,7 +156,7 @@ export function createFinanceApi(supabase) {
       const { data, error } = await supabase.rpc('finance_invoice_route', {
         p_route_id: routeId, p_academic_year_id: academicYearId, p_term_id: termId
       });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
@@ -166,7 +166,7 @@ export function createFinanceApi(supabase) {
       const { data, error } = await supabase.rpc('finance_route_invoiced_students', {
         p_route_id: routeId, p_academic_year_id: academicYearId, p_term_id: termId
       });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok((data || []).map((r) => r.student_id));
     }
   };
@@ -177,7 +177,7 @@ export function createFinanceApi(supabase) {
       if (academicYearId) q = q.eq('academic_year_id', academicYearId);
       if (termId) q = q.eq('term_id', termId);
       const { data, error } = await q;
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     /** Design standard rollout round 2: the Un-invoice button should only
@@ -189,7 +189,7 @@ export function createFinanceApi(supabase) {
      *  it to this school like every other read here. */
     async invoicedStructureIds() {
       const { data, error } = await supabase.from('finance_invoice_items').select('fee_structure_id').not('fee_structure_id', 'is', null);
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok([...new Set((data || []).map((r) => r.fee_structure_id))]);
     },
     /** payload: { id?, academic_year_id, term_id, name, class_ids: [], items: [{vote_head_id, amount}] }
@@ -215,7 +215,7 @@ export function createFinanceApi(supabase) {
         p_class_ids: payload.class_ids,
         p_items: items
       });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok({ id: data });
     },
@@ -224,7 +224,7 @@ export function createFinanceApi(supabase) {
      *  covers both "new term, invoice Grade 1/2" and "new mid-term joiner". */
     async generateInvoices(feeStructureId, studentIds) {
       const { data, error } = await supabase.rpc('finance_generate_invoices', { p_fee_structure_id: feeStructureId, p_student_ids: studentIds || null });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
@@ -234,7 +234,7 @@ export function createFinanceApi(supabase) {
      *  comment in migrations/0032 for why). */
     async uninvoice(feeStructureId) {
       const { data, error } = await supabase.rpc('finance_uninvoice_structure', { p_fee_structure_id: feeStructureId });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     }
@@ -245,7 +245,7 @@ export function createFinanceApi(supabase) {
       const { data, error } = await supabase.from('finance_invoices')
         .select('*, finance_invoice_items(*, finance_vote_heads(name))')
         .eq('student_id', studentId).order('created_at');
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     /** Direct correction of a non-transport invoice line (e.g. a wrong fee
@@ -267,13 +267,13 @@ export function createFinanceApi(supabase) {
         p_student_id: studentId, p_vote_head_id: voteHeadId, p_amount: Number(amount), p_reason: reason || null,
         p_academic_year_id: academicYearId, p_term_id: termId
       });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
     async forStudent(studentId) {
       const { data, error } = await supabase.from('finance_debit_notes').select('*, finance_vote_heads(name)').eq('student_id', studentId).order('created_at');
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     /** School-wide debit-note trail (live feedback: "no trail of debit and
@@ -292,7 +292,7 @@ export function createFinanceApi(supabase) {
       if (opts.status === 'active') q = q.is('reversed_at', null);
       if (opts.status === 'reversed') q = q.not('reversed_at', 'is', null);
       const { data, error } = await q;
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     /** Next Sprint 2 §12: reverse a wrongly-entered debit note — inserts a
@@ -301,7 +301,7 @@ export function createFinanceApi(supabase) {
      *  schema.sql for the full rationale. */
     async reverse(noteId, reason) {
       const { data, error } = await supabase.rpc('finance_reverse_debit_note', { p_note_id: noteId, p_reason: reason || null });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     }
@@ -313,13 +313,13 @@ export function createFinanceApi(supabase) {
         p_student_id: studentId, p_vote_head_id: voteHeadId, p_amount: Number(amount), p_reason: reason || null,
         p_academic_year_id: academicYearId, p_term_id: termId
       });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
     async forStudent(studentId) {
       const { data, error } = await supabase.from('finance_credit_notes').select('*, finance_vote_heads(name)').eq('student_id', studentId).order('created_at');
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     /** School-wide credit-note trail — same shape/filters as
@@ -334,14 +334,14 @@ export function createFinanceApi(supabase) {
       if (opts.status === 'active') q = q.is('reversed_at', null);
       if (opts.status === 'reversed') q = q.not('reversed_at', 'is', null);
       const { data, error } = await q;
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     /** Same idea as debitNotes.reverse() above, just the opposite direction
      *  — inserts a matching debit note and flags this credit note reversed. */
     async reverse(noteId, reason) {
       const { data, error } = await supabase.rpc('finance_reverse_credit_note', { p_note_id: noteId, p_reason: reason || null });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     }
@@ -362,7 +362,7 @@ export function createFinanceApi(supabase) {
       if (opts.academic_year_id) q = q.eq('academic_year_id', opts.academic_year_id);
       if (opts.term_id) q = q.eq('term_id', opts.term_id);
       const { data, error } = await q;
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     // inKindDescription: Finance Expansion brief item 1.3 — only meaningful
@@ -374,19 +374,19 @@ export function createFinanceApi(supabase) {
         p_student_id: studentId, p_amount: Number(amount), p_mode: mode, p_reference: reference || null, p_notes: notes || null,
         p_in_kind_description: inKindDescription || null
       });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
     async reverse(collectionId, reason) {
       const { data, error } = await supabase.rpc('finance_reverse_collection', { p_collection_id: collectionId, p_reason: reason || null });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
     async transfer(collectionId, toStudentId) {
       const { data, error } = await supabase.rpc('finance_transfer_collection', { p_collection_id: collectionId, p_to_student_id: toStudentId });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
@@ -394,7 +394,7 @@ export function createFinanceApi(supabase) {
      *  its receipt, and reprinted identically for any past receipt. */
     async allocations(collectionId) {
       const { data, error } = await supabase.from('finance_collection_allocations').select('*, finance_vote_heads(name)').eq('collection_id', collectionId);
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     }
   };
@@ -407,7 +407,7 @@ export function createFinanceApi(supabase) {
         .select('id, admission_no, full_name, gender, class_id, stream_id, guardian_name, guardian_contact, classes(name), streams(name)')
         .or(`full_name.ilike.%${q}%,admission_no.ilike.%${q}%`)
         .eq('status', 'active').order('full_name').limit(30);
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     /** Transport bulk-assign ("add students by class" — live feedback:
@@ -418,7 +418,7 @@ export function createFinanceApi(supabase) {
       const { data, error } = await supabase.from('students')
         .select('id, admission_no, full_name, gender, class_id, classes(name)')
         .eq('class_id', classId).eq('status', 'active').order('full_name');
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     /** "Whole school" option in the same bulk picker — every active student,
@@ -427,12 +427,12 @@ export function createFinanceApi(supabase) {
       const { data, error } = await supabase.from('students')
         .select('id, admission_no, full_name, gender, class_id, classes(name)')
         .eq('status', 'active').order('full_name');
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     async balance(studentId) {
       const { data, error } = await supabase.rpc('finance_student_balance', { p_student_id: studentId });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data);
     },
     /** Report Forms' optional fee-balance box (Permissions > Report Forms >
@@ -446,12 +446,12 @@ export function createFinanceApi(supabase) {
      *  their parent) and returns only the single headline number. */
     async reportCardBalance(studentId) {
       const { data, error } = await supabase.rpc('report_card_fee_balance', { p_student_id: studentId });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data);
     },
     async openingBalance(studentId, academicYearId) {
       const { data, error } = await supabase.from('finance_opening_balances').select('*').eq('student_id', studentId).eq('academic_year_id', academicYearId).maybeSingle();
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || null);
     },
     /** POST-BUILD AUDIT (Task #49) — the Opening Balances template download
@@ -461,7 +461,7 @@ export function createFinanceApi(supabase) {
      *  One query for the whole year, mapped by student_id client-side. */
     async openingBalancesForYear(academicYearId) {
       const { data, error } = await supabase.from('finance_opening_balances').select('student_id, amount').eq('academic_year_id', academicYearId);
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       const byStudent = {};
       (data || []).forEach((r) => { byStudent[r.student_id] = r.amount; });
       return ok(byStudent);
@@ -473,7 +473,7 @@ export function createFinanceApi(supabase) {
       }));
       if (!payload.length) return err('No valid rows to upload — each row needs a matched student and a numeric amount.');
       const { data, error } = await supabase.from('finance_opening_balances').upsert(payload, { onConflict: 'student_id,academic_year_id' }).select();
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data || []);
     },
@@ -490,7 +490,7 @@ export function createFinanceApi(supabase) {
         p_term_id: termId || null,
         p_reason: reason || null
       });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     }
@@ -500,33 +500,33 @@ export function createFinanceApi(supabase) {
     async dashboard(academicYearId, termId) {
       return cached('dashboard', [academicYearId, termId], async () => {
         const { data, error } = await supabase.rpc('finance_dashboard', { p_academic_year_id: academicYearId || null, p_term_id: termId || null });
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(data);
       });
     },
     async classBalances(classId, minBalance) {
       const { data, error } = await supabase.rpc('finance_class_balances', { p_class_id: classId || null, p_min_balance: minBalance === undefined || minBalance === null || minBalance === '' ? null : Number(minBalance) });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     async voteHeadCollections(academicYearId, termId) {
       return cached('voteHeadCollections', [academicYearId, termId], async () => {
         const { data, error } = await supabase.rpc('finance_vote_head_collections', { p_academic_year_id: academicYearId || null, p_term_id: termId || null });
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(data || []);
       });
     },
     async cashbook(from, to) {
       return cached('cashbook', [from, to], async () => {
         const { data, error } = await supabase.rpc('finance_cashbook', { p_from: from, p_to: to });
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(data || []);
       });
     },
     async trialBalance(academicYearId, termId) {
       return cached('trialBalance', [academicYearId, termId], async () => {
         const { data, error } = await supabase.rpc('finance_trial_balance', { p_academic_year_id: academicYearId || null, p_term_id: termId || null });
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(data || []);
       });
     },
@@ -538,7 +538,7 @@ export function createFinanceApi(supabase) {
       const { data, error } = await supabase.rpc('finance_vote_head_student_balances', {
         p_vote_head_id: voteHeadId, p_academic_year_id: academicYearId || null, p_term_id: termId || null
       });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     }
   };
@@ -550,7 +550,7 @@ export function createFinanceApi(supabase) {
   const accountTypes = {
     async list() {
       const { data, error } = await supabase.from('finance_account_types').select('*').order('is_default', { ascending: false }).order('name');
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     async save(payload) {
@@ -565,7 +565,7 @@ export function createFinanceApi(supabase) {
   const accounts = {
     async list() {
       const { data, error } = await supabase.from('finance_accounts').select('*, finance_account_types(name)').order('name');
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     async save(payload) {
@@ -591,7 +591,7 @@ export function createFinanceApi(supabase) {
   const suppliers = {
     async list() {
       const { data, error } = await supabase.from('finance_suppliers').select('*').order('name');
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     async save(payload) {
@@ -611,7 +611,7 @@ export function createFinanceApi(supabase) {
   const lpos = {
     async list() {
       const { data, error } = await supabase.from('finance_lpos').select('*, finance_suppliers(name)').order('created_at', { ascending: false });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     /** Only 'pending' LPOs make sense to attach a new expense to — an
@@ -619,7 +619,7 @@ export function createFinanceApi(supabase) {
     async pendingForSupplier(supplierId) {
       if (!supplierId) return ok([]);
       const { data, error } = await supabase.from('finance_lpos').select('*').eq('supplier_id', supplierId).eq('status', 'pending').order('created_at', { ascending: false });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     async record(supplierId, description, amount, issuedDate) {
@@ -627,13 +627,13 @@ export function createFinanceApi(supabase) {
       const { data, error } = await supabase.rpc('finance_record_lpo', {
         p_supplier_id: supplierId, p_description: description || null, p_amount: Number(amount) || 0, p_issued_date: issuedDate || null
       });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
     async cancel(id) {
       const { error } = await supabase.from('finance_lpos').update({ status: 'cancelled' }).eq('id', id).eq('status', 'pending');
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(true);
     }
@@ -650,7 +650,7 @@ export function createFinanceApi(supabase) {
       if (filters.from) q = q.gte('expense_date', filters.from);
       if (filters.to) q = q.lte('expense_date', filters.to);
       const { data, error } = await q;
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     async record(payload) {
@@ -661,7 +661,7 @@ export function createFinanceApi(supabase) {
         p_vote_head_id: payload.vote_head_id, p_amount: Number(payload.amount), p_description: payload.description || null,
         p_supplier_id: payload.supplier_id || null, p_lpo_id: payload.lpo_id || null, p_expense_date: payload.expense_date || null
       });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     }
@@ -671,7 +671,7 @@ export function createFinanceApi(supabase) {
       const { data, error } = await supabase.from('finance_payment_vouchers')
         .select('*, finance_expenses(expense_no, description, finance_suppliers(name)), finance_accounts(name)')
         .order('created_at', { ascending: false });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     async record(expenseId, accountId, amount, paymentDate, paymentMethod, notes) {
@@ -682,7 +682,7 @@ export function createFinanceApi(supabase) {
         p_expense_id: expenseId, p_account_id: accountId, p_amount: Number(amount),
         p_payment_date: paymentDate || null, p_payment_method: paymentMethod || 'bank', p_notes: notes || null
       });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
@@ -693,7 +693,7 @@ export function createFinanceApi(supabase) {
     async reverse(voucherId, reason) {
       if (!voucherId) return err('Missing payment voucher.');
       const { data, error } = await supabase.rpc('finance_reverse_payment_voucher', { p_voucher_id: voucherId, p_reason: reason || null });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     }
@@ -701,7 +701,7 @@ export function createFinanceApi(supabase) {
   const supplierBalances = {
     async list() {
       const { data, error } = await supabase.rpc('finance_supplier_balances');
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     }
   };
@@ -715,7 +715,7 @@ export function createFinanceApi(supabase) {
   const payrollProfiles = {
     async list() {
       const { data, error } = await supabase.from('finance_payroll_profiles').select('*, staff(full_name, role)').order('created_at', { ascending: false });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     async save(payload) {
@@ -737,12 +737,12 @@ export function createFinanceApi(supabase) {
   const payrollRuns = {
     async list() {
       const { data, error } = await supabase.from('finance_payroll_runs').select('*, finance_expenses(expense_no, amount, paid_amount, status)').order('period_year', { ascending: false }).order('period_month', { ascending: false });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     async items(runId) {
       const { data, error } = await supabase.from('finance_payroll_items').select('*, staff(full_name)').eq('payroll_run_id', runId).order('created_at');
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     /** For "open an individual employee and view their salary history
@@ -753,31 +753,31 @@ export function createFinanceApi(supabase) {
         .select('*, finance_payroll_runs!inner(period_year, period_month, status)')
         .eq('staff_id', staffId).eq('finance_payroll_runs.status', 'finalized')
         .order('created_at', { ascending: false });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     async create(periodYear, periodMonth) {
       const { data, error } = await supabase.rpc('finance_payroll_create_run', { p_period_year: periodYear, p_period_month: periodMonth });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
     /** adjustments: [{label, kind: 'allowance'|'deduction', amount}] */
     async updateItem(itemId, adjustments) {
       const { data, error } = await supabase.rpc('finance_payroll_update_item', { p_item_id: itemId, p_adjustments: adjustments || [] });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
     async finalize(runId) {
       const { data, error } = await supabase.rpc('finance_payroll_finalize', { p_run_id: runId });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
     async reverse(runId, reason) {
       const { data, error } = await supabase.rpc('finance_payroll_reverse', { p_run_id: runId, p_reason: reason || null });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     }
@@ -788,12 +788,12 @@ export function createFinanceApi(supabase) {
      *  cheap no-op on every subsequent call (see migrations/0031). */
     async bootstrap() {
       const { error } = await supabase.rpc('finance_bootstrap');
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(true);
     },
     async carryForwardBalances(fromYearId, toYearId) {
       const { data, error } = await supabase.rpc('finance_carry_forward_balances', { p_from_year_id: fromYearId, p_to_year_id: toYearId });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },

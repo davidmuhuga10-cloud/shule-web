@@ -14,7 +14,7 @@
  * persisted template (the receipt SMS) and this phase doesn't need a
  * second one to be useful.
  */
-import { esc, options, toast, loader } from '../app.js';
+import { esc, options, toast, loader, withBusy } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { fillTemplate } from './financePreferences.mjs';
 
@@ -129,11 +129,17 @@ function renderStudentTarget(targetEl, bodyEl, schoolName) {
     `;
     previewEl.querySelector('#fm-send-one').onclick = async () => {
       const btn = previewEl.querySelector('#fm-send-one');
-      btn.disabled = true; btn.textContent = 'Sending…';
-      const res = await Db.messaging.send({ scope: 'individual_student', student_id: selected.id, body: fillTemplate(bodyEl.value, { student: selected.full_name, balance: balance.toLocaleString(), school: schoolName }) });
-      btn.disabled = false; btn.textContent = 'Send SMS';
-      if (!res.ok) { toast(res.message, 'err'); return; }
-      toast(`Sent to ${selected.full_name}'s guardian.`, 'ok');
+      // Cleanup audit: this used to disable/re-enable the button by hand
+      // with no try/finally, so a genuine network blip mid-send (rather
+      // than a normal {ok:false} reply) left "Sending…" stuck forever with
+      // no way to retry short of leaving the screen. withBusy() (already
+      // used everywhere else in the app for exactly this) has that safety
+      // net built in.
+      await withBusy(btn, async () => {
+        const res = await Db.messaging.send({ scope: 'individual_student', student_id: selected.id, body: fillTemplate(bodyEl.value, { student: selected.full_name, balance: balance.toLocaleString(), school: schoolName }) });
+        if (!res.ok) { toast(res.message, 'err'); return; }
+        toast(`Sent to ${selected.full_name}'s guardian.`, 'ok');
+      }, 'Sending…');
     };
   };
 
@@ -192,16 +198,18 @@ function renderClassTarget(targetEl, bodyEl, classes, schoolName, sel) {
     `;
     previewEl.querySelector('#fm-send-class').onclick = async () => {
       const btn = previewEl.querySelector('#fm-send-class');
-      btn.disabled = true; const label = btn.textContent; btn.textContent = 'Sending…';
-      const classObj = classes.find((c) => c.id === classId);
-      const messageRecipients = recipients.map((r) => ({
-        student_id: r.student_id, phone: r.guardian_contact,
-        body: fillTemplate(bodyEl.value, { student: r.full_name, balance: Number(r.balance).toLocaleString(), school: schoolName })
-      }));
-      const res = await Db.messaging.send({ scope: 'personalized', scope_label: `Fee reminder — ${classObj ? classObj.name : 'Class'}`, recipients: messageRecipients });
-      btn.disabled = false; btn.textContent = label;
-      if (!res.ok) { toast(res.message, 'err'); return; }
-      toast(`Sent to ${messageRecipients.length} guardian(s).`, 'ok');
+      // See the same note on #fm-send-one above — withBusy() now guards
+      // this one too, so a network blip mid-send can't leave it stuck.
+      await withBusy(btn, async () => {
+        const classObj = classes.find((c) => c.id === classId);
+        const messageRecipients = recipients.map((r) => ({
+          student_id: r.student_id, phone: r.guardian_contact,
+          body: fillTemplate(bodyEl.value, { student: r.full_name, balance: Number(r.balance).toLocaleString(), school: schoolName })
+        }));
+        const res = await Db.messaging.send({ scope: 'personalized', scope_label: `Fee reminder — ${classObj ? classObj.name : 'Class'}`, recipients: messageRecipients });
+        if (!res.ok) { toast(res.message, 'err'); return; }
+        toast(`Sent to ${messageRecipients.length} guardian(s).`, 'ok');
+      }, 'Sending…');
     };
   };
 

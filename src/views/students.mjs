@@ -394,7 +394,7 @@ async function openStudentModal(root, classes, filters, existing, onSaved) {
           if (prov && prov.ok && prov.defaultPassword) {
             toast(`Student saved. Login created — default password: ${prov.defaultPassword}`, 'ok');
           } else {
-            toast('Student saved. (Login provisioning will be available once the Netlify function is deployed.)', 'warn');
+            toast('Student saved. (Login provisioning will be available shortly.)', 'warn');
           }
         } else {
           toast('Student saved.', 'ok');

@@ -279,7 +279,7 @@ function render(root, state) {
     }).catch((e) => {
       console.error('cell edit modal: failed to load stream subjects', e);
       const bodyEl = document.getElementById('tt-modal-body');
-      if (bodyEl) bodyEl.innerHTML = `⚠️ Couldn't load subjects for this stream${e && e.message ? ` (${e.message})` : ''}. Close and try again.`;
+      if (bodyEl) bodyEl.innerHTML = "⚠️ Couldn't load subjects for this stream. Close and try again.";
     });
   }
 }

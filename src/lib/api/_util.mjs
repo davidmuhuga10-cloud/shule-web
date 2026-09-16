@@ -59,9 +59,35 @@ export function ok(data, extra) {
 export function err(message) {
   return { ok: false, message };
 }
+/** Cleanup audit finding: "customers shouldn't know we are using Netlify [or
+ *  Supabase/Postgres]" — fromResult() below used to pass a raw Supabase/
+ *  Postgres error.message straight through to whatever toast/screen a view
+ *  puts it in (~150 call sites app-wide all inherited this from one place).
+ *  That can be a literal schema/constraint name ("duplicate key value
+ *  violates unique constraint students_school_id_admission_no_key"), a raw
+ *  network message ("Failed to fetch"), or anything else Postgres/Supabase/
+ *  the browser happens to phrase internally — none of which a school admin
+ *  should ever see. This translates the handful of error CODES that
+ *  genuinely happen during normal use (duplicate entry, a missing linked
+ *  record, a required field, an invalid value, a permissions problem) into
+ *  plain text, and falls back to one generic, safe message for anything
+ *  else — never the raw text. Deliberately narrow in scope: it only touches
+ *  fromResult() (the one place a raw Supabase {data,error} pair gets
+ *  wrapped) — a developer-authored err('some specific friendly message')
+ *  call elsewhere (e.g. inventory.mjs's own foreign-key message) was never
+ *  raw backend text to begin with, and is untouched. */
+export function friendlyDbError(error) {
+  const code = error && error.code;
+  if (code === '23505') return 'That already exists — check for a duplicate before saving again.';
+  if (code === '23503') return "This can't be saved because something it depends on is missing or was removed — refresh the page and try again.";
+  if (code === '23502') return 'A required field is missing — please fill in everything marked required and try again.';
+  if (code === '23514') return "That value isn't allowed here — please check it and try again.";
+  if (code === '42501' || code === 'PGRST301') return "You don't have permission to do that.";
+  return 'Something went wrong saving this. Please try again in a moment.';
+}
 /** Wrap a Supabase {data,error} result into our {ok,data|message} shape. */
 export function fromResult({ data, error }, extra) {
-  if (error) return err(error.message || String(error));
+  if (error) return err(friendlyDbError(error));
   return ok(data, extra);
 }
 

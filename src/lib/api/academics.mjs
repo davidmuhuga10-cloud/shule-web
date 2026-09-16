@@ -8,7 +8,7 @@
  * before, to keep view code familiar.
  * ----------------------------------------------------------------------------
  */
-import { ok, err, fromResult, createMemoCache, clearAllCaches } from './_util.mjs';
+import { ok, err, friendlyDbError, fromResult, createMemoCache, clearAllCaches } from './_util.mjs';
 import { CBC_LEVELS, STANDARD_CLASS_LEVELS, CBC_SUBJECTS, levelBucketForClassName, PRI_JSS_CLASS_LEVELS, SENIOR_CLASS_LEVELS, classLevelsForCategory, PATHWAYS } from './cbcDefaults.mjs';
 import { seedDefaultSubjectsForNewStream } from './assignments.mjs';
 import { plainNameError } from '../validators.mjs';
@@ -58,13 +58,13 @@ export function createAcademicsApi(supabase) {
         let saved;
         if (payload.id) {
           const { data, error } = await supabase.from('academic_years').update(rec).eq('id', payload.id).select().single();
-          if (error) return err(error.message);
+          if (error) return err(friendlyDbError(error));
           saved = data;
         } else {
           const { data: dup } = await supabase.from('academic_years').select('id').eq('name', name).maybeSingle();
           if (dup) return err(`An academic year named "${name}" already exists.`);
           const { data, error } = await supabase.from('academic_years').insert(rec).select().single();
-          if (error) return err(error.message);
+          if (error) return err(friendlyDbError(error));
           saved = data;
         }
         if (rec.status === 'active') {
@@ -77,7 +77,7 @@ export function createAcademicsApi(supabase) {
         const { count } = await supabase.from('terms').select('id', { count: 'exact', head: true }).eq('academic_year_id', id);
         if (count > 0) return err('This academic year has terms linked to it. Delete those terms first.');
         const { error } = await supabase.from('academic_years').delete().eq('id', id);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         clearCache();
         return ok(true);
       }
@@ -89,7 +89,7 @@ export function createAcademicsApi(supabase) {
           let q = supabase.from('terms').select('*, academic_years(name)');
           if (academicYearId) q = q.eq('academic_year_id', academicYearId);
           const { data, error } = await q.order('name', { ascending: true });
-          if (error) return err(error.message);
+          if (error) return err(friendlyDbError(error));
           const rows = (data || []).map((t) => ({
             ...t,
             academic_year_name: t.academic_years ? t.academic_years.name : ''
@@ -111,14 +111,14 @@ export function createAcademicsApi(supabase) {
         let saved;
         if (payload.id) {
           const { data, error } = await supabase.from('terms').update(rec).eq('id', payload.id).select().single();
-          if (error) return err(error.message);
+          if (error) return err(friendlyDbError(error));
           saved = data;
         } else {
           const { data: dup } = await supabase.from('terms')
             .select('id').eq('academic_year_id', payload.academic_year_id).eq('name', payload.name).maybeSingle();
           if (dup) return err(`${payload.name} already exists for that academic year.`);
           const { data, error } = await supabase.from('terms').insert(rec).select().single();
-          if (error) return err(error.message);
+          if (error) return err(friendlyDbError(error));
           saved = data;
         }
         if (rec.status === 'active') {
@@ -129,7 +129,7 @@ export function createAcademicsApi(supabase) {
       },
       async remove(id) {
         const { error } = await supabase.from('terms').delete().eq('id', id);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         clearCache();
         return ok(true);
       }
@@ -147,7 +147,7 @@ export function createAcademicsApi(supabase) {
       async list() {
         return cached('classes.list', null, async () => {
           const { data, error } = await supabase.from('classes').select('*');
-          if (error) return err(error.message);
+          if (error) return err(friendlyDbError(error));
           const rows = (data || []).slice().sort((a, b) => {
             const ao = Number(a.level_order) || 0, bo = Number(b.level_order) || 0;
             if (ao !== bo) return ao - bo;
@@ -231,13 +231,13 @@ export function createAcademicsApi(supabase) {
         let saved;
         if (payload.id) {
           const { data, error } = await supabase.from('classes').update(rec).eq('id', payload.id).select().single();
-          if (error) return err(error.message);
+          if (error) return err(friendlyDbError(error));
           saved = data;
         } else {
           const { data: dup } = await supabase.from('classes').select('id').eq('name', name).maybeSingle();
           if (dup) return err('That class already exists.');
           const { data, error } = await supabase.from('classes').insert(rec).select().single();
-          if (error) return err(error.message);
+          if (error) return err(friendlyDbError(error));
           saved = data;
         }
 
@@ -310,7 +310,7 @@ export function createAcademicsApi(supabase) {
         if (count > 0) return err('Students are enrolled in this class. Move or remove them first.');
         // Streams cascade-delete automatically (ON DELETE CASCADE in schema.sql).
         const { error } = await supabase.from('classes').delete().eq('id', id);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         clearCache();
         return ok(true);
       }
@@ -322,7 +322,7 @@ export function createAcademicsApi(supabase) {
         let q = supabase.from('streams').select('*, classes(name)');
         if (classId) q = q.eq('class_id', classId);
         const { data, error } = await q;
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         const rows = (data || []).map((s) => ({ ...s, class_name: s.classes ? s.classes.name : '', student_count: 0 }));
         // System Fixes brief §13 (site-wide performance under load): this
         // used to fire one student-count round trip per stream (even
@@ -386,12 +386,12 @@ export function createAcademicsApi(supabase) {
           // already-chosen pathway when promptAddStream's rename flow (no
           // pathway field at all) calls this.
           const { data, error } = await supabase.from('streams').update({ class_id: rec.class_id, name: rec.name, description: rec.description }).eq('id', payload.id).select().single();
-          if (error) return err(error.message);
+          if (error) return err(friendlyDbError(error));
           clearCache();
           return ok(data);
         }
         const { data, error } = await supabase.from('streams').insert(rec).select().single();
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         // Brief §4.2: seed the correct default CBC subjects for this stream's
         // grade level right away (best-effort — a lookup/insert hiccup here
         // shouldn't fail the stream creation itself; the admin can still add
@@ -426,7 +426,7 @@ export function createAcademicsApi(supabase) {
           }
         }
         const { error } = await supabase.from('streams').delete().eq('id', id);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         clearCache();
         return ok(true);
       }
@@ -436,7 +436,7 @@ export function createAcademicsApi(supabase) {
       async list() {
         return cached('subjects.list', null, async () => {
         const { data, error } = await supabase.from('subjects').select('*');
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         const order = {};
         CBC_LEVELS.forEach((l, i) => { order[l] = i; });
         const rows = (data || []).slice().sort((a, b) => {
@@ -460,7 +460,7 @@ export function createAcademicsApi(supabase) {
         const rec = { name, code: payload.code || '', level, pathway, description: payload.description || '' };
         if (payload.id) {
           const { data, error } = await supabase.from('subjects').update(rec).eq('id', payload.id).select().single();
-          if (error) return err(error.message);
+          if (error) return err(friendlyDbError(error));
           clearCache();
           return ok(data);
         }
@@ -469,14 +469,14 @@ export function createAcademicsApi(supabase) {
         const { data: dup } = await dupQuery.maybeSingle();
         if (dup) return err('That subject already exists for this level.');
         const { data, error } = await supabase.from('subjects').insert(rec).select().single();
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         clearCache();
         return ok(data);
       },
       async remove(id) {
         // subject_class_assignments / subject_teacher_assignments cascade-delete automatically.
         const { error } = await supabase.from('subjects').delete().eq('id', id);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         clearCache();
         return ok(true);
       },
@@ -489,7 +489,7 @@ export function createAcademicsApi(supabase) {
             ignoreDuplicates: true
           })
           .select();
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         clearCache();
         return ok(null, { added: (data || []).length });
       }
@@ -518,7 +518,7 @@ export function createAcademicsApi(supabase) {
         if (subjectId) q = q.eq('subject_id', subjectId);
         if (classId) q = q.eq('class_id', classId);
         const { data, error } = await q.order('paper_no', { ascending: true });
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(data || []);
       },
       /** Every configured paper across every subject AND every class for
@@ -528,7 +528,7 @@ export function createAcademicsApi(supabase) {
       async listForExam(examId) {
         if (!examId) return ok([]);
         const { data, error } = await supabase.from('subject_papers').select('*').eq('exam_id', examId).order('paper_no', { ascending: true });
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(data || []);
       },
       /** Replace the WHOLE paper list for one (exam, subject, CLASS) in a
@@ -644,17 +644,17 @@ export function createAcademicsApi(supabase) {
 
         for (const r of toRemove) {
           const { error } = await supabase.from('subject_papers').delete().eq('id', r.id);
-          if (error) return err(error.message);
+          if (error) return err(friendlyDbError(error));
         }
 
         for (const p of papers) {
           const rec = { name: p.name, paper_no: p.paper_no, out_of: p.out_of, weight: p.ratio / 100 };
           if (p.id) {
             const { error } = await supabase.from('subject_papers').update(rec).eq('id', p.id);
-            if (error) return err(error.message);
+            if (error) return err(friendlyDbError(error));
           } else {
             const { error } = await supabase.from('subject_papers').insert({ ...rec, exam_id: examId, subject_id: subjectId, class_id: classId });
-            if (error) return err(error.message);
+            if (error) return err(friendlyDbError(error));
           }
         }
         return ok(true, { count: papers.length });
@@ -678,7 +678,7 @@ export function createAcademicsApi(supabase) {
       async listForExam(examId) {
         if (!examId) return ok([]);
         const { data: combos, error } = await supabase.from('subject_combinations').select('*').eq('exam_id', examId).order('created_at', { ascending: true });
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         if (!(combos || []).length) return ok([]);
         const comboIds = combos.map((c) => c.id);
         const { data: members, error: mErr } = await supabase.from('subject_combination_members').select('*').in('combination_id', comboIds);
@@ -730,12 +730,12 @@ export function createAcademicsApi(supabase) {
         let comboId = id;
         if (comboId) {
           const { error } = await supabase.from('subject_combinations').update({ name }).eq('id', comboId);
-          if (error) return err(error.message);
+          if (error) return err(friendlyDbError(error));
           const { error: delErr } = await supabase.from('subject_combination_members').delete().eq('combination_id', comboId);
           if (delErr) return err(delErr.message);
         } else {
           const { data: created, error } = await supabase.from('subject_combinations').insert({ exam_id: examId, name }).select().single();
-          if (error) return err(error.message);
+          if (error) return err(friendlyDbError(error));
           comboId = created.id;
         }
 
@@ -752,7 +752,7 @@ export function createAcademicsApi(supabase) {
       async remove(comboId) {
         if (!comboId) return err('Missing combination.');
         const { error } = await supabase.from('subject_combinations').delete().eq('id', comboId);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(true);
       }
     }

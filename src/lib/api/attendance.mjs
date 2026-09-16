@@ -4,7 +4,7 @@
  * every query to the caller's own school and, for a student/parent, to
  * their own/linked record — none of that filtering has to happen here.
  */
-import { ok, err, byAdmissionNo, createMemoCache, clearAllCaches } from './_util.mjs';
+import { ok, err, friendlyDbError, byAdmissionNo, createMemoCache, clearAllCaches } from './_util.mjs';
 
 const VALID_STATUSES = ['present', 'absent', 'late', 'excused'];
 
@@ -24,7 +24,7 @@ export function createAttendanceApi(supabase) {
         let q = supabase.from('students').select('id, admission_no, full_name, class_id, stream_id').eq('class_id', class_id).eq('status', 'active');
         if (stream_id) q = q.eq('stream_id', stream_id);
         const { data: students, error } = await q;
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
 
         const { data: marks, error: marksErr } = await supabase
           .from('student_attendance').select('student_id, status, notes')
@@ -53,7 +53,7 @@ export function createAttendanceApi(supabase) {
         notes: r.notes || null, marked_by: marked_by || null
       }));
       const { error } = await supabase.from('student_attendance').upsert(payload, { onConflict: 'student_id,date' });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(null, { saved: payload.length });
     },
@@ -65,7 +65,7 @@ export function createAttendanceApi(supabase) {
         if (from) q = q.gte('date', from);
         if (to) q = q.lte('date', to);
         const { data, error } = await q;
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(data || []);
       });
     },
@@ -106,7 +106,7 @@ export function createAttendanceApi(supabase) {
       if (!date) return err('Choose a date.');
       return cached('getStaffRosterForDate', date, async () => {
         const { data: staffList, error } = await supabase.from('staff').select('id, full_name, role').eq('status', 'active').order('full_name');
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         // Round 3 §19: sign_in_time/sign_out_time are read alongside the
         // existing status/notes — same row, one query, no separate fetch.
         const { data: marks, error: mErr } = await supabase.from('staff_attendance').select('staff_id, status, notes, sign_in_time, sign_out_time').eq('date', date);
@@ -127,7 +127,7 @@ export function createAttendanceApi(supabase) {
       if (!rows.length) return err('No valid attendance marks to save.');
       const payload = rows.map((r) => ({ staff_id: r.staff_id, date, status: r.status, notes: r.notes || null, marked_by: marked_by || null }));
       const { error } = await supabase.from('staff_attendance').upsert(payload, { onConflict: 'staff_id,date' });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(null, { saved: payload.length });
     },
@@ -162,7 +162,7 @@ export function createAttendanceApi(supabase) {
         marked_by: marked_by || null
       }));
       const { error } = await supabase.from('staff_attendance').upsert(payload, { onConflict: 'staff_id,date' });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(null, { saved: payload.length });
     }

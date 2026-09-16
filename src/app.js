@@ -673,6 +673,25 @@ export function fmtDate(d) {
   try { const dt = new Date(d); if (isNaN(dt)) return d; return dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
   catch (e) { return d; }
 }
+/** Cleanup audit: the exact same date-formatting body used to be
+ *  copy-pasted under three different local names (deletedExams.mjs's
+ *  fmtDate, examDesk.mjs's fmtDate, _reportCard.mjs's fmtReportDate) —
+ *  deliberately kept SEPARATE from fmtDate() above rather than merged into
+ *  it, since the two behave differently on purpose: fmtDate() above shows
+ *  an em dash ("—") for a missing date and the raw value for an invalid
+ *  one (right for a table cell that should always show something), while
+ *  this one shows a blank for both (right for the three screens above,
+ *  which deliberately render nothing when a date genuinely isn't set yet —
+ *  e.g. an exam that hasn't been deleted, or a report card date that
+ *  hasn't happened). Swapping either screen over to fmtDate()'s em-dash
+ *  behavior would be a visible change, not just deduplication, so it isn't
+ *  done here — only the copy-pasted body itself was extracted. */
+export function fmtDateOrBlank(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
 export function renderPrereq(root, title, text, route, label) {
   root.innerHTML = `<div class="card"><div class="card-b"><div class="empty warn">
     <div class="e-ico">⚠️</div><h3>${esc(title)}</h3><p>${esc(text)}</p>
@@ -1684,8 +1703,13 @@ async function router() {
       renderComingSoon(view, (NAV[state.profile.role] || []).flatMap((it) => it.children ? it.children : [it]).find((r) => r.route === route)?.label || route);
     }
   } catch (e) {
+    // Cleanup audit: this used to show the raw caught error's message
+    // directly on screen — whatever a browser/network/JS engine happened to
+    // phrase it as internally, with no filtering. It's still logged to the
+    // console for anyone actually debugging; the screen itself now only
+    // ever shows plain, safe text.
     console.error(e);
-    view.innerHTML = `<div class="card pad">⚠️ Something went wrong loading this page: ${esc(e.message || e)}</div>`;
+    view.innerHTML = '<div class="card pad">⚠️ Something went wrong loading this page. Please try again, or reload the app.</div>';
   }
 }
 /** POST-BUILD AUDIT (Sidebar_Performance_Login_Audit_Fixes.docx item 1,

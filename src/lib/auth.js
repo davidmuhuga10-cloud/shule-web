@@ -43,16 +43,6 @@ export function splitLoginUsername(combined) {
   return studentEmailHelper().splitLoginUsername(combined);
 }
 
-/** Public, pre-auth lookup: does this School Code exist, and what's its name/logo/settings? */
-export async function resolveSchoolByCode(code) {
-  const trimmed = String(code || '').trim();
-  if (!trimmed) return { ok: false, message: 'Enter your School Code.' };
-  const { data, error } = await supabase.rpc('get_school_public_info', { p_code: trimmed });
-  if (error) return { ok: false, message: error.message };
-  if (!data || data.found !== true) return { ok: false, message: 'We could not find a school with that code.' };
-  return { ok: true, school: data };
-}
-
 /**
  * Smart login (landing redesign brief B1): given ONLY a phone number, find
  * every active admin/teacher/parent account it belongs to, across every

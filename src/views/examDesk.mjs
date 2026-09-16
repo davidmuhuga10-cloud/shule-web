@@ -25,7 +25,7 @@
  * Deleted Exams (brief §8) is its own module (deletedExams.mjs) and its own
  * nav tile, not part of this file — see examsHub.mjs.
  */
-import { esc, modal, closeModal, toast, confirmAction, options, renderPrereq, renderPrereqOrConnectivity, loader, go, withBusy } from '../app.js';
+import { esc, modal, closeModal, toast, confirmAction, options, renderPrereq, renderPrereqOrConnectivity, loader, go, withBusy, fmtDateOrBlank } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 import { EXAM_TYPE_LABELS } from '../lib/api/results.mjs';
 import { setNavIntent } from '../lib/navIntent.mjs';
@@ -218,12 +218,7 @@ const STATUS_META = {
   released: { label: 'Released', cls: 'green' }
 };
 
-function fmtDate(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-}
+const fmtDate = fmtDateOrBlank;
 
 // Shared per-class action markup so the desktop table and the mobile
 // accordion (see mobileClassAccordion below) can't drift apart. `mobile`
@@ -772,6 +767,6 @@ function openClassPickerModal(root, exam, currentClassRows, onDone) {
     });
   }).catch((e) => {
     console.error('openClassPickerModal: failed to load class choices', e);
-    toast(`Couldn't load classes to add${e && e.message ? ` (${e.message})` : ''}.`, 'err');
+    toast("Couldn't load classes to add. Please try again.", 'err');
   });
 }

@@ -30,7 +30,7 @@
  *     means true too" rule as show_papers_separately above — see
  *     broadsheet.mjs's showAchievementLevels().
  */
-import { ok, err, titleCase, createMemoCache, clearAllCaches } from './_util.mjs';
+import { ok, err, friendlyDbError, titleCase, createMemoCache, clearAllCaches } from './_util.mjs';
 
 export function createSettingsApi(supabase) {
   // Same short-window in-memory memoization pattern as finance.mjs/
@@ -51,7 +51,7 @@ export function createSettingsApi(supabase) {
     async get() {
       return cached('settings.get', async () => {
         const { data, error } = await supabase.from('settings').select('*');
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         const map = {};
         (data || []).forEach((r) => { map[r.key] = r.value; });
         // Brief: "Capitalize school name to always even when entered in small

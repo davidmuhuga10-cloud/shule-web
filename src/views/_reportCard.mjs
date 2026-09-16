@@ -1,4 +1,4 @@
-import { esc } from '../app.js';
+import { esc, fmtDateOrBlank } from '../app.js';
 import { printHeaderHtml, reportTitleBarHtml } from '../lib/printHeader.mjs';
 
 /**
@@ -213,12 +213,7 @@ function mottoHtml(settings) {
  *  reportForms.mjs), not School Settings — still the exact same
  *  `settings.school_closed_on`/`next_term_begins_on` values underneath, so
  *  this display logic didn't need to change at all. */
-function fmtReportDate(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-}
+const fmtReportDate = fmtDateOrBlank;
 function termDatesHtml(settings) {
   const closed = fmtReportDate(settings.school_closed_on);
   const nextTerm = fmtReportDate(settings.next_term_begins_on);

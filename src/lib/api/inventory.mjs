@@ -9,7 +9,7 @@
  * separate concern with its own tables — it only ever REACHES INTO Finance
  * for suppliers (finance_suppliers), never the other way around.
  */
-import { ok, err, fromResult, createMemoCache, clearAllCaches } from './_util.mjs';
+import { ok, err, friendlyDbError, fromResult, createMemoCache, clearAllCaches } from './_util.mjs';
 
 export function createInventoryApi(supabase) {
   const { cached } = createMemoCache(20000);
@@ -19,7 +19,7 @@ export function createInventoryApi(supabase) {
     async list() {
       return cached('inventory.categories', null, async () => {
         const { data, error } = await supabase.from('inventory_categories').select('*').order('name');
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(data || []);
       });
     },
@@ -39,7 +39,7 @@ export function createInventoryApi(supabase) {
       const { error } = await supabase.from('inventory_categories').delete().eq('id', id);
       if (error) {
         if (error.code === '23503') return err('This category is used by at least one inventory item — deactivate it instead, or move those items to a different category first.');
-        return err(error.message);
+        return err(friendlyDbError(error));
       }
       clearCache();
       return ok(true);
@@ -50,7 +50,7 @@ export function createInventoryApi(supabase) {
     async list() {
       return cached('inventory.units', null, async () => {
         const { data, error } = await supabase.from('inventory_units').select('*').order('name');
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(data || []);
       });
     },
@@ -66,7 +66,7 @@ export function createInventoryApi(supabase) {
       const { error } = await supabase.from('inventory_units').delete().eq('id', id);
       if (error) {
         if (error.code === '23503') return err('This unit is used by at least one inventory item — deactivate it instead, or update those items to a different unit first.');
-        return err(error.message);
+        return err(friendlyDbError(error));
       }
       clearCache();
       return ok(true);
@@ -78,7 +78,7 @@ export function createInventoryApi(supabase) {
       const { data, error } = await supabase.from('inventory_items')
         .select('*, inventory_categories(name), inventory_units(name), finance_suppliers(name)')
         .order('name');
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     },
     async save(payload) {
@@ -108,7 +108,7 @@ export function createInventoryApi(supabase) {
       if (filters.from) q = q.gte('created_at', filters.from);
       if (filters.to) q = q.lte('created_at', filters.to + 'T23:59:59');
       const { data, error } = await q.limit(500);
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(data || []);
     }
   };
@@ -116,7 +116,7 @@ export function createInventoryApi(supabase) {
   return {
     async bootstrap() {
       const { error } = await supabase.rpc('inventory_bootstrap');
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       return ok(true);
     },
     categories, units, items, transactions,
@@ -127,7 +127,7 @@ export function createInventoryApi(supabase) {
         p_supplier_id: payload.supplier_id || null, p_reference: payload.reference || null,
         p_location: payload.location || null, p_notes: payload.notes || null, p_date: payload.date || null
       });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
@@ -137,7 +137,7 @@ export function createInventoryApi(supabase) {
         p_item_id: payload.item_id, p_quantity: Number(payload.quantity), p_destination: payload.destination || null,
         p_person: payload.person || null, p_reason: payload.reason || null, p_notes: payload.notes || null, p_date: payload.date || null
       });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
@@ -147,7 +147,7 @@ export function createInventoryApi(supabase) {
       const { data, error } = await supabase.rpc('inventory_adjust', {
         p_item_id: payload.item_id, p_quantity_delta: Number(payload.quantity_delta), p_reason: payload.reason, p_notes: payload.notes || null, p_date: payload.date || null
       });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
@@ -156,7 +156,7 @@ export function createInventoryApi(supabase) {
       const { data, error } = await supabase.rpc('inventory_stocktake', {
         p_item_id: payload.item_id, p_physical_quantity: Number(payload.physical_quantity), p_reason: payload.reason || null, p_notes: payload.notes || null, p_date: payload.date || null
       });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },

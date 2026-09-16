@@ -18,7 +18,7 @@
  * staleness bug caught during this round's testing (a newly-enrolled
  * student not showing up on the exam board for up to 20 seconds).
  */
-import { ok, err, byAdmissionNo, createMemoCache, clearAllCaches } from './_util.mjs';
+import { ok, err, friendlyDbError, byAdmissionNo, createMemoCache, clearAllCaches } from './_util.mjs';
 
 const VALID_GENDERS = ['Male', 'Female'];
 export const LEAVING_REASONS = ['transferred', 'graduated', 'withdrawn', 'other'];
@@ -72,7 +72,7 @@ export function createStudentsApi(supabase) {
         if (filters.stream_id) q = q.eq('stream_id', filters.stream_id);
         q = q.eq('status', filters.status || 'active');
         const { data, error } = await q;
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         const withN = await withNames(data || []);
         withN.sort(byAdmissionNo);
         return ok(withN);
@@ -90,7 +90,7 @@ export function createStudentsApi(supabase) {
       if (!query) return ok([]);
       return cached('students.search', query, async () => {
         const { data, error } = await supabase.from('students').select('*').eq('status', 'active');
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         const matched = (data || []).filter((s) =>
           String(s.admission_no || '').toLowerCase().indexOf(query) !== -1 ||
           String(s.full_name || '').toLowerCase().indexOf(query) !== -1
@@ -104,7 +104,7 @@ export function createStudentsApi(supabase) {
     async get(id) {
       return cached('students.get', id, async () => {
         const { data, error } = await supabase.from('students').select('*').eq('id', id).maybeSingle();
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         if (!data) return err('Student not found.');
         const [withN] = await withNames([data]);
         return ok(withN);
@@ -120,7 +120,7 @@ export function createStudentsApi(supabase) {
     async existingAdmissionNumbers() {
       return cached('students.existingAdmissionNumbers', null, async () => {
         const { data, error } = await supabase.from('students').select('admission_no');
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok((data || []).map((r) => String(r.admission_no || '').trim().toLowerCase()).filter(Boolean));
       });
     },
@@ -165,12 +165,12 @@ export function createStudentsApi(supabase) {
 
       if (payload.id) {
         const { data, error } = await supabase.from('students').update(rec).eq('id', payload.id).select().single();
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         clearCache();
         return ok(data);
       }
       const { data, error } = await supabase.from('students').insert(rec).select().single();
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
@@ -183,7 +183,7 @@ export function createStudentsApi(supabase) {
      *  rather than erasing them. */
     async remove(id) {
       const { error } = await supabase.from('students').delete().eq('id', id);
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(true);
     },
@@ -204,7 +204,7 @@ export function createStudentsApi(supabase) {
         left_notes: payload.notes || ''
       };
       const { data, error } = await supabase.from('students').update(rec).eq('id', id).select().single();
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
@@ -214,7 +214,7 @@ export function createStudentsApi(supabase) {
       if (!id) return err('Missing student.');
       const { data, error } = await supabase.from('students')
         .update({ status: 'active', left_reason: null, left_date: null, left_notes: null }).eq('id', id).select().single();
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
@@ -229,7 +229,7 @@ export function createStudentsApi(supabase) {
       if (!payload.class_id) return err('Please choose the class to move them to.');
       const rec = { class_id: payload.class_id, stream_id: payload.stream_id || null };
       const { error } = await supabase.from('students').update(rec).in('id', ids);
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(null, { moved: ids.length });
     },

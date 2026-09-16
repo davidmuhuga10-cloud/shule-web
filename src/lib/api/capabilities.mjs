@@ -7,7 +7,7 @@
  * "Supervisor" login — that role in the chain is simply an admin, or any
  * teacher an admin has explicitly granted this capability to.
  */
-import { ok, err, createMemoCache, clearAllCaches } from './_util.mjs';
+import { ok, err, friendlyDbError, createMemoCache, clearAllCaches } from './_util.mjs';
 
 // Sprint: Finance module — two granular grants (see migrations/
 // 0031_finance_module.sql's header comment): 'finance_record_collections'
@@ -99,7 +99,7 @@ export function createCapabilitiesApi(supabase) {
       if (!staffId) return ok([]);
       return cached('capabilities.listForStaff', staffId, async () => {
         const { data, error } = await supabase.from('staff_capabilities').select('*').eq('staff_id', staffId);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok((data || []).map((r) => r.capability));
       });
     },
@@ -111,7 +111,7 @@ export function createCapabilitiesApi(supabase) {
         .eq('staff_id', staffId).eq('capability', capability).maybeSingle();
       if (existing) return ok(true);
       const { error } = await supabase.from('staff_capabilities').insert({ staff_id: staffId, capability });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(true);
     },
@@ -119,7 +119,7 @@ export function createCapabilitiesApi(supabase) {
     async revoke(staffId, capability) {
       if (!staffId) return err('Missing staff member.');
       const { error } = await supabase.from('staff_capabilities').delete().eq('staff_id', staffId).eq('capability', capability);
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(true);
     },
@@ -135,7 +135,7 @@ export function createCapabilitiesApi(supabase) {
         const { data, error } = await supabase.from('staff_capabilities')
           .select('staff_id, capability, staff(id, full_name, role, status)')
           .in('capability', FINANCE_USER_CAPABILITIES);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         // A capability row for a staff member who's since been deleted has
         // no embedded `staff` — skip it rather than surface a blank name.
         const byStaff = {};

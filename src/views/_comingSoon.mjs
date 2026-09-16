@@ -4,7 +4,7 @@ export function renderComingSoon(root, label) {
     <div class="empty">
       <div class="e-ico">🚧</div>
       <h3>${label || 'This section'} is coming soon</h3>
-      <p>This part of the migration to Supabase/Netlify hasn't landed yet — it's next on the list.</p>
+      <p>This part of the app hasn't been built yet — it's next on the list.</p>
     </div>
   </div></div>`;
 }

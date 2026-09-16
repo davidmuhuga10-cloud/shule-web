@@ -11,7 +11,7 @@
  * (rather than importing `fetch` directly) keeps this module unit-testable
  * without a live Netlify function.
  */
-import { ok, err, createMemoCache, clearAllCaches } from './_util.mjs';
+import { ok, err, friendlyDbError, createMemoCache, clearAllCaches } from './_util.mjs';
 
 export function createUsersApi(supabase, callAdminFunction) {
   // Same short-window in-memory memoization pattern as the rest of the app
@@ -33,7 +33,7 @@ export function createUsersApi(supabase, callAdminFunction) {
         p_name: payload.name || null,
         p_phone: payload.phone || null
       });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
@@ -44,7 +44,7 @@ export function createUsersApi(supabase, callAdminFunction) {
           .from('profiles')
           .select('id, name, email, username, phone, role, status, staff_id, student_id')
           .order('name', { ascending: true });
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(data || []);
       });
     },
@@ -114,7 +114,7 @@ export function createUsersApi(supabase, callAdminFunction) {
         if ((count || 0) <= 1) return err('You cannot revoke the last remaining admin — grant another admin first.');
       }
       const { error } = await supabase.from('profiles').update({ role }).eq('id', profileId);
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(true);
     }

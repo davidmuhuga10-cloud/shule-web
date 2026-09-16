@@ -9,7 +9,7 @@
  * purgeExpired, swept lazily on every listDeletedExams call) — this screen
  * only ever shows exams still inside that window.
  */
-import { esc, toast, loader, confirmAction, withBusy } from '../app.js';
+import { esc, toast, loader, confirmAction, withBusy, fmtDateOrBlank } from '../app.js';
 import { Db } from '../lib/api/index.mjs';
 
 export async function viewDeletedExams(root) {
@@ -56,9 +56,4 @@ async function render(root) {
   });
 }
 
-function fmtDate(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-}
+const fmtDate = fmtDateOrBlank;

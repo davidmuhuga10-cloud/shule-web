@@ -8,7 +8,7 @@
  * after a successful save(), same pattern as students. See
  * netlify/functions/README.md.
  */
-import { ok, err, createMemoCache, clearAllCaches } from './_util.mjs';
+import { ok, err, friendlyDbError, createMemoCache, clearAllCaches } from './_util.mjs';
 
 export function createStaffApi(supabase) {
   // Same short-window in-memory memoization pattern as the rest of the app
@@ -23,7 +23,7 @@ export function createStaffApi(supabase) {
     async list() {
       return cached('staff.list', null, async () => {
         const { data, error } = await supabase.from('staff').select('*').order('full_name', { ascending: true });
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(data || []);
       });
     },
@@ -31,7 +31,7 @@ export function createStaffApi(supabase) {
     async get(id) {
       return cached('staff.get', id, async () => {
         const { data, error } = await supabase.from('staff').select('*').eq('id', id).maybeSingle();
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         if (!data) return err('Staff member not found.');
         return ok(data);
       });
@@ -53,7 +53,7 @@ export function createStaffApi(supabase) {
         p_next_of_kin_name: payload.next_of_kin_name || null,
         p_next_of_kin_contact: payload.next_of_kin_contact || null
       });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
@@ -97,19 +97,19 @@ export function createStaffApi(supabase) {
       };
       if (payload.id) {
         const { data, error } = await supabase.from('staff').update(rec).eq('id', payload.id).select().single();
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         clearCache();
         return ok(data);
       }
       const { data, error } = await supabase.from('staff').insert(rec).select().single();
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(data);
     },
 
     async remove(id) {
       const { error } = await supabase.from('staff').delete().eq('id', id);
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(true);
     },

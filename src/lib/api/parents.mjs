@@ -17,7 +17,7 @@
  * service role: RLS's parent_links_admin_write policy already lets a signed-in
  * admin insert directly, so that goes straight through the plain client.
  */
-import { ok, err, byAdmissionNo, indexById, createMemoCache, clearAllCaches } from './_util.mjs';
+import { ok, err, friendlyDbError, byAdmissionNo, indexById, createMemoCache, clearAllCaches } from './_util.mjs';
 
 export function createParentsApi(supabase, callAdminFunction) {
   // Same short-window in-memory memoization pattern as the rest of the app
@@ -37,7 +37,7 @@ export function createParentsApi(supabase, callAdminFunction) {
           .select('id, name, email, status, created_at')
           .eq('role', 'parent')
           .order('name', { ascending: true });
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(data || []);
       });
     },
@@ -50,7 +50,7 @@ export function createParentsApi(supabase, callAdminFunction) {
         .from('parent_links')
         .select('id, parent_profile_id, student_id, relationship, created_at')
         .order('created_at', { ascending: false });
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       if (!rows || !rows.length) return ok([]);
 
       const parentIds = [...new Set(rows.map((r) => r.parent_profile_id))];
@@ -95,7 +95,7 @@ export function createParentsApi(supabase, callAdminFunction) {
         if (String(error.message || '').toLowerCase().includes('duplicate')) {
           return err('This parent is already linked to this student.');
         }
-        return err(error.message);
+        return err(friendlyDbError(error));
       }
       clearCache();
       return ok(data);
@@ -104,7 +104,7 @@ export function createParentsApi(supabase, callAdminFunction) {
     async unlink(linkId) {
       if (!linkId) return err('Missing link.');
       const { error } = await supabase.from('parent_links').delete().eq('id', linkId);
-      if (error) return err(error.message);
+      if (error) return err(friendlyDbError(error));
       clearCache();
       return ok(true);
     },
@@ -120,7 +120,7 @@ export function createParentsApi(supabase, callAdminFunction) {
       // this too. See _util.mjs's createMemoCache header comment.
       return cached('parents.myChildren', null, async () => {
         const { data: links, error } = await supabase.from('parent_links').select('student_id, relationship');
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         const studentIds = [...new Set((links || []).map((l) => l.student_id))];
         if (!studentIds.length) return ok([]);
 

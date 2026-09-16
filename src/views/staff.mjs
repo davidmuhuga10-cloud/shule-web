@@ -221,7 +221,7 @@ export async function openStaffModal(root, existing, onSaved) {
           // written down here.
           toast('Staff saved. Ask them to sign in and tap "First time here?" using their phone number to set a password.', 'ok');
         } else {
-          toast('Staff saved. (Login provisioning will be available once the Netlify function is deployed.)', 'warn');
+          toast('Staff saved. (Login provisioning will be available shortly.)', 'warn');
         }
       } else {
         const wantsPublish = document.getElementById('sf-publish') && document.getElementById('sf-publish').checked;

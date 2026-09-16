@@ -6,7 +6,7 @@
  * happen server-side. Everything else here (recipient previews, history) is
  * a plain RLS-scoped read, same as every other module.
  */
-import { ok, err, createMemoCache, clearAllCaches } from './_util.mjs';
+import { ok, err, friendlyDbError, createMemoCache, clearAllCaches } from './_util.mjs';
 
 export function createMessagingApi(supabase, sendMessageFn, resendMessageFn) {
   // Same short-window in-memory memoization pattern as the rest of the app
@@ -26,7 +26,7 @@ export function createMessagingApi(supabase, sendMessageFn, resendMessageFn) {
           .select('id, full_name, guardian_name, guardian_contact')
           .eq('class_id', class_id).eq('status', 'active')
           .order('full_name');
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(data || []);
       });
     },
@@ -38,7 +38,7 @@ export function createMessagingApi(supabase, sendMessageFn, resendMessageFn) {
           .select('*')
           .order('created_at', { ascending: false })
           .limit(limit || 200);
-        if (error) return err(error.message);
+        if (error) return err(friendlyDbError(error));
         return ok(data || []);
       });
     },
