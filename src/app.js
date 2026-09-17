@@ -462,10 +462,39 @@ function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm, headerEl, 
   // own edge — see headerEl's doc comment, bugs 1 and 2) was already
   // computed above, before this shrink path even runs, since it applies
   // whether or not the table needs shrinking.
+  // BUG FIX: live feedback after the zero-margin-header fix — "the table's
+  // left margin is smaller than its right margin." Root cause: the 0.975
+  // safety factor above (see its own comment — it deliberately shrinks the
+  // table 2.5% narrower than the full printable width so a hairline
+  // pagination/rounding difference at real print time never clips the
+  // last column) was never centering that leftover 2.5% — the table is a
+  // plain left-aligned block, so ALL of that slack landed on the right
+  // side only. At the old, more generous default margins this was a small
+  // enough sliver to go unnoticed; at today's much tighter 5mm margin it
+  // reads as a clearly lopsided table. Centering the shrunk table
+  // (margin-left/right:auto) splits that same 2.5% slack evenly instead —
+  // still exactly as much safety cushion as before, just balanced on both
+  // sides rather than dumped on one. This is intentionally skipped in the
+  // one case where it would introduce a DIFFERENT bug: whenever headerRule
+  // above was computed, it aligned the header's right edge to this table's
+  // right edge under the assumption that the table stayed LEFT-aligned
+  // (its left edge unchanged, only its right edge moving as it shrinks) —
+  // centering the table here would shift its left edge too and throw that
+  // alignment off. headerRule is only ever computed when a caller passes
+  // both a fitEl and a headerEl AND relies on them sharing one margin
+  // (see autoFitPrintWidth's headerNeedsOwnBleed check above) — today
+  // that's no caller at all (the Mark List, the only screen that passes
+  // both, now always takes the headerNeedsOwnBleed path since its header's
+  // page-1 margin is deliberately different from its table's), so
+  // centering is safe everywhere it actually applies right now — but kept
+  // conditional so it can never silently reintroduce a header/table
+  // misalignment if a future screen ever combines the two differently.
+  const centerTableRule = headerRule ? '' : `table[data-pf-id="${pfId}"]{margin-left:auto!important;margin-right:auto!important}`;
   const style = document.createElement('style');
   style.id = 'print-autofit-override';
   style.textContent = `
     table[data-pf-id="${pfId}"]{width:${printableWidthPx.toFixed(2)}px!important}
+    ${centerTableRule}
     table[data-pf-id="${pfId}"] th,table[data-pf-id="${pfId}"] td{box-sizing:border-box!important;font-size:${(baseFontSize * scale).toFixed(2)}px!important;padding:${(padTop * scale).toFixed(2)}px ${(padRight * scale).toFixed(2)}px!important}
     table[data-pf-id="${pfId}"] th:last-child,table[data-pf-id="${pfId}"] td:last-child{border-right:1.5px solid var(--grid-ink)!important}
     ${colRules}
