@@ -229,7 +229,7 @@ const PX_PER_MM = 96 / 25.4;
  *      not the box's, flush with the table's — verified with a Playwright
  *      measurement that both elements' rendered right edges match to
  *      sub-pixel precision, with and without the shrink path engaged. */
-function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm, headerEl) {
+function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm, headerEl, firstPageMarginMm) {
   if (!tableEl) return () => {};
   const [shortMm, longMm] = PAPER_DIMENSIONS_MM[paperSize] || PAPER_DIMENSIONS_MM.A4;
   const pageWidthMm = orientation === 'landscape' ? longMm : shortMm;
@@ -256,8 +256,31 @@ function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm, headerEl) 
   // fit, otherwise exactly what it renders at today. Needed even when
   // nothing is shrinking — see headerEl's own comment above (bug 1). */
   const finalTableWidth = scale < 1 ? printableWidthPx : naturalWidth;
+  // BUG FIX: live feedback after shipping page-1-only zero margin — "the
+  // left whitespace is gone but there's still whitespace to the right of
+  // the header (and above it)." The right-side gap traced back to HERE:
+  // this block force-pins the header's own width to match the TABLE's
+  // right edge — a rule written back when header and table always shared
+  // the exact same @page margin, so aligning them was correct. Now that
+  // page 1 can have a genuinely different margin for the header
+  // (firstPageMarginMm, e.g. 0) than the table keeps for its own shrink
+  // target (marginMm, e.g. 5mm — deliberately NOT lowered, so continuation
+  // pages that get the normal margin back never see an oversized table),
+  // the two are DELIBERATELY no longer the same width — the header is
+  // supposed to bleed all the way to the true page edge while the table
+  // stays inset. Forcing the header to match the table's narrower edge
+  // undid exactly the zero-margin bleed this was meant to deliver. When a
+  // distinct firstPageMarginMm is in play, skip pinning the header's width
+  // altogether and let it keep filling its parent naturally (its own CSS
+  // negative-margin bleed already reaches the true page edge on its own —
+  // this is proven by the left edge, which was never touched by this rule
+  // and has been edge-to-edge the whole time). The alignment rule below
+  // still applies unchanged for every other caller that never passes a
+  // firstPageMarginMm (header and table share one margin there, so the
+  // original alignment fix still matters).
+  const headerNeedsOwnBleed = Number.isFinite(firstPageMarginMm) && firstPageMarginMm >= 0 && firstPageMarginMm !== effectiveMarginMm;
   let headerRule = '';
-  if (headerEl) {
+  if (headerEl && !headerNeedsOwnBleed) {
     if (!headerEl.dataset.pfHeaderId) headerEl.dataset.pfHeaderId = 'pfh' + Math.random().toString(36).slice(2);
     const tableRectBefore = tableEl.getBoundingClientRect();
     const headerRectBefore = headerEl.getBoundingClientRect();
@@ -543,7 +566,7 @@ export function printWithOptions(orientation, paperSize, marginMm, fitEl, header
   style.id = 'print-options-override';
   style.textContent = `@page{size:${size} ${orient};margin:${margin}mm}${firstPageRule}`;
   document.head.appendChild(style);
-  const unfit = autoFitPrintWidth(fitEl, orient, size, margin, headerEl);
+  const unfit = autoFitPrintWidth(fitEl, orient, size, margin, headerEl, firstPageMarginMm);
   // BUG FIX (root cause of the Mark List printing portrait/unscaled no
   // matter what — confirmed on desktop Chrome AND Android Chrome, with
   // the deployed code verified correct both times, so this was never a
