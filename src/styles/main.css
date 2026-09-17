@@ -1392,6 +1392,23 @@ table.data td.num,table.data th.num{text-align:center}
   .card{box-shadow:none;border:none;border-radius:0}
   .batch-page{page-break-after:always}
   .batch-page:last-child{page-break-after:auto}
+  /* Live feedback: "reinforce the top student report to always start from
+     a new page when both are selected to print, right now it just starts
+     when analysis report ends." examAnalysis.mjs always renders both
+     .ea-report blocks (Class Analysis then Top Students) as siblings in
+     the DOM — wireCombinedPrint() only toggles display:none on whichever
+     one a checkbox unticks, it never removes it from the DOM — so this
+     sibling-combinator selector reliably matches the Top Students report
+     only when the Class Analysis report is its immediate DOM sibling
+     (i.e. whenever both are actually being printed together), regardless
+     of which one a viewer happens to be looking at on screen. It does NOT
+     depend on display:none vs visible: a forced page-break-before on the
+     very first box a print job renders is a no-op per the CSS Fragmentation
+     spec (there's nothing to break "before"), so printing the Top Students
+     report on its own (Class Analysis unticked, so it's the first and only
+     visible thing) never produces a leading blank page — verified with a
+     real PDF render of both scenarios. */
+  .ea-report + .ea-report{page-break-before:always;break-before:page}
   /* Wide printable tables (broadsheet, class list, transcript) — shrink to
      fit the page width instead of being clipped or forcing a scrollbar
      that paper obviously can't have. */
@@ -2297,7 +2314,13 @@ table.data td.num,table.data th.num{text-align:center}
 .ea-stat-v{font-size:22px;font-weight:800;color:#000;margin-top:4px}
 .ea-podium{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:14px}
 .ea-podium-c{border:1px solid #000;border-radius:var(--radius-sm);padding:14px 10px;text-align:center;background:var(--bg)}
-.ea-podium-c.p1{background:linear-gradient(160deg,var(--brand),var(--brand-2));color:#fff;border-color:#000}
+/* Live feedback: "remove the greenish background shown on top student, let
+   it have same background as student 2 and 3" — rank 1 used to get its own
+   teal-gradient/white-text treatment (.p1); removed so every podium tile
+   (rank 1, 2, 3) renders identically via the shared .ea-podium-c rule
+   above. The markup in podiumHtml() still adds the "p1" class to the rank-1
+   tile (harmless — no rule targets it anymore), so this is a pure style
+   removal with no HTML change needed. */
 .ea-podium-rank{font-size:11px;font-weight:750;letter-spacing:.04em;opacity:.8}
 .ea-podium-name{font-weight:750;font-size:13.5px;margin-top:4px}
 .ea-podium-sub{font-size:11px;opacity:.75;margin-top:2px}

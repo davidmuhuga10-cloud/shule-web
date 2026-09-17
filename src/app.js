@@ -504,6 +504,55 @@ function autoFitPrintWidth(tableEl, orientation, paperSize, marginMm, headerEl, 
   return () => { style.remove(); };
 }
 
+/** BUG FIX: live feedback on the Exam Analysis report — "look at page 2,
+ *  the title headers are cut some eg 'Performance Level' have extended even
+ *  outside the box." Root cause: a page-spanning bug introduced by the
+ *  first-page-only zero margin feature above (firstPageMarginMm). A CSS
+ *  `@page` margin sets the actual page CONTENT AREA — it's the one thing no
+ *  ordinary element's CSS (padding, negative margin, anything) can widen or
+ *  shrink; it's enforced by the print engine itself, outside normal
+ *  document layout. So when page 1 has `@page:first{margin:0}` (for the
+ *  letterhead to bleed edge-to-edge) and every later page keeps the
+ *  screen's normal, non-zero marginMm, page 1's usable content area is
+ *  GENUINELY WIDER than every later page's. That's invisible for content
+ *  that only ever appears on page 1 (the header) or that explicitly sizes
+ *  itself against the narrower, normal marginMm regardless of which page
+ *  it starts on (the Mark List's own wide table — see autoFitPrintWidth
+ *  above, which is deliberately handed `margin`, never `firstPageMarginMm`,
+ *  for exactly this reason). It breaks, though, for plain `width:100%`
+ *  content that begins on the (wider) page 1 and keeps flowing onto a
+ *  (narrower) later page — a single fragmented box's width doesn't
+ *  reflow page to page, so a table sized against page 1's extra width
+ *  simply overflows past the true right edge everywhere the normal,
+ *  narrower margin applies. Exam Analysis has exactly this shape (several
+ *  `.print-grid` tables flowing under the header, tall enough to cross
+ *  page 1 into page 2) and never went through autoFitPrintWidth's own
+ *  per-table fix, so it had no protection against this at all.
+ *  The fix: constrain the ENTIRE post-header content block (everything
+ *  below the letterhead, not one specific table) to the width the NORMAL,
+ *  non-zero marginMm would give it — the same width every later page
+ *  already has — so it renders identically small enough to fit whichever
+ *  page it lands on, page 1 included, and the "extra" width page 1's zero
+ *  margin offers is spent ONLY by the header (which lives in its own,
+ *  separate sibling element and is untouched by this). `contentSelector`
+ *  is a plain CSS class/selector (not a single element — a report can flow
+ *  as more than one top-level block, e.g. Exam Analysis's Class Analysis
+ *  and Top Students reports both need this), so this applies one shared
+ *  width rule to every match at once rather than computing a per-element
+ *  offset the way autoFitPrintWidth's header alignment does. */
+function constrainPrintContentWidth(contentSelector, orientation, paperSize, marginMm) {
+  if (!contentSelector) return () => {};
+  const [shortMm, longMm] = PAPER_DIMENSIONS_MM[paperSize] || PAPER_DIMENSIONS_MM.A4;
+  const pageWidthMm = orientation === 'landscape' ? longMm : shortMm;
+  const effectiveMarginMm = Number.isFinite(marginMm) ? marginMm : 10;
+  const targetWidthPx = (pageWidthMm - 2 * effectiveMarginMm) * PX_PER_MM;
+  const style = document.createElement('style');
+  style.id = 'print-content-width-override';
+  style.textContent = `${contentSelector}{box-sizing:border-box!important;width:${targetWidthPx.toFixed(2)}px!important;max-width:${targetWidthPx.toFixed(2)}px!important;margin-left:auto!important;margin-right:auto!important}`;
+  document.head.appendChild(style);
+  return () => { style.remove(); };
+}
+
 /** marginMm (optional) lets one specific screen ask for tighter page
  *  margins than the 10mm app-wide default — added for Next Sprint 2 §8 (the
  *  Mark List's own margins halved, ~5mm, to make room for a larger font
@@ -582,7 +631,7 @@ function hideNativeSplashOnce() {
 // letterhead band only ever appears on page 1 anyway (reportTitleBarHtml/
 // printHeaderHtml render once, at the very top of the flow), so this is the
 // only page that needs — or should get — the zero margin.
-export function printWithOptions(orientation, paperSize, marginMm, fitEl, headerEl, firstPageMarginMm) {
+export function printWithOptions(orientation, paperSize, marginMm, fitEl, headerEl, firstPageMarginMm, contentSelector) {
   const size = PRINT_PAPER_SIZES[paperSize] || 'A4';
   const orient = orientation === 'landscape' ? 'landscape' : 'portrait';
   // Same bug as autoFitPrintWidth's own marginMm handling (see its comment):
@@ -596,6 +645,14 @@ export function printWithOptions(orientation, paperSize, marginMm, fitEl, header
   style.textContent = `@page{size:${size} ${orient};margin:${margin}mm}${firstPageRule}`;
   document.head.appendChild(style);
   const unfit = autoFitPrintWidth(fitEl, orient, size, margin, headerEl, firstPageMarginMm);
+  // See constrainPrintContentWidth()'s own doc comment above: only needed
+  // (and only ever passed a contentSelector) when a screen's page 1 has a
+  // genuinely different, wider margin than its later pages — otherwise
+  // this is a no-op (constrainPrintContentWidth bails out with nothing to
+  // do when contentSelector is falsy).
+  const uncontain = Number.isFinite(firstPageMarginMm) && firstPageMarginMm !== margin
+    ? constrainPrintContentWidth(contentSelector, orient, size, margin)
+    : () => {};
   // BUG FIX (root cause of the Mark List printing portrait/unscaled no
   // matter what — confirmed on desktop Chrome AND Android Chrome, with
   // the deployed code verified correct both times, so this was never a
@@ -621,6 +678,7 @@ export function printWithOptions(orientation, paperSize, marginMm, fitEl, header
   const cleanup = () => {
     style.remove();
     unfit();
+    uncontain();
     window.removeEventListener('afterprint', cleanup);
     window.removeEventListener('focus', cleanup);
   };
@@ -724,7 +782,7 @@ export function printOptionsHtml(idPrefix, defaultOrientation, opts) {
  *  title bar) that should bleed out to the exact same right edge as
  *  fitSelector's table once it's auto-shrunk — see autoFitPrintWidth()'s
  *  own comment on headerEl. Only the Mark List passes this today too. */
-export function wirePrintOptions(root, idPrefix, suggestedFilename, marginMm, fitSelector, headerSelector, firstPageMarginMm) {
+export function wirePrintOptions(root, idPrefix, suggestedFilename, marginMm, fitSelector, headerSelector, firstPageMarginMm, contentSelector) {
   const btn = root.querySelector(`#${idPrefix}-print-btn`);
   if (!btn) return;
   btn.onclick = () => {
@@ -764,7 +822,7 @@ export function wirePrintOptions(root, idPrefix, suggestedFilename, marginMm, fi
       window.addEventListener('focus', restore);
       setTimeout(restore, 120000);
     }
-    printWithOptions(orient, size, marginMm, fitEl, headerEl, firstPageMarginMm);
+    printWithOptions(orient, size, marginMm, fitEl, headerEl, firstPageMarginMm, contentSelector);
   };
 }
 

@@ -320,7 +320,14 @@ async function load(root, classes, sel) {
            header's orange rule) — visibly unbalanced. Tightened both sides
            of this seam the same way (12px->6px above, 20px->6px just for
            the top of this card-b) so the two gaps read as the same size. -->
-      <div class="card-b" style="padding-top:6px">
+      <!-- ea-report-body: shared marker class — see constrainPrintContentWidth()
+           in app.js (wired below via wirePrintOptions' contentSelector arg).
+           Fixes "title headers cut / extended outside the box" on page 2+:
+           this content flows past page 1 (which has a wider, zero-margin
+           content area for the letterhead) onto later pages (normal
+           margin), and without this, a table that starts on page 1 renders
+           too wide for every later, narrower page. -->
+      <div class="card-b ea-report-body" style="padding-top:6px">
         <div class="ea-stat-row">
           <div class="ea-stat-tile"><div class="ea-stat-l">STUDENTS WHO SAT</div><div class="ea-stat-v">${analysis.students_sat}</div></div>
           <!-- Sprint Review correction (final): every aggregate figure
@@ -359,8 +366,11 @@ async function load(root, classes, sel) {
         ${printHeaderHtml(settings)}
         ${reportTitleBarHtml([cls ? cls.name : '', bsRes.exam.name, 'Top Students Report'])}
       </div>
-      <!-- Same balanced-gap fix as the class analysis report above. -->
-      <div class="card-b" style="padding-top:6px">
+      <!-- Same balanced-gap fix as the class analysis report above, and the
+           same ea-report-body width-constraint marker (see its comment
+           above) — this report's own per-subject tables can just as easily
+           span page 1 into page 2. -->
+      <div class="card-b ea-report-body" style="padding-top:6px">
         <div style="font-weight:750;font-size:13.5px">TOP 3 — OVERALL</div>
         ${podiumHtml(analysis.top_students_overall)}
 
@@ -414,8 +424,12 @@ async function load(root, classes, sel) {
   // broadsheet.mjs's own wirePrintOptions() call (see its comment there for
   // the full explanation and the physical-printer caveat). Args 5/6
   // (fitSelector/headerSelector) are left undefined — this screen has no
-  // wide-table auto-fit target, unlike the Mark List.
-  wirePrintOptions(sheetEl, 'ea', combinedSuggestedName, 6, undefined, undefined, 0);
+  // single wide-table auto-fit target, unlike the Mark List. The 8th arg
+  // (contentSelector, '.ea-report-body') is the fix for "title headers cut
+  // ... extended outside the box" on page 2+ — see constrainPrintContentWidth()
+  // in app.js for the full explanation of why page-1's own zero margin was
+  // silently making page-spanning tables here render too wide.
+  wirePrintOptions(sheetEl, 'ea', combinedSuggestedName, 6, undefined, undefined, 0, '.ea-report-body');
   wireCombinedPrint(sheetEl, 'ea', [
     { checkbox: sheetEl.querySelector('#ea-check-class'), el: classReportEl },
     { checkbox: sheetEl.querySelector('#ea-check-top'), el: topReportEl }
