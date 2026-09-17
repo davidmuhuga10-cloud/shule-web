@@ -303,7 +303,7 @@ async function load(root, classes, sel) {
 
   const classAnalysisHtml = `
     <div class="card ea-report" id="ea-class-report">
-      <div class="card-b" style="padding-bottom:12px">
+      <div class="card-b" style="padding-bottom:6px">
         ${printHeaderHtml(settings)}
         <!-- Same approved letterhead/title-bar design as the Mark List
              (broadsheet.mjs): class far left, exam centered, report name
@@ -313,7 +313,14 @@ async function load(root, classes, sel) {
              relying on truncation to make the longer one fit. -->
         ${reportTitleBarHtml([cls ? cls.name : '', bsRes.exam.name, 'Analysis Report'])}
       </div>
-      <div class="card-b">
+      <!-- Live feedback (same fix as broadsheet.mjs's Mark List): the gap
+           below the title-bar row down to the first stat tile was much
+           bigger (12px + this card-b's own 20px top padding = 32px) than
+           the gap above the title-bar (its own 8px margin-top from the
+           header's orange rule) — visibly unbalanced. Tightened both sides
+           of this seam the same way (12px->6px above, 20px->6px just for
+           the top of this card-b) so the two gaps read as the same size. -->
+      <div class="card-b" style="padding-top:6px">
         <div class="ea-stat-row">
           <div class="ea-stat-tile"><div class="ea-stat-l">STUDENTS WHO SAT</div><div class="ea-stat-v">${analysis.students_sat}</div></div>
           <!-- Sprint Review correction (final): every aggregate figure
@@ -348,11 +355,12 @@ async function load(root, classes, sel) {
 
   const topStudentsHtml = `
     <div class="card ea-report" id="ea-top-report">
-      <div class="card-b" style="padding-bottom:12px">
+      <div class="card-b" style="padding-bottom:6px">
         ${printHeaderHtml(settings)}
         ${reportTitleBarHtml([cls ? cls.name : '', bsRes.exam.name, 'Top Students Report'])}
       </div>
-      <div class="card-b">
+      <!-- Same balanced-gap fix as the class analysis report above. -->
+      <div class="card-b" style="padding-top:6px">
         <div style="font-weight:750;font-size:13.5px">TOP 3 — OVERALL</div>
         ${podiumHtml(analysis.top_students_overall)}
 

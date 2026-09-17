@@ -748,7 +748,13 @@ table.data td.num,table.data th.num{text-align:center}
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 /* Live feedback: "force capitalization of the address... just like the
    school name does" — same uppercase treatment as .ph-school below. */
-.print-header .ph-address{flex:0 0 auto;text-align:right;font-size:11px;color:rgba(255,255,255,.8);line-height:1.55;white-space:nowrap;text-transform:uppercase}
+/* Live feedback: "change font color of the address to be good white like
+   the one for school name" — was a dimmed rgba(255,255,255,.8), same solid
+   #fff as .ph-school now. This is the one shared printHeaderHtml() markup
+   every report's letterhead renders, so the change applies everywhere
+   (Mark List, Exam Analysis, Class List, Score Sheet, Report Forms, the
+   Finance reports, Timetables) without touching each report individually. */
+.print-header .ph-address{flex:0 0 auto;text-align:right;font-size:11px;color:#fff;line-height:1.55;white-space:nowrap;text-transform:uppercase}
 /* reportTitleBarHtml()'s row, directly under the letterhead band above —
    Round 6: plain black text, no fill (the band above now carries the
    color), spread across the full width when the caller passes distinct
